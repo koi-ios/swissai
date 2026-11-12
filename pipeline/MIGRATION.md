@@ -1,6 +1,6 @@
 # Migration plan: put the workspace on the doctrine
 
-Written 12 Nov 2026 by the coordinating session. **Nothing below has been applied.** Phases 0 to 2 are done: the repository exists (baseline `a0997fd`), and `pipeline/` and `upstream/` hold the research, the doctrine, the template and five repository cards. This plan is what remains, and it waits for approval.
+Written 12 Nov 2026 by the coordinating session. **Applied on 12 Nov 2026, after the user's approval; section 9 says what differs.** Phases 0 to 2 are done: the repository exists (baseline `a0997fd`), and `pipeline/` and `upstream/` hold the research, the doctrine, the template and five repository cards. The text below is the plan as it was approved.
 
 Principles: no project folder moves, nothing is deleted, no project's code, tests, patches, results, STATUS or WRITEUP is edited. The plan is 2 renames, 1 move, about a dozen line edits in four index files, and about 50 new files, most of them small. Every step is one commit and can be reverted on its own.
 
@@ -171,3 +171,17 @@ None of these blocks the migration. Defaults are what the scripts will assume un
 - Renaming the two `CLAUDE.md` files changes what a session in those folders loads. That is the intent; the content stays one `git mv` away.
 - The dry run executes OpenTela's test suite, which is upstream code. It ran on this machine on 12 Nov already; this time it runs with a scrubbed environment.
 - Canonical clones need the network once (read-only fetches from GitHub).
+
+## 9. Applied
+
+Applied on 12 Nov 2026 in the commits after `24d172b`, then checked by a fresh subagent ([MIGRATION-REVIEW.md](MIGRATION-REVIEW.md)) and by rerunning every test suite. The user's answers to section 7: the defaults stand; commits here use a neutral local identity; exported commits use the identity in `pipeline/workspace.toml`.
+
+What differs from the text above:
+
+- **Clones.** `make clones-verify` proves seven series equal their clone's branch (01, 02, 03, 04, 06, 07 and 08's servekit series). It cannot compare 05's two clones, which are shallow, or the two SGLang series that no clone holds (08's alias patch, 09's diff). So "each project" in section 4 should read "seven of the eleven series". The canonical `sglang` and `vllm` clones are single-branch, without tags or blobs.
+- **Sandbox file.** Its allowlist has the package indexes and github.com. It names no model API host: the sandbox governs shell commands, and the documentation lists no such host. It has not been run in a live session.
+- **Third-party instruction files** also sit in 06's Go module cache (13 of them) and can sit in any `.venv/`. The excludes and the rule in `AGENTS.md` now cover `toolchain/` and `.venv/` as well as `vendor/`; `make check` verifies the excludes are there.
+- **Edits were a little larger than the table says.** The two renamed plans carry a two-line banner; the sentence in `EVALUATION.md` was reworded, not only re-linked; `SHARED_CONTEXT.md` changed in 22 lines, not 5, because its rules moved to `AGENTS.md`.
+- **Created beyond the table:** `scripts/lib.py`, the targets `make clones-verify` and `make research`, and a ninth row in `budget/plan.csv` (03's $0.75 smoke run).
+- **`make check`:** the credentials check is a warning, so that your own later login does not break the lint; `STRICT=1` makes it fail.
+- **Not exercised:** a second agent (none installed), `make backup`, `make new-project`, and `make spend` against the real ledger.

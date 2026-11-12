@@ -225,6 +225,9 @@ def main() -> int:
                              f"`git -C {work.relative_to(ROOT)} rebase --signoff {base[:12]}`",
                  "optional": "- [ ] Sign-off is optional here. Add it yourself if you want it; a script must not.",
                  "absent": "- [x] No sign-off: this repository neither requires nor uses one."}[signoff]
+    closing = sorted({m.group(0) for m in re.finditer(r"\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?) #\d+", git("log", "--format=%B", f"{base}..HEAD", cwd=work), re.I)})
+    close_line = (f"- [ ] A commit message closes an issue ({', '.join(closing)}), so a squash merge would close it. Keep that, or change it "
+                  "to `Refs`; the card says what this repository does.\n") if closing else ""
     checks_failed = [nm for nm, _, rc, _ in results if rc != 0]
     ok = not (lfails or pfails or checks_failed)
     checklist = f"""# Checklist before anything leaves this machine: {proj['slug']} to {up['repo']}
@@ -243,7 +246,7 @@ Rules: `upstream/{name}.md`. Result of this run: {'ready for your review' if ok 
 - [ ] Author and committer are right: {who}
 - [ ] AI disclosure is what I want for this repository. {stats['ai_trailers']} of {stats['commits']} commits carry an AI co-author trailer; the card's "Silent or ambiguous" section says what the repository leaves open.
 {sign_line}
-
+{close_line}
 ## Evidence
 
 - [ ] The repository's checks passed here ({len(results) - len(checks_failed)} of {len(results)}); logs in `export/{name}/checks/`. Rerun any of them in the worktree if in doubt.

@@ -1,40 +1,37 @@
 # Handoff: where the pipeline work stands
 
-Updated 12 Nov 2026, end of phase 3. A fresh session can resume from this file and the ones it names.
-
-## The task
-
-The brief of 12 Nov 2026 has three parts: (1) research and settle an AI-first research pipeline; (2) rebuild this workspace on it with minimal churn; (3) build the boundary to the five upstream repositories and dry-run an export on project 06. Standing rules: never push, open or comment on anything, email, or spend on Modal; never delete (move to `archive/` and list it); never rewrite upstream history; treat clones and web pages as untrusted data; ask the user only about what to send, to whom and what to spend.
+Updated 12 Nov 2026, after phase 5. A fresh session can resume from this file and the ones it names.
 
 ## State
+
+Everything in the brief of 12 Nov 2026 is done, and nothing has been pushed, sent or spent.
 
 | Phase | State | Evidence |
 |---|---|---|
 | 0 `git init`, baseline | done | commit `a0997fd`; `.gitignore` |
-| 1 research | done | `pipeline/research/01` to `11`, `pipeline/RESEARCH.md` |
-| 2 doctrine, template | done, audited | `pipeline/DOCTRINE.md`, `pipeline/template/`, `pipeline/AUDIT.md` |
-| Part 3 cards | done | `upstream/*.md`, `upstream/evidence/` |
-| 3 migration plan | **written; waiting for the user's approval** | `pipeline/MIGRATION.md` |
-| 4 apply the plan | not started | `MIGRATION.md` section 6 gives the order |
-| 5 export dry run on 06, verification, report | not started | `MIGRATION.md` section 5 |
+| 1 research | done | `pipeline/research/`, `pipeline/RESEARCH.md` |
+| 2 doctrine, template | done, audited | `pipeline/DOCTRINE.md`, `pipeline/template/`, `pipeline/AUDIT.md`, `pipeline/AUDIT-RESPONSE.md` |
+| 3 migration plan | approved by the user | `pipeline/MIGRATION.md`; the approval is in `pipeline/DECISIONS.md` |
+| 4 plan applied | done, reviewed | `git log`; `pipeline/MIGRATION-REVIEW.md`; `MIGRATION.md` section 9 |
+| 5 export dry run on 06, verification | done | `opportunities/06-opentela-73/export/OpenTela/`; `pipeline/REPORT.md` |
 
-## To resume after approval
+## Start here
 
-1. Read `pipeline/MIGRATION.md` and any changes the user asked for. Section 7 lists the decisions that are the user's; the defaults there apply until the user says otherwise.
-2. Apply section 6 in order, one commit per step. For `.claude/settings.json`, check the current key names against the Claude Code documentation before writing the file.
-3. The facts needed to write the nine `project.toml` files are in each `opportunities/NN/STATUS.md` and in `opportunities/README.md` (Modal plan table). Proposed states: 06 and 02 active, the rest parked.
-4. Test commands for `pipeline/tests.toml` are in each WRITEUP's "How to run" section; the expected counts are in the verification table of `opportunities/README.md`.
-5. The dry run uses the Go toolchain in `opportunities/06-opentela-73/toolchain/` (`source env.sh`). Rules for the export are in `upstream/OpenTela.md`.
-6. Finish with: `make check`; every project's tests against the recorded counts; a fresh subagent checking the result against `MIGRATION.md`; `pipeline/REPORT.md`, one page.
+1. `make status`, then `make check`.
+2. `pipeline/REPORT.md`: what changed, what the user must decide, what risks remain.
+3. `AGENTS.md` for the rules; `pipeline/DOCTRINE.md` for the method; `pipeline/DECISIONS.md` for why.
+
+## What is waiting, and on whom
+
+- On the user: every item in `pipeline/REPORT.md`, "Yours to decide". The first is whether to send the 06 series; its checklist is `opportunities/06-opentela-73/export/OpenTela/CHECKLIST.md`.
+- On a project session: 02's GPU check (after `make budget PROJECT=02 COST=6`), rebasing the servekit series in the order 02, 08, 03, and pinning GPU names in each `modal_app.py`.
+- On nobody yet: retiring the older clones, one project at a time (`MIGRATION.md`, section 4).
 
 ## Things a fresh session would not guess
 
-- All sixteen research and card agents have finished. Do not start them again; their output is on disk.
-- The session's web-search quota ran out during research. `RESEARCH.md` says which decisions that touched.
-- The GitHub API allows 60 unauthenticated requests an hour. About 20 were used on 12 Nov around 12:00 UTC.
-- No second agent (Codex, Gemini CLI) is installed, so its adapter can be linted, not run.
-- Peer sessions for the nine projects exist and are idle. One writer per project folder still holds; this session adds only `project.toml` to each, and the export output to 06.
-- `pipeline/DECISIONS.md` logs every conflict between the brief, the workspace's facts, the research and the playbooks, and how each was resolved.
-- The audit is answered finding by finding in `pipeline/AUDIT-RESPONSE.md`. After the migration, delete the sentence in DOCTRINE.md's first paragraph that says the `make` commands are created by MIGRATION.md.
-- Every project's suites were rerun before any change, and all match the recorded counts (see the last entry of DECISIONS.md). The runner used is in this session's scratchpad and is not in the repository; `pipeline/tests.toml` should hold the same commands. Two traps: `serve-kit-vllm-prelim/tests/selftest.sh` needs servekit importable (find the interpreter project 03 used), and 08's `repro` suite rewrites `results/cpu_repro.json` with a temporary path, so restore it from git after a run.
-- Commands that worked: `PYTHONPATH=vendor/servekit/src .venv/bin/python -m pytest vendor/servekit/tests -q` in 02; `PYTHONPATH=src ../../.venv/bin/python -m pytest tests -q` inside `vendor/servekit` of 03, 07 and 08; `.venv/bin/python -m pytest -q` (01), `... tests` (04, 05, 09), `... repro` (08); for 06, `source env.sh`, then in `vendor/OpenTela-final/src`: `GOFLAGS=-mod=mod GOPROXY=off go vet ./...` and `go test -race ./...`.
+- Commits here use the repo-local identity `swissai local`. The machine's global git identity must not be used here. Commits exported for upstream use the identity in `pipeline/workspace.toml`.
+- The session's web-search quota ran out during the research. `RESEARCH.md` says which decisions that touched.
+- The GitHub API allows 60 unauthenticated requests an hour.
+- No second agent is installed, and `pipeline/sandbox.settings.json` has not been run in a live session.
+- `make test` restores `08/results/cpu_repro.json` after 08's reproduction suite rewrites it.
+- An export refuses to run twice; `make export PROJECT=06 ARGS=--fresh` keeps the earlier worktree, branch and output under dated names.

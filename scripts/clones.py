@@ -58,9 +58,10 @@ def cmd_list() -> int:
         head = git("rev-parse", "--short", "HEAD", cwd=path, check=False) or "?"
         branch = git("symbolic-ref", "--short", "-q", "HEAD", cwd=path, check=False) or "detached"
         dirty = len([ln for ln in git("status", "--porcelain", cwd=path, check=False).splitlines() if ln])
+        state = "no-checkout" if os.listdir(path) == [".git"] else f"dirty={dirty}"
         url = git("config", "--get", "remote.origin.url", cwd=path, check=False).removeprefix("https://github.com/").removesuffix(".git")
         shallow = " shallow" if git("rev-parse", "--is-shallow-repository", cwd=path, check=False) == "true" else ""
-        print(f"{r:<9} {str(path.relative_to(ROOT)):<62} {url:<26} {branch:<32.32} {head} dirty={dirty}{shallow}")
+        print(f"{r:<9} {str(path.relative_to(ROOT)):<62} {url:<26} {branch:<32.32} {head} {state}{shallow}")
     print("clones: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
     return 0
 
@@ -108,12 +109,14 @@ def cmd_verify() -> int:
             label = f"{p['slug'][:2]} {card_name(u['repo']):<13}"
             patches = sorted(glob.glob(str(p["dir"] / u.get("series", "none"))))
             if not legacy:
+                skipped += 1
                 print(f"skip  {label} no clone holds this series ({len(patches)} file(s) in patches/)")
                 continue
             rel, ref = legacy.split("@", 1)
             clone = p["dir"] / rel
             base = u.get("legacy_base", u.get("base", ""))
             if not clone.exists():
+                skipped += 1
                 print(f"gone  {label} {rel} is not on disk; the patches are the record")
                 continue
             if ref == "WORKTREE":

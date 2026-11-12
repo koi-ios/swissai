@@ -2,7 +2,7 @@
 
 Decision D10: one capped workspace, pinned hardware, the user launches.
 
-- `plan.csv`: the Modal steps planned on 12 Nov, in the order to run them (cheapest decisive step first). Estimates, not measurements. The rows sum to about $75; `opportunities/README.md` says "about $88 if everything runs", which counts steps the table does not list.
+- `plan.csv`: the Modal steps planned on 12 Nov, in the order to run them (cheapest decisive step first). Estimates, not measurements. The rows sum to about $76; `opportunities/README.md` says "about $88 if everything runs", which counts steps the table does not list.
 - `ledger.csv`: what was actually spent, one row per run. Append with `make spend`; never edit a row.
 - Caps live in `pipeline/workspace.toml`: $25 a project, $30 a month (one workspace's free credit), $90 in all.
 

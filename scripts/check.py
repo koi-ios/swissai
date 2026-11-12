@@ -13,6 +13,7 @@ copies of measure.py.
 from __future__ import annotations
 
 import glob
+import json
 import os
 import pathlib
 import re
@@ -76,6 +77,14 @@ def check_instructions() -> None:
     for name in (".claude/settings.json", ".gemini/settings.json"):
         if not (ROOT / name).exists():
             fail(f"{name} is missing (adapter)")
+    try:
+        excludes = " ".join(json.loads((ROOT / ".claude/settings.json").read_text()).get("claudeMdExcludes", []))
+    except (OSError, ValueError):
+        excludes = ""
+    for d in ("vendor", "toolchain", ".venv"):
+        for f in ("CLAUDE.md", "AGENTS.md"):
+            if not re.search(rf"/{re.escape(d)}/\S*{re.escape(f)}", excludes):
+                fail(f".claude/settings.json does not exclude {f} under {d}/ (D11: third-party instruction files are data)")
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for f in filenames:
@@ -179,16 +188,20 @@ def check_warnings() -> None:
     placeholders = workspace()["leak"]["placeholder_identities"]
     for p in projects():
         bad = set()
-        for patch in glob.glob(str(p["dir"] / "patches/**/*.patch"), recursive=True):
+        found = [f for ext in ("patch", "diff") for f in glob.glob(str(p["dir"] / f"patches/**/*.{ext}"), recursive=True)]
+        for patch in found:
             head = pathlib.Path(patch).read_text(encoding="utf-8", errors="replace")[:600]
             m = re.search(r"^From: (.*)$", head, re.M)
-            if m and any(x in m.group(1) for x in placeholders):
+            if not m:
+                bad.add("no author header")
+            elif any(x in m.group(1) for x in placeholders):
                 bad.add(m.group(1).strip())
         if bad:
             warn(f"{p['slug']}: stored patches have placeholder authors ({'; '.join(sorted(bad))}); the export sets the identity")
         app = p["dir"] / "modal_app.py"
         if app.exists():
-            loose = sorted(set(re.findall(r'"((?:H100|H200|A100|B200)(?::\d+)?)"', app.read_text(encoding="utf-8"))))
+            loose = sorted(set(m.group(1) for m in re.finditer(
+                r"""["']((?:H100|H200|A100|B200)(?![!\w-])[^"']{0,12})["']""", app.read_text(encoding="utf-8"))))
             if loose:
                 warn(f"{p['slug']}/modal_app.py names GPUs unpinned ({', '.join(loose)}); pin before the first paid run (D10)")
     tracked = git("ls-files", "-z").split("\0")

@@ -20,6 +20,7 @@ Rules: `upstream/OpenTela.md`. Result of this run: ready for your review.
 - [ ] Author and committer are right: Soorya <soorya.narayananiv@gmail.com>
 - [ ] AI disclosure is what I want for this repository. 2 of 2 commits carry an AI co-author trailer; the card's "Silent or ambiguous" section says what the repository leaves open.
 - [x] No sign-off: this repository neither requires nor uses one.
+- [ ] The second commit's message says `Fixes #73`, and PR.md says `Refs #73`. A squash merge would close the issue. Pick one; OpenTela's own PRs use no closing keywords.
 
 ## Evidence
 

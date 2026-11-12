@@ -96,3 +96,16 @@ Applied in nine commits after the user's approval. Differences from `MIGRATION.m
 ## [2026-11-12] finding | The export dry run on 06
 
 `make export PROJECT=06` on a fresh worktree of OpenTela `origin/main` (4b6e90f, fetched 12 Nov): both patches apply; author and committer are the upstream identity; the `Co-Authored-By` trailer is kept, as the card's observed practice has it; `go vet`, `go test -race` with the Makefile's flags (17 packages ok) and golangci-lint v2.15 pass; the leak check passes; the PR text has the headings OpenTela's contributors use. The leak check was also run on a superseded branch with a placeholder author and failed it, as it should. Nothing was pushed: the worktree has no remote but the read-only origin, and this machine holds no credentials. One deviation, stated in the card and the rule file: OpenTela's `make test` downloads a test runner with `curl`; the same `go test` flags were run without it.
+
+## [2026-11-12] finding | The independent review of the migration, and corrections
+
+A fresh session checked the result against the plan (`pipeline/MIGRATION-REVIEW.md`): no high findings, 6 medium, 11 low; nothing deleted, no project file other than the new cards touched, no sign of a push. Acted on:
+
+- Thirteen third-party instruction files sit in 06's Go module cache, outside `vendor/`. The excludes now cover `toolchain/` and `.venv/`, `AGENTS.md` names them, and `make check` fails if the excludes are missing.
+- `make clones-verify` miscounted its skips (it said 2; there are 4). Fixed. `make clones` no longer shows a meaningless dirty count for clones without a checkout.
+- `make check` now warns about 02's unpinned GPU (an f-string) and 09's patch without an author.
+- The export notes a commit message that closes an issue: 06's second commit says `Fixes #73` while its PR text says `Refs #73`. The user picks.
+- `MIGRATION.md` and `HANDOFF.md` said the plan was waiting for approval. Both are updated; section 9 of the plan lists every difference.
+- Correction to the entry "The migration was applied": it said nine commits; there were eight at that point.
+
+Left as they are, on purpose: the rule files are slightly looser than the cards (servekit and model-launch subject prefixes); 06's STATUS.md still describes the state before the export, because only that project's session edits it.
