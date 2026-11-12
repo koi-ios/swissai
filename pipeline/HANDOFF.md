@@ -10,7 +10,7 @@ The brief of 12 Nov 2026 has three parts: (1) research and settle an AI-first re
 
 | Phase | State | Evidence |
 |---|---|---|
-| 0 `git init`, baseline | done | commit `d6debc9`; `.gitignore` |
+| 0 `git init`, baseline | done | commit `a0997fd`; `.gitignore` |
 | 1 research | done | `pipeline/research/01` to `11`, `pipeline/RESEARCH.md` |
 | 2 doctrine, template | done, audited | `pipeline/DOCTRINE.md`, `pipeline/template/`, `pipeline/AUDIT.md` |
 | Part 3 cards | done | `upstream/*.md`, `upstream/evidence/` |

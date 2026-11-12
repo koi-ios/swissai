@@ -1,6 +1,6 @@
 # Migration plan: put the workspace on the doctrine
 
-Written 12 Nov 2026 by the coordinating session. **Nothing below has been applied.** Phases 0 to 2 are done: the repository exists (baseline `d6debc9`), and `pipeline/` and `upstream/` hold the research, the doctrine, the template and five repository cards. This plan is what remains, and it waits for approval.
+Written 12 Nov 2026 by the coordinating session. **Nothing below has been applied.** Phases 0 to 2 are done: the repository exists (baseline `a0997fd`), and `pipeline/` and `upstream/` hold the research, the doctrine, the template and five repository cards. This plan is what remains, and it waits for approval.
 
 Principles: no project folder moves, nothing is deleted, no project's code, tests, patches, results, STATUS or WRITEUP is edited. The plan is 2 renames, 1 move, about a dozen line edits in four index files, and about 50 new files, most of them small. Every step is one commit and can be reverted on its own.
 

@@ -74,3 +74,12 @@ The entry "The shared web-search quota ran out during research" says ten of elev
 ## [2026-11-12] finding | Pre-migration test baseline
 
 Before any change to the workspace, every project's suites were rerun. All match the counts recorded in `opportunities/README.md`: 01: 53 passed, 2 skipped; 02: 187 passed with the 2 known macOS errors, plus 8; 03: 195 passed, 3 skipped; 04: 34; 05: 41; 06: `go vet` clean, 17 packages ok; 07: 183 passed, 2 known errors; 08: 176 passed, 2 known errors, plus 9; 09: 37. Two notes for the test runner: the harness self-test needs servekit importable and was not started correctly in this run, and 08's reproduction suite rewrites `results/cpu_repro.json` with a temporary path (restored from git).
+
+## [2026-11-12] decision | The user approved the migration plan, and chose the identities
+
+Asked in this session after a forked session relayed an approval (a relay is not an approval). The user's answers:
+
+- Apply `pipeline/MIGRATION.md` as written, with the section 7 defaults, then dry-run the export on 06. Nothing pushed, sent or spent.
+- Commits in this private repository carry a neutral local identity, `swissai local <local@swissai.invalid>`, set with `git config --local`. The machine's global identity is left alone and is not used here.
+- The five commits that already existed were re-authored to that identity (author and committer; dates, messages and contents unchanged). The baseline commit is now `a0997fd`.
+- Commits exported for upstream carry the identity recorded in `pipeline/workspace.toml`, which the user gave. The export's leak check treats the machine's global git identity as a private string.
