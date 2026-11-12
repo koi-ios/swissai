@@ -1,0 +1,419 @@
+From d6448e5a732d2e1d6e19f61020697ce1e4129d27 Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:37:58 +0100
+Subject: [PATCH 1/2] fix(crdt): rank a new write above the values it replaces
+
+A replica can hold a value at a priority above its own heads: it has
+merged the block that carries the value but not yet walked the branch
+below it, so that branch's root is not a head. A node that restarts with
+an empty store is in this state until it has pulled the whole history.
+addDAGNode gave its writes max head height + 1, so a write could rank
+below a value the replica had already merged, and setValue on every
+replica dropped it as stale, with no log and no hook.
+
+Rank a new delta above the current priority of every key it writes, the
+way a Lamport clock moves past each timestamp it receives. Once a replica
+is in sync the current priorities are at most its head height, so this
+changes nothing there. Convergence is unaffected: a block's priority is
+fixed when the block is created, and the winning value is still a
+function of the set of merged blocks.
+
+The regression test restarts a replica with an empty store, lets it merge
+the tip of the history while holding back the rest of the walk, and checks
+that a write it makes after the merge wins on the other replica. On main
+the write lands at height 2 and loses to the LEFT record at height 42.
+
+Refs #73
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/internal/protocol/go-ds-crdt/crdt.go      |  16 +
+ .../go-ds-crdt/restart_priority_test.go       | 313 ++++++++++++++++++
+ src/internal/protocol/go-ds-crdt/set.go       |  24 ++
+ 3 files changed, 353 insertions(+)
+ create mode 100644 src/internal/protocol/go-ds-crdt/restart_priority_test.go
+
+diff --git a/src/internal/protocol/go-ds-crdt/crdt.go b/src/internal/protocol/go-ds-crdt/crdt.go
+index 6d6dcc5..d89c67f 100644
+--- a/src/internal/protocol/go-ds-crdt/crdt.go
++++ b/src/internal/protocol/go-ds-crdt/crdt.go
+@@ -1402,6 +1402,22 @@ func (store *Datastore) addDAGNode(ctx context.Context, delta *pb.Delta) (cid.Ci
+ 	}
+ 	height = height + 1 // This implies our minimum height is 1
+ 
++	// A replica can hold a value at a priority above its own heads: it has
++	// merged the block carrying the value but not yet walked the branch below
++	// it, so that branch's root is not a head. A node that restarts with an
++	// empty store sits in this state for as long as it takes to pull the
++	// whole history. A write made at height+1 would rank below a value it has
++	// already merged, and setValue on every replica would drop the write as
++	// stale (eth-easl/OpenTela#73). Rank the write above every value it
++	// replaces, the way a Lamport clock moves past each timestamp it receives.
++	replaced, err := store.set.maxPriority(ctx, delta.GetElements())
++	if err != nil {
++		return cid.Undef, fmt.Errorf("error reading current priorities: %w", err)
++	}
++	if replaced >= height {
++		height = replaced + 1
++	}
++
+ 	delta.Priority = height
+ 
+ 	// for _, e := range delta.GetElements() {
+diff --git a/src/internal/protocol/go-ds-crdt/restart_priority_test.go b/src/internal/protocol/go-ds-crdt/restart_priority_test.go
+new file mode 100644
+index 0000000..5c0ab50
+--- /dev/null
++++ b/src/internal/protocol/go-ds-crdt/restart_priority_test.go
+@@ -0,0 +1,313 @@
++package crdt_test
++
++import (
++	"bytes"
++	"context"
++	"fmt"
++	"sync"
++	"testing"
++	"time"
++
++	crdt "opentela/internal/protocol/go-ds-crdt"
++
++	cid "github.com/ipfs/go-cid"
++	ds "github.com/ipfs/go-datastore"
++	dssync "github.com/ipfs/go-datastore/sync"
++	ipld "github.com/ipfs/go-ipld-format"
++	logging "github.com/ipfs/go-log/v2"
++)
++
++// bus is an in-memory pubsub topic: a broadcast reaches every other member that
++// has joined. Members can join late and leave, which a pipe pair cannot model.
++type bus struct {
++	mu      sync.Mutex
++	members map[*busMember]struct{}
++}
++
++type busMember struct {
++	bus   *bus
++	inbox chan []byte
++	done  chan struct{}
++	once  sync.Once
++}
++
++func newBus() *bus { return &bus{members: map[*busMember]struct{}{}} }
++
++// member returns a broadcaster that neither sends nor receives until join.
++func (b *bus) member() *busMember {
++	return &busMember{bus: b, inbox: make(chan []byte, 1024), done: make(chan struct{})}
++}
++
++func (m *busMember) join() {
++	m.bus.mu.Lock()
++	m.bus.members[m] = struct{}{}
++	m.bus.mu.Unlock()
++}
++
++func (m *busMember) leave() {
++	m.bus.mu.Lock()
++	delete(m.bus.members, m)
++	m.bus.mu.Unlock()
++	m.once.Do(func() { close(m.done) })
++}
++
++func (m *busMember) Broadcast(ctx context.Context, data []byte) error {
++	m.bus.mu.Lock()
++	defer m.bus.mu.Unlock()
++	if _, joined := m.bus.members[m]; !joined {
++		return nil // not on the topic yet: the message goes nowhere
++	}
++	for other := range m.bus.members {
++		if other == m {
++			continue
++		}
++		select {
++		case other.inbox <- append([]byte(nil), data...):
++		default: // a full inbox drops, like a slow gossipsub peer
++		}
++	}
++	return nil
++}
++
++func (m *busMember) Next(ctx context.Context) ([]byte, error) {
++	select {
++	case b := <-m.inbox:
++		return b, nil
++	case <-m.done:
++		return nil, crdt.ErrNoMoreBroadcast
++	case <-ctx.Done():
++		return nil, ctx.Err()
++	}
++}
++
++// historyGate serves the first `allow` distinct blocks a replica fetches and
++// holds every later fetch until released. A replica walks a branch from its
++// tip downwards, so the gate lets it merge the newest part of the history while
++// the rest of the walk is still pending, the state a restarted node is in for
++// minutes while it pulls a long DAG over bitswap.
++type historyGate struct {
++	ipld.DAGService
++	allow int
++
++	mu      sync.Mutex
++	served  map[cid.Cid]struct{}
++	held    int
++	open    chan struct{}
++	release sync.Once
++}
++
++func newHistoryGate(base ipld.DAGService, allow int) *historyGate {
++	return &historyGate{DAGService: base, allow: allow, served: map[cid.Cid]struct{}{}, open: make(chan struct{})}
++}
++
++func (g *historyGate) Release() { g.release.Do(func() { close(g.open) }) }
++
++func (g *historyGate) heldFetches() int {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	return g.held
++}
++
++func (g *historyGate) admit(ctx context.Context, c cid.Cid) error {
++	g.mu.Lock()
++	if _, ok := g.served[c]; ok || len(g.served) < g.allow {
++		g.served[c] = struct{}{}
++		g.mu.Unlock()
++		return nil
++	}
++	g.held++
++	g.mu.Unlock()
++	select {
++	case <-g.open:
++		return nil
++	case <-ctx.Done():
++		return ctx.Err()
++	}
++}
++
++func (g *historyGate) Get(ctx context.Context, c cid.Cid) (ipld.Node, error) {
++	if err := g.admit(ctx, c); err != nil {
++		return nil, err
++	}
++	return g.DAGService.Get(ctx, c)
++}
++
++func (g *historyGate) GetMany(ctx context.Context, cids []cid.Cid) <-chan *ipld.NodeOption {
++	out := make(chan *ipld.NodeOption, len(cids))
++	go func() {
++		defer close(out)
++		for _, c := range cids {
++			if err := g.admit(ctx, c); err != nil {
++				out <- &ipld.NodeOption{Err: err}
++				continue
++			}
++			nd, err := g.DAGService.Get(ctx, c)
++			out <- &ipld.NodeOption{Node: nd, Err: err}
++		}
++	}()
++	return out
++}
++
++func restartTestOptions(name string) *crdt.Options {
++	o := crdt.DefaultOptions()
++	o.Logger = logging.Logger(name)
++	o.RebroadcastInterval = 200 * time.Millisecond
++	o.DAGSyncerTimeout = time.Minute
++	o.MultiHeadProcessing = true // as in OpenTela (internal/protocol/crdt.go)
++	return o
++}
++
++func waitValue(ctx context.Context, store *crdt.Datastore, key ds.Key, want []byte, d time.Duration) bool {
++	deadline := time.Now().Add(d)
++	for time.Now().Before(deadline) {
++		if v, err := store.Get(ctx, key); err == nil && bytes.Equal(v, want) {
++			return true
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	return false
++}
++
++func valueOf(ctx context.Context, store *crdt.Datastore, key ds.Key) string {
++	v, err := store.Get(ctx, key)
++	if err != nil {
++		return "<" + err.Error() + ">"
++	}
++	return string(v)
++}
++
++// TestRestartedReplicaRowOutranksItsPreviousIncarnation reproduces
++// eth-easl/OpenTela#73 at the CRDT layer.
++//
++// A worker that restarts keeps its peer ID but starts from an empty store
++// (cleanslate defaults to true, and shutdown wipes the store as well). The rest
++// of the mesh still holds the row of its previous incarnation, its own LEFT
++// record from AnnounceLeave, at the height the mesh had reached. The restarted
++// worker writes at height 1, 2, ... and setValue on every peer drops those
++// writes as stale until the worker has walked the entire history, which on a
++// long-lived mesh takes minutes.
++//
++// The worker does merge the LEFT record early: it sits near the tip of the DAG,
++// which is where the walk starts. A write the worker makes after that merge
++// must win, whether or not the rest of the walk has finished.
++func TestRestartedReplicaRowOutranksItsPreviousIncarnation(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++
++	shared := newSharedDAG() // every block is fetchable: the head never leaves
++	topic := newBus()
++	rowKey := ds.NewKey("/worker")
++
++	// The head, and the worker's first incarnation.
++	headBC := topic.member()
++	headBC.join()
++	head, err := crdt.New(dssync.MutexWrap(ds.NewMapDatastore()), ds.NewKey("/ocf-crdt"), shared, headBC, restartTestOptions("head"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer head.Close()
++
++	w1BC := topic.member()
++	w1BC.join()
++	w1, err := crdt.New(dssync.MutexWrap(ds.NewMapDatastore()), ds.NewKey("/ocf-crdt"), shared, w1BC, restartTestOptions("worker-1"))
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	// Mesh history: other rows written over the life of the mesh.
++	const history = 40
++	for i := 0; i < history; i++ {
++		if err := head.Put(ctx, ds.NewKey(fmt.Sprintf("/peer-%d", i)), []byte("row")); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if !waitHas(ctx, w1, ds.NewKey(fmt.Sprintf("/peer-%d", history-1)), 10*time.Second) {
++		t.Fatal("worker-1 never synced the mesh history")
++	}
++
++	// worker-1 registers, then shuts down gracefully (AnnounceLeave).
++	ready1, left1 := []byte(`{"status":"ready","life":1}`), []byte(`{"status":"left","life":1}`)
++	if err := w1.Put(ctx, rowKey, ready1); err != nil {
++		t.Fatal(err)
++	}
++	if !waitValue(ctx, head, rowKey, ready1, 10*time.Second) {
++		t.Fatalf("head never saw worker-1's ready row; has %s", valueOf(ctx, head, rowKey))
++	}
++	if err := w1.Put(ctx, rowKey, left1); err != nil {
++		t.Fatal(err)
++	}
++	if !waitValue(ctx, head, rowKey, left1, 10*time.Second) {
++		t.Fatalf("head never saw worker-1's LEFT row; has %s", valueOf(ctx, head, rowKey))
++	}
++	w1BC.leave()
++	_ = w1.Close()
++
++	// The mesh keeps writing while the worker is down.
++	const whileDown = 3
++	for i := 0; i < whileDown; i++ {
++		if err := head.Put(ctx, ds.NewKey(fmt.Sprintf("/later-%d", i)), []byte("row")); err != nil {
++			t.Fatal(err)
++		}
++	}
++
++	// worker-2: same row key, empty store. The gate serves the newest blocks,
++	// enough to reach the LEFT record, and holds the rest of the walk.
++	gate := newHistoryGate(shared, whileDown+4)
++	defer gate.Release()
++	w2BC := topic.member()
++	w2, err := crdt.New(dssync.MutexWrap(ds.NewMapDatastore()), ds.NewKey("/ocf-crdt"), gate, w2BC, restartTestOptions("worker-2"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer func() {
++		gate.Release()
++		w2BC.leave()
++		_ = w2.Close()
++	}()
++
++	// Like InitializeMyself, worker-2 writes its row before it has heard from
++	// anyone. Nothing can make this first write win: worker-2 knows nothing.
++	if err := w2.Put(ctx, rowKey, []byte(`{"status":"pending","life":2}`)); err != nil {
++		t.Fatal(err)
++	}
++	w2BC.join()
++
++	// worker-2 merges the tip of the history, LEFT record included. On its own
++	// store the previous incarnation's row now outranks the row it just wrote.
++	if !waitValue(ctx, w2, rowKey, left1, 10*time.Second) {
++		t.Fatalf("worker-2 never merged its previous incarnation's row; has %s", valueOf(ctx, w2, rowKey))
++	}
++
++	// It announces itself again, as OpenTela's self-row guard does on seeing a
++	// row it did not write.
++	ready2 := []byte(`{"status":"ready","life":2}`)
++	if err := w2.Put(ctx, rowKey, ready2); err != nil {
++		t.Fatal(err)
++	}
++	if gate.heldFetches() == 0 {
++		t.Fatal("test setup: worker-2 finished walking the history; the gate did not hold it")
++	}
++
++	if !waitValue(ctx, head, rowKey, ready2, 5*time.Second) {
++		t.Fatalf("head still holds %s for the restarted worker after its post-merge write "+
++			"(worker-2 max height %d, history walk still pending): a write made after merging "+
++			"the LEFT record lost to it",
++			valueOf(ctx, head, rowKey), w2.InternalStats(ctx).MaxHeight)
++	}
++	if !waitValue(ctx, w2, rowKey, ready2, 5*time.Second) {
++		t.Fatalf("worker-2 does not see its own row; has %s", valueOf(ctx, w2, rowKey))
++	}
++
++	// Once the walk completes nothing changes: both replicas keep the new row.
++	gate.Release()
++	if !waitHas(ctx, w2, ds.NewKey("/peer-0"), 10*time.Second) {
++		t.Fatal("worker-2 never finished the history walk after release")
++	}
++	time.Sleep(500 * time.Millisecond)
++	if got := valueOf(ctx, head, rowKey); got != string(ready2) {
++		t.Fatalf("head row regressed to %s after the walk completed", got)
++	}
++	if got := valueOf(ctx, w2, rowKey); got != string(ready2) {
++		t.Fatalf("worker-2 row regressed to %s after the walk completed", got)
++	}
++}
+diff --git a/src/internal/protocol/go-ds-crdt/set.go b/src/internal/protocol/go-ds-crdt/set.go
+index 06d3c95..923e0f6 100644
+--- a/src/internal/protocol/go-ds-crdt/set.go
++++ b/src/internal/protocol/go-ds-crdt/set.go
+@@ -297,6 +297,30 @@ func (s *set) getPriority(ctx context.Context, key string) (uint64, error) {
+ 	return prio - 1, nil
+ }
+ 
++// maxPriority returns the highest priority among the current values of the
++// keys in elems, or 0 if none of them has a value. It holds putElemsMux so a
++// merge in progress, which batches its priority writes, is either complete or
++// not yet started.
++func (s *set) maxPriority(ctx context.Context, elems []*pb.Element) (uint64, error) {
++	if len(elems) == 0 {
++		return 0, nil
++	}
++	s.putElemsMux.Lock()
++	defer s.putElemsMux.Unlock()
++
++	var highest uint64
++	for _, e := range elems {
++		prio, err := s.getPriority(ctx, e.GetKey())
++		if err != nil {
++			return 0, err
++		}
++		if prio > highest {
++			highest = prio
++		}
++	}
++	return highest, nil
++}
++
+ func (s *set) setPriority(ctx context.Context, writeStore ds.Write, key string, prio uint64) error {
+ 	prioK := s.priorityKey(key)
+ 	buf := make([]byte, binary.MaxVarintLen64)
+-- 
+2.50.1 (Apple Git-155)
+

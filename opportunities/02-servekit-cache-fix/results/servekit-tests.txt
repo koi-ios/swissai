@@ -1,0 +1,11 @@
+# servekit tests at 19f01d5 feat: report JIT output the engine leaves outside the kept caches, Python 3.12.13, macOS arm64
+=========================== short test summary info ============================
+ERROR tests/test_launch.py::test_stage_is_bitwise_exact_across_concurrent_writers
+ERROR tests/test_launch.py::test_stage_fails_loudly_on_a_missing_source - Att...
+187 passed, 1 skipped, 8 deselected, 2 errors in 14.70s
+
+# same, Python 3.9
+=========================== short test summary info ============================
+ERROR tests/test_launch.py::test_stage_is_bitwise_exact_across_concurrent_writers
+ERROR tests/test_launch.py::test_stage_fails_loudly_on_a_missing_source - Att...
+187 passed, 1 skipped, 8 deselected, 2 errors in 15.06s

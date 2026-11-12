@@ -1,0 +1,2 @@
+model.layers.27.mlp.down_proj.weight: flipped bit 6 (mant_msb) of 16 elements; 16 elements changed, relative change 0.000779
+wrote /private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/fd44cfd8-d7e7-472d-991c-6bcf097dc0b8/scratchpad/e2e_cli_work2/mantflip (servekit-fault.json records the ground truth)

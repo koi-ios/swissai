@@ -1,0 +1,395 @@
+{
+ "config": {
+  "min_idle_s": 1.0,
+  "idle_cost_ratio": 0.0,
+  "horizon_s": 1800.0,
+  "session_gap_s": 900.0,
+  "max_launches": 2000
+ },
+ "models": {
+  "swissai/Apertus-70B-Instruct": {
+   "launches": 105,
+   "requests_per_launch_p50": 9.0,
+   "default": {
+    "ready_s": 43.428687999999994,
+    "startup_wait_s_mean": 163.21991087609467,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 163.21991087609467,
+    "total_extra_s_p50": 123.11075190844724
+   },
+   "fixed": {
+    "ready_s": 1.4249999999999998,
+    "startup_wait_s_mean": 2.430114294233776,
+    "eager_prefill_penalty_s_mean": 0.08972666666666688,
+    "eager_decode_penalty_s_mean": 62.92798205495099,
+    "eager_prefill_share": 0.9955258911544668,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 65.44782301585143,
+    "total_extra_s_p50": 2.419199910354614
+   },
+   "lazy": {
+    "ready_s": 1.4249999999999998,
+    "startup_wait_s_mean": 2.430114294233776,
+    "eager_prefill_penalty_s_mean": 0.017688571428571404,
+    "eager_decode_penalty_s_mean": 3.2132602860042034,
+    "eager_prefill_share": 0.12300132022883967,
+    "interference_s_mean": 0.21858769523808272,
+    "delayed_request_share": 0.0073346046648085665,
+    "max_delay_s": 0.9276160686645554,
+    "total_extra_s_mean": 5.879650846904634,
+    "total_extra_s_p50": 2.419199910354614,
+    "launches_fully_captured_share": 0.9809523809523809,
+    "all_captured_after_s_p50": 58.342687986648464,
+    "all_captured_after_s_p90": 113.37972324043575
+   },
+   "plan": {
+    "startup_capture_s": 1.4249999999999998,
+    "default_capture_s": 43.428687999999994,
+    "initial": {
+     "decode": [
+      1,
+      2,
+      4,
+      8,
+      40
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 31,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  },
+  "swissai/apertus3-70b-15T-sft": {
+   "launches": 129,
+   "requests_per_launch_p50": 5.0,
+   "default": {
+    "ready_s": 43.428688,
+    "startup_wait_s_mean": 94.33723977009927,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 94.33723977009927,
+    "total_extra_s_p50": 67.8553761449585
+   },
+   "fixed": {
+    "ready_s": 1.14,
+    "startup_wait_s_mean": 1.2408682165959084,
+    "eager_prefill_penalty_s_mean": 0.1422891472868209,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.9880688124306326,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 1.383157363882729,
+    "total_extra_s_p50": 1.1674
+   },
+   "lazy": {
+    "ready_s": 1.14,
+    "startup_wait_s_mean": 1.2408682165959084,
+    "eager_prefill_penalty_s_mean": 0.10485426356589023,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.5677025527192009,
+    "interference_s_mean": 0.27760613554276353,
+    "delayed_request_share": 0.030244173140954494,
+    "max_delay_s": 1.3135360782012953,
+    "total_extra_s_mean": 1.623328615704562,
+    "total_extra_s_p50": 1.1808118149871836,
+    "launches_fully_captured_share": 0.9302325581395349,
+    "all_captured_after_s_p50": 52.14657207247914,
+    "all_captured_after_s_p90": 92.64948246351474
+   },
+   "plan": {
+    "startup_capture_s": 1.14,
+    "default_capture_s": 43.428688,
+    "initial": {
+     "decode": [
+      1,
+      2,
+      4,
+      8
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 32,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  },
+  "Apertus-70B-sft-mixture-8e-aligned-swissai": {
+   "launches": 38,
+   "requests_per_launch_p50": 15.0,
+   "default": {
+    "ready_s": 43.428688,
+    "startup_wait_s_mean": 174.06996839585554,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 174.06996839585554,
+    "total_extra_s_p50": 110.91625193896485
+   },
+   "fixed": {
+    "ready_s": 2.8499999999999996,
+    "startup_wait_s_mean": 4.948473684411297,
+    "eager_prefill_penalty_s_mean": 0.07618421052631527,
+    "eager_decode_penalty_s_mean": 0.15945629653177762,
+    "eager_prefill_share": 0.9923547400611621,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 5.184114191469393,
+    "total_extra_s_p50": 5.7109999999999985
+   },
+   "lazy": {
+    "ready_s": 2.8499999999999996,
+    "startup_wait_s_mean": 4.948473684411297,
+    "eager_prefill_penalty_s_mean": 0.05708157894736796,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.5045871559633027,
+    "interference_s_mean": 0.5151511338019024,
+    "delayed_request_share": 0.021916411824668705,
+    "max_delay_s": 1.0764520228881835,
+    "total_extra_s_mean": 5.52070639716057,
+    "total_extra_s_p50": 5.702999999999999,
+    "launches_fully_captured_share": 0.9736842105263158,
+    "all_captured_after_s_p50": 64.17518390653983,
+    "all_captured_after_s_p90": 176.8202879889373
+   },
+   "plan": {
+    "startup_capture_s": 2.8499999999999996,
+    "default_capture_s": 43.428688,
+    "initial": {
+     "decode": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      40,
+      48
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 26,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  },
+  "Qwen/Qwen3-32B": {
+   "launches": 178,
+   "requests_per_launch_p50": 8.0,
+   "default": {
+    "ready_s": 43.428688,
+    "startup_wait_s_mean": 2516.242348440569,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 2516.242348440569,
+    "total_extra_s_p50": 80.15122007915497
+   },
+   "fixed": {
+    "ready_s": 0,
+    "startup_wait_s_mean": 0.0,
+    "eager_prefill_penalty_s_mean": 3.3138921348324044,
+    "eager_decode_penalty_s_mean": 1479.5534647932209,
+    "eager_prefill_share": 0.9875353584528735,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 1482.867356928053,
+    "total_extra_s_p50": 55.51318129317761
+   },
+   "lazy": {
+    "ready_s": 0,
+    "startup_wait_s_mean": 0.0,
+    "eager_prefill_penalty_s_mean": 1.5876466292136124,
+    "eager_decode_penalty_s_mean": 602.6306308932383,
+    "eager_prefill_share": 0.580297112927614,
+    "interference_s_mean": 0.5229640157645821,
+    "delayed_request_share": 0.0007722202170610306,
+    "max_delay_s": 1.2294239790191597,
+    "total_extra_s_mean": 604.7412415382163,
+    "total_extra_s_p50": 16.36606000854969,
+    "launches_fully_captured_share": 0.9325842696629213,
+    "all_captured_after_s_p50": 82.06018799141684,
+    "all_captured_after_s_p90": 544.8106879694824
+   },
+   "plan": {
+    "startup_capture_s": 0,
+    "default_capture_s": 43.428688,
+    "initial": {
+     "decode": [],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 36,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  },
+  "Qwen/Qwen3-Next-80B-A3B-Instruct": {
+   "launches": 28,
+   "requests_per_launch_p50": 257.5,
+   "default": {
+    "ready_s": 43.428687999999994,
+    "startup_wait_s_mean": 1733.5754538990998,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 1733.5754538990998,
+    "total_extra_s_p50": 1041.6565121497267
+   },
+   "fixed": {
+    "ready_s": 0.285,
+    "startup_wait_s_mean": 2.2646428595270427,
+    "eager_prefill_penalty_s_mean": 0.28619642857142163,
+    "eager_decode_penalty_s_mean": 2877.7415265732166,
+    "eager_prefill_share": 0.9999356871824555,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 2880.292365861315,
+    "total_extra_s_p50": 2263.4677156953217
+   },
+   "lazy": {
+    "ready_s": 0.285,
+    "startup_wait_s_mean": 2.2646428595270427,
+    "eager_prefill_penalty_s_mean": 0.027807142857142874,
+    "eager_decode_penalty_s_mean": 354.3880653558262,
+    "eager_prefill_share": 0.0890089394816387,
+    "interference_s_mean": 0.13327755657849824,
+    "delayed_request_share": 0.0005788153579008296,
+    "max_delay_s": 0.8652200209808285,
+    "total_extra_s_mean": 356.8137929147889,
+    "total_extra_s_p50": 216.70865561836962,
+    "launches_fully_captured_share": 1.0,
+    "all_captured_after_s_p50": 74.23968807534017,
+    "all_captured_after_s_p90": 146.09608794525883
+   },
+   "plan": {
+    "startup_capture_s": 0.285,
+    "default_capture_s": 43.428687999999994,
+    "initial": {
+     "decode": [
+      64
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 35,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  },
+  "openai/gpt-oss-120b": {
+   "launches": 23,
+   "requests_per_launch_p50": 6.0,
+   "default": {
+    "ready_s": 43.428687999999994,
+    "startup_wait_s_mean": 328.4824796646131,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 328.4824796646131,
+    "total_extra_s_p50": 103.58306393133543
+   },
+   "fixed": {
+    "ready_s": 3.135,
+    "startup_wait_s_mean": 11.15447829287985,
+    "eager_prefill_penalty_s_mean": 0.0820913043478261,
+    "eager_decode_penalty_s_mean": 345.29026030572186,
+    "eager_prefill_share": 0.9851051401869159,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 356.52682990294954,
+    "total_extra_s_p50": 34.54632257072926
+   },
+   "lazy": {
+    "ready_s": 3.135,
+    "startup_wait_s_mean": 11.15447829287985,
+    "eager_prefill_penalty_s_mean": 0.01294347826086957,
+    "eager_decode_penalty_s_mean": 53.60173852934113,
+    "eager_prefill_share": 0.09813084112149532,
+    "interference_s_mean": 0.16064138350909984,
+    "delayed_request_share": 0.0040887850467289715,
+    "max_delay_s": 0.7841760648497882,
+    "total_extra_s_mean": 64.92980168399095,
+    "total_extra_s_p50": 6.377004602782257,
+    "launches_fully_captured_share": 0.9565217391304348,
+    "all_captured_after_s_p50": 62.70968406484981,
+    "all_captured_after_s_p90": 309.10358802155395
+   },
+   "plan": {
+    "startup_capture_s": 3.135,
+    "default_capture_s": 43.428687999999994,
+    "initial": {
+     "decode": [
+      32,
+      40,
+      48,
+      56,
+      64,
+      72,
+      80,
+      88,
+      96,
+      104,
+      112
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 25,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  }
+ }
+}

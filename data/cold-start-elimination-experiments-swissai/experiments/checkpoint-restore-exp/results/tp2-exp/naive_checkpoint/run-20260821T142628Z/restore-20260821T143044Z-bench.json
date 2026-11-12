@@ -1,0 +1,10 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "model": null,
+  "correctness": null,
+  "throughput": null,
+  "ready_wait_s": null,
+  "errors": [
+    "http://127.0.0.1:8080 not serving after 120s (last error: <urlopen error [Errno 111] Connection refused>)"
+  ]
+}

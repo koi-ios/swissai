@@ -1,0 +1,37 @@
+From 2f82e9c96ec4b60a0ab31e473e4618c63a8c5f6c Mon Sep 17 00:00:00 2001
+From: pystartup <pystartup@localhost>
+Date: Thu, 12 Nov 2026 06:41:02 +0100
+Subject: [PATCH] [docker] ship bytecode in the runtime image
+
+The framework stage deletes __pycache__ and SGLang is an editable install, so the image
+has no .pyc files and every launch compiles site-packages and the SGLang tree from
+source (every process, when the root filesystem is read-only). Compile both once in the
+runtime stage with unchecked-hash pycs (PEP 552), which do not depend on mtimes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docker/Dockerfile | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/docker/Dockerfile b/docker/Dockerfile
+index a9712bc..d618ecb 100644
+--- a/docker/Dockerfile
++++ b/docker/Dockerfile
+@@ -753,6 +753,14 @@ COPY --from=framework_final /opt/sglang/lib/python3.12/site-packages /opt/sglang
+ # Copy SGLang workspace
+ COPY --from=framework_final /sgl-workspace /sgl-workspace
+ 
++# Ship bytecode. The framework stage removes __pycache__ to keep its layer small and SGLang is
++# an editable install, so without this step every launch compiles site-packages and the SGLang
++# tree from source in its first process(es) -- in every process when the root is read-only.
++# Compile once here; unchecked-hash pycs (PEP 552) stay valid whatever happens to mtimes.
++RUN python3 -m compileall -q -j 0 --invalidation-mode unchecked-hash \
++        /opt/sglang/lib/python3.12/site-packages /sgl-workspace/sglang/python \
++    || echo "compileall: some sources did not compile (unimportable files); continuing"
++
+ # Copy sgl-model-gateway binary
+ COPY --from=framework_final /opt/sglang/bin/sgl-model-gateway /opt/sglang/bin/sgl-model-gateway
+ 
+-- 
+2.50.1 (Apple Git-155)
+

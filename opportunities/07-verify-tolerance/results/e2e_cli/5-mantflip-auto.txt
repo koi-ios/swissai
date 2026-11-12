@@ -1,0 +1,48 @@
+[SERVEKIT] waiting up to 300s for http://127.0.0.1:18105 to serve
+[SERVEKIT] checking 16 prompts from http://127.0.0.1:18105 against results/e2e_cli/gold.json
+
+[SERVEKIT] Verify of http://127.0.0.1:18105 (exact mode)
+----------------------------------------
+prompt                n_tok   max|dlp|    max z       dnll    greedy
+capital_of_france         4  0.0009594 0.000959  -0.000241        ok
+fibonacci_code           16   0.000452 0.000452  -2.73e-05        ok
+arithmetic               26   0.005063   0.0158   -6.1e-05        ok
+primes                   22    0.01967   0.0197  -0.000901        ok
+thermodynamics           13   0.008393  0.00864   -0.00133        ok
+french                   21  0.0007915 0.000792  +3.49e-05        ok
+german                   22   0.003924  0.00392  +0.000164        ok
+unicode                  31   0.001241   0.0152  -1.73e-05        ok
+json_schema              21    0.02725   0.0528   -0.00121         -
+sql                      28   0.008183  0.00854  -0.000298         -
+repetition               12   0.007947  0.00795  -0.000654         -
+rare_tokens              28    0.09654    0.123   -0.00363         -
+dialogue                 20    0.03149   0.0315   +0.00155         -
+chess                    47    0.02887   0.0718  +0.000599         -
+numbers                  61   0.002187  0.00512  -3.63e-05         -
+long_prose              769    0.06249    0.136  -7.94e-05         -
+
+max |delta token_logprob|: 0.096542   bitwise equal: False
+calibration: 8 perturbed runs, scale 0.132, deterministic True, batch-invariant False
+weight checksums: DIFFER
+  not bitwise equal; the drift is within the calibrated noise of perturbed load (max_z 1.03 vs 8.55). A restart- or process-level difference is the likely cause; if this engine is known to vary across restarts, check with --mode statistical.
+FAIL
+! weight checksums differ: rank 0: model.layers.27.mlp.down_proj.weight differs
+! capital_of_france: 4/4 logprobs differ; worst at token 0 by +0.000959
+! fibonacci_code: 10/16 logprobs differ; worst at token 0 by +0.000452
+! arithmetic: 20/26 logprobs differ; worst at token 6 by +0.00506
+! primes: 14/22 logprobs differ; worst at token 0 by +0.0197
+! thermodynamics: 12/13 logprobs differ; worst at token 7 by +0.00839
+! french: 14/21 logprobs differ; worst at token 0 by -0.000792
+! german: 21/22 logprobs differ; worst at token 0 by -0.00392
+! unicode: 29/31 logprobs differ; worst at token 22 by -0.00124
+! json_schema: 16/21 logprobs differ; worst at token 19 by +0.0273
+! sql: 18/28 logprobs differ; worst at token 9 by +0.00818
+! repetition: 10/12 logprobs differ; worst at token 0 by +0.00795
+! rare_tokens: 23/28 logprobs differ; worst at token 23 by +0.0965
+! dialogue: 18/20 logprobs differ; worst at token 0 by -0.0315
+! chess: 36/47 logprobs differ; worst at token 18 by -0.0289
+! numbers: 24/61 logprobs differ; worst at token 3 by +0.00219
+! long_prose: 437/769 logprobs differ; worst at token 15 by +0.0625
+
+result written to results/e2e_cli/5-mantflip-auto.json
+exit 1

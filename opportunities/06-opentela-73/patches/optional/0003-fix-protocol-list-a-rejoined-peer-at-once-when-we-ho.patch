@@ -1,0 +1,109 @@
+From bfce305a14ff708af044c541b7143a21079427d6 Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:44:55 +0100
+Subject: [PATCH] fix(protocol): list a rejoined peer at once when we hold a
+ direct connection
+
+UpdateNodeTableHook keeps a LEFT row disconnected, so neither the connect
+handler nor the pubsub ping can mark the peer connected while it is LEFT.
+When the peer's new record replaces the LEFT row, the PutHook carries
+Connected=false over to it, and a restarted worker stays out of
+/v1/dnt/table until the next ping tick, up to 30 s. A brand-new peer is
+listed at once, because ConnectedF gives it a connected minimal entry.
+
+When a non-LEFT record replaces a LEFT row and we hold a direct (not
+relayed) connection to the peer, mark it connected: the open connection
+is the same proof of life ConnectedF accepts for a new peer. Relayed
+peers still wait for the ping tick.
+
+Refs #73
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/internal/protocol/crdt.go        |  3 ++-
+ src/internal/protocol/node_table.go  | 13 +++++++++++
+ src/internal/protocol/rejoin_test.go | 34 ++++++++++++++++++++++++++++
+ 3 files changed, 49 insertions(+), 1 deletion(-)
+ create mode 100644 src/internal/protocol/rejoin_test.go
+
+diff --git a/src/internal/protocol/crdt.go b/src/internal/protocol/crdt.go
+index 6f4afe7..e5ae08b 100644
+--- a/src/internal/protocol/crdt.go
++++ b/src/internal/protocol/crdt.go
+@@ -183,7 +183,8 @@ func GetCRDTStore() (*crdt.Datastore, context.CancelFunc) {
+ 				peer.Connected = false
+ 				common.Logger.Debugf("Adding peer: [%s] triggered by p2p hook", strings.Trim(k.String(), "/"))
+ 			} else {
+-				peer.Connected = p.Connected
++				peer.Connected = p.Connected ||
++					rejoinedOverDirectConn(p, peer, strings.Trim(k.String(), "/"), IsDirectlyConnected)
+ 				common.Logger.Debugf("Updating peer: [%s] triggered by p2p hook", strings.Trim(k.String(), "/"))
+ 			}
+ 			value, err := json.Marshal(peer)
+diff --git a/src/internal/protocol/node_table.go b/src/internal/protocol/node_table.go
+index c556659..7e2045c 100644
+--- a/src/internal/protocol/node_table.go
++++ b/src/internal/protocol/node_table.go
+@@ -500,6 +500,19 @@ func UpdateNodeTableHook(key ds.Key, value []byte) {
+ 	table[key.String()] = peer
+ }
+ 
++// rejoinedOverDirectConn reports whether a record that replaces a LEFT row
++// comes from a peer we hold a direct connection to.
++//
++// UpdateNodeTableHook keeps a LEFT row disconnected, so neither the connect
++// handler nor the pubsub ping can mark the peer connected while it is LEFT, and
++// the PutHook then carries Connected=false over to the peer's new record. A
++// restarted worker would stay out of /v1/dnt/table until the next ping tick,
++// up to 30 s, while a brand-new peer is listed at once. A direct connection is
++// the proof of life ConnectedF accepts for a new peer, so accept it here too.
++func rejoinedOverDirectConn(existing, incoming Peer, id string, directlyConnected func(string) bool) bool {
++	return existing.Status == LEFT && incoming.Status != LEFT && directlyConnected(id)
++}
++
+ func DeleteNodeTableHook(key ds.Key) {
+ 	table := *getNodeTable()
+ 	tableUpdateSem <- struct{}{}
+diff --git a/src/internal/protocol/rejoin_test.go b/src/internal/protocol/rejoin_test.go
+new file mode 100644
+index 0000000..12eb2b0
+--- /dev/null
++++ b/src/internal/protocol/rejoin_test.go
+@@ -0,0 +1,34 @@
++package protocol
++
++import "testing"
++
++func TestRejoinedOverDirectConn(t *testing.T) {
++	connected := func(string) bool { return true }
++	unreachable := func(string) bool { return false }
++
++	cases := []struct {
++		name     string
++		existing Peer
++		incoming Peer
++		direct   func(string) bool
++		want     bool
++	}{
++		{"LEFT row replaced by a live record over a direct connection",
++			Peer{Status: LEFT}, Peer{Status: READY}, connected, true},
++		{"LEFT row replaced by a PENDING record over a direct connection",
++			Peer{Status: LEFT}, Peer{Status: PENDING}, connected, true},
++		{"no direct connection: wait for the ping tick",
++			Peer{Status: LEFT}, Peer{Status: READY}, unreachable, false},
++		{"not a rejoin: an ordinary update keeps the row's Connected",
++			Peer{Status: READY}, Peer{Status: READY}, connected, false},
++		{"still LEFT",
++			Peer{Status: LEFT}, Peer{Status: LEFT}, connected, false},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := rejoinedOverDirectConn(tc.existing, tc.incoming, "peer", tc.direct); got != tc.want {
++				t.Fatalf("rejoinedOverDirectConn = %v, want %v", got, tc.want)
++			}
++		})
++	}
++}
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,33 @@
+[SERVEKIT] checking 16 prompts from http://127.0.0.1:18103 against results/e2e_cli/gold.json
+
+[SERVEKIT] Verify of http://127.0.0.1:18103 (statistical mode)
+----------------------------------------
+prompt                n_tok   max|dlp|    max z       dnll    greedy
+capital_of_france         4     0.1046    0.987    -0.0414     tie@5
+fibonacci_code           16     0.2009     1.77    -0.0136    tie@18
+arithmetic               26     0.1199     2.58    +0.0224        ok
+primes                   22    0.07217     1.01   +0.00176        ok
+thermodynamics           13    0.09115     1.04   +0.00329        ok
+french                   21      0.149     2.75   +0.00237     tie@4
+german                   22      0.158     2.55   -0.00109        ok
+unicode                  31      0.218     1.68     -0.015        ok
+json_schema              21     0.1108     0.95    -0.0152         -
+sql                      28     0.1288     1.07   +0.00439         -
+repetition               12     0.2584     1.95   +0.00798         -
+rare_tokens              28     0.3526     3.41    +0.0155         -
+dialogue                 20     0.1055     1.88   +0.00743         -
+chess                    47     0.1779     2.04   +0.00399         -
+numbers                  61     0.1124     1.63    -0.0015         -
+long_prose              769     0.2382     3.28   +0.00146         -
+
+max_z       3.405   threshold 8.555   calibration [4.46, 6.58]
+rms_z      0.6535   threshold 0.7751   calibration [0.626, 0.716]
+shift     0.06943   threshold 0.07877   calibration [-0.0506, 0.0337]
+top-1 flips at clear winners: 0/871; greedy divergences: 0 unexplained, 3 at near-ties
+calibration: 8 perturbed runs, scale 0.132, deterministic True, batch-invariant False
+  noise model: scale 0.132 x (1 - p), 8 perturbed calibration runs, margin_tau 1.39, alpha 0.01
+  3 greedy divergence(s) at near-ties (margin <= 1.39), explained by noise
+PASS
+
+result written to results/e2e_cli/3-autotune-stat.json
+exit 0

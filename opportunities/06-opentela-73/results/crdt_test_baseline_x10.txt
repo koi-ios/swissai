@@ -1,0 +1,48 @@
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.20s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+2026-11-11T20:26:16.634+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+2026-11-11T20:26:16.634+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+2026-11-11T20:26:16.634+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.18s)
+2026-11-11T20:26:21.818+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.16s)
+2026-11-11T20:26:26.981+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.20s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+2026-11-11T20:26:32.179+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.16s)
+2026-11-11T20:26:37.342+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+2026-11-11T20:26:37.342+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.19s)
+2026-11-11T20:26:42.536+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+2026-11-11T20:26:42.536+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.24s)
+2026-11-11T20:26:47.779+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.25s)
+2026-11-11T20:26:53.030+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+2026-11-11T20:26:58.289+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.26s)
+2026-11-11T20:26:58.289+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+2026-11-11T20:26:58.289+0100	ERROR	worker-2	go-ds-crdt/crdt.go:762	context canceled
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+    restart_priority_test.go:292: head still holds {"status":"left","life":1} for the restarted worker after its post-merge write (worker-2 max height 2, history walk still pending): a write made after merging the LEFT record lost to it
+--- FAIL: TestRestartedReplicaRowOutranksItsPreviousIncarnation (5.26s)
+FAIL
+FAIL	opentela/internal/protocol/go-ds-crdt	52.315s
+FAIL

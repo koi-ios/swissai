@@ -1,0 +1,398 @@
+{
+  "argv": [
+    "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/bin/python",
+    "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py"
+  ],
+  "exit_code": 0,
+  "gate": "PASS",
+  "reasons": [],
+  "proposal": {
+    "TVM_FFI_CACHE_DIR": "{jit_cache}/tvm-ffi"
+  },
+  "proposal_entries": {
+    "TVM_FFI_CACHE_DIR": [
+      "tvm_ffi"
+    ]
+  },
+  "verification": {
+    "tvm_ffi": "verified"
+  },
+  "builds": {
+    "tvm_ffi": {
+      "binaries_cold": 3,
+      "binaries_warm": 0,
+      "files_cold": 21,
+      "files_warm": 0
+    }
+  },
+  "relocation": {
+    "tvm_ffi": 15
+  },
+  "readonly": {
+    "returncode": -9,
+    "write_attempts_into_ro_cache": {
+      "tvm_ffi": 1107
+    },
+    "failed_writes": 0
+  },
+  "outside": [],
+  "runs": {
+    "cold": {
+      "returncode": 0,
+      "wall_s": 4.749,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {},
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi",
+          "entry": "tvm_ffi",
+          "anchor": "HOME",
+          "variable": "TVM_FFI_CACHE_DIR",
+          "files": 21,
+          "bytes": 234622,
+          "by_class": {
+            "build": 12,
+            "lock": 3,
+            "source": 3,
+            "binary": 3
+          },
+          "bytes_by_class": {
+            "build": 103249,
+            "lock": 0,
+            "source": 1245,
+            "binary": 130128
+          },
+          "path_baked": 6,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_1_5725a782aac1b819/.ninja_deps",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_1_5725a782aac1b819/build.ninja",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_2_222a96f3b672868a/.ninja_deps",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_2_222a96f3b672868a/build.ninja",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_3_1ba807f096218e8b/.ninja_deps"
+          ],
+          "write_pattern": "direct writes (9 opens, no rename)",
+          "ops": {
+            "mkdir": 7,
+            "open_w": 9
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23": 16
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_1_5725a782aac1b819",
+          "pid": 48474,
+          "t": 1794463683.4086888,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_2_222a96f3b672868a",
+          "pid": 48474,
+          "t": 1794463684.365213,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/cold-79c6e8/home/.cache/tvm-ffi/scale_add_3_1ba807f096218e8b",
+          "pid": 48474,
+          "t": 1794463685.151882,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        }
+      ],
+      "log_tail": "build_s=2.59 kernels=3"
+    },
+    "redirect": {
+      "returncode": 0,
+      "wall_s": 4.848,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TVM_FFI_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi"
+      },
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi",
+          "entry": "tvm_ffi",
+          "anchor": "other",
+          "variable": "TVM_FFI_CACHE_DIR",
+          "files": 21,
+          "bytes": 234614,
+          "by_class": {
+            "build": 12,
+            "lock": 3,
+            "source": 3,
+            "binary": 3
+          },
+          "bytes_by_class": {
+            "build": 103241,
+            "lock": 0,
+            "source": 1245,
+            "binary": 130128
+          },
+          "path_baked": 6,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_1_5725a782aac1b819/.ninja_deps",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_1_5725a782aac1b819/build.ninja",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_2_222a96f3b672868a/.ninja_deps",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_2_222a96f3b672868a/build.ninja",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_3_1ba807f096218e8b/.ninja_deps"
+          ],
+          "write_pattern": "direct writes (9 opens, no rename)",
+          "ops": {
+            "mkdir": 7,
+            "open_w": 9
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23": 16
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_1_5725a782aac1b819",
+          "pid": 48493,
+          "t": 1794463688.308905,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_2_222a96f3b672868a",
+          "pid": 48493,
+          "t": 1794463689.142317,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_3_1ba807f096218e8b",
+          "pid": 48493,
+          "t": 1794463690.01344,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        }
+      ],
+      "log_tail": "build_s=2.54 kernels=3"
+    },
+    "warm": {
+      "returncode": 0,
+      "wall_s": 2.105,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TVM_FFI_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi"
+      },
+      "roots": [],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_1_5725a782aac1b819",
+          "pid": 48525,
+          "t": 1794463692.9423811,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_2_222a96f3b672868a",
+          "pid": 48525,
+          "t": 1794463692.964372,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache/tvm-ffi/scale_add_3_1ba807f096218e8b",
+          "pid": 48525,
+          "t": 1794463692.97722,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        }
+      ],
+      "log_tail": "build_s=0.05 kernels=3"
+    },
+    "relocate": {
+      "returncode": 0,
+      "wall_s": 4.645,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TVM_FFI_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi"
+      },
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi",
+          "entry": "tvm_ffi",
+          "anchor": "other",
+          "variable": "TVM_FFI_CACHE_DIR",
+          "files": 15,
+          "bytes": 234666,
+          "by_class": {
+            "build": 12,
+            "binary": 3
+          },
+          "bytes_by_class": {
+            "build": 104538,
+            "binary": 130128
+          },
+          "path_baked": 6,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_1_5725a782aac1b819/.ninja_deps",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_1_5725a782aac1b819/build.ninja",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_2_222a96f3b672868a/.ninja_deps",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_2_222a96f3b672868a/build.ninja",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_3_1ba807f096218e8b/.ninja_deps"
+          ],
+          "write_pattern": "direct writes (6 opens, no rename)",
+          "ops": {
+            "mkdir": 6,
+            "open_w": 6
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23": 12
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_1_5725a782aac1b819",
+          "pid": 48531,
+          "t": 1794463695.0982258,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_2_222a96f3b672868a",
+          "pid": 48531,
+          "t": 1794463695.988121,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "ninja",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-moved/tvm-ffi/scale_add_3_1ba807f096218e8b",
+          "pid": 48531,
+          "t": 1794463696.800083,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:23",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tvm_ffi_jit.py:34"
+          ]
+        }
+      ],
+      "log_tail": "build_s=2.52 kernels=3"
+    },
+    "readonly": {
+      "returncode": -9,
+      "wall_s": 120.028,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [
+        "timeout after 120.0s"
+      ],
+      "env_set": {
+        "TVM_FFI_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tvm_ffi_jit/redirect-b2de44/cache-ro/tvm-ffi"
+      },
+      "roots": [],
+      "subprocesses": [],
+      "log_tail": ""
+    }
+  }
+}

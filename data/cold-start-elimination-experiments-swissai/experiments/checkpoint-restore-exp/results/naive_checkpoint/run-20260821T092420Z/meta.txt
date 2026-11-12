@@ -1,0 +1,13 @@
+gpu_pids=18132 18224 18225 18226 
+root=18132
+port=8080
+released_tags=
+model_path=/root/models/Qwen2.5-3B-Instruct
+img_size=29G
+log=/root/simple-serving-stack/experiments/checkpoint-restore-exp/results/naive_checkpoint/run-20260821T092420Z/server.log
+log_size=34289
+launch_to_warmed_ms=67754
+release_ms=0
+gpu_evict_ms=17588
+criu_dump_ms=47506
+checkpoint_total_ms=65094

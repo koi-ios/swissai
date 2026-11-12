@@ -1,0 +1,2 @@
+{"binary": "base", "worker_public_addr": false, "history": 20000, "delay_s": 0, "run": 1, "initial_join_s": 0.0, "left_hidden_s": 0.0, "time_to_routable_s": "", "outcome": "not routable after 180s", "worker_self_status": "ready", "worker_self_services": 1, "after_post_s": 10.88, "guard_s": ""}
+nice -n 19 python3 -I restart_repro.py --binary bin/otela-base --label base    45.72s user 45.71s system 37% cpu 4:03.67 total

@@ -1,0 +1,1794 @@
+[
+ {
+  "id": "vllm_root.env.cache_root",
+  "claim": "VLLM_CACHE_ROOT relocates the vLLM cache root; its value is passed through os.path.expanduser",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 712,
+  "quote": "\"VLLM_CACHE_ROOT\": lambda: os.path.expanduser("
+ },
+ {
+  "id": "vllm_root.default.cache_root",
+  "claim": "Default VLLM_CACHE_ROOT is <default cache root>/vllm",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 715,
+  "quote": "os.path.join(get_default_cache_root(), \"vllm\"),"
+ },
+ {
+  "id": "vllm_root.default.xdg",
+  "claim": "The default cache root is $XDG_CACHE_HOME when it is set",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 340,
+  "quote": "\"XDG_CACHE_HOME\","
+ },
+ {
+  "id": "vllm_root.default.home",
+  "claim": "Without XDG_CACHE_HOME the default cache root is ~/.cache",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 341,
+  "quote": "os.path.join(os.path.expanduser(\"~\"), \".cache\"),"
+ },
+ {
+  "id": "vllm_root.engine.envs_cache",
+  "claim": "After service init, enable_envs_cache memoizes env reads, so env changes after init are not seen",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2322,
+  "quote": "__getattr__ = functools.cache(__getattr__)"
+ },
+ {
+  "id": "vllm_root.engine.bench_override",
+  "claim": "Only the startup benchmark rewrites VLLM_CACHE_ROOT (to a mkdtemp dir); serving code never sets it",
+  "path": "vendor/vllm-v0.32.0/vllm/benchmarks/startup.py",
+  "line": 121,
+  "quote": "os.environ[\"VLLM_CACHE_ROOT\"] = temp_cache_dir"
+ },
+ {
+  "id": "vllm_root.engine.default_o2",
+  "claim": "Default optimization level is O2",
+  "path": "vendor/vllm-v0.32.0/vllm/config/vllm.py",
+  "line": 427,
+  "quote": "optimization_level: OptimizationLevel = OptimizationLevel.O2"
+ },
+ {
+  "id": "vllm_root.engine.import_override",
+  "claim": "import vllm executes vllm/env_override.py",
+  "path": "vendor/vllm-v0.32.0/vllm/__init__.py",
+  "line": 14,
+  "quote": "import vllm.env_override  # noqa: F401"
+ },
+ {
+  "id": "vllm_root.engine.inductor_threads",
+  "claim": "vLLM force-sets TORCHINDUCTOR_COMPILE_THREADS=1 at import",
+  "path": "vendor/vllm-v0.32.0/vllm/env_override.py",
+  "line": 168,
+  "quote": "os.environ[\"TORCHINDUCTOR_COMPILE_THREADS\"] = \"1\""
+ },
+ {
+  "id": "vllm_root.engine.triton_autotune",
+  "claim": "vLLM setdefaults TRITON_CACHE_AUTOTUNING=1 so Triton persists autotune results in its cache dir",
+  "path": "vendor/vllm-v0.32.0/vllm/env_override.py",
+  "line": 176,
+  "quote": "os.environ.setdefault(\"TRITON_CACHE_AUTOTUNING\", \"1\")"
+ },
+ {
+  "id": "vllm_root.key.all_envs",
+  "claim": "compile_factors() hashes every registered vLLM env var except an ignore list",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2354,
+  "quote": "Start with every known vLLM env var; drop entries in"
+ },
+ {
+  "id": "vllm_root.key.skip_ignored",
+  "claim": "Only names in ignored_factors are skipped when building the env hash",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2448,
+  "quote": "if factor in ignored_factors:"
+ },
+ {
+  "id": "vllm_root.key.ignore_cache_root",
+  "claim": "VLLM_CACHE_ROOT is excluded from the torch.compile env hash",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2364,
+  "quote": "\"VLLM_CACHE_ROOT\","
+ },
+ {
+  "id": "vllm_root.key.reloc_rationale",
+  "claim": "Location-only paths are ignored so that relocating HOME/XDG does not invalidate compile caches",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2368,
+  "quote": "hashing them means relocating"
+ },
+ {
+  "id": "vllm_root.key.ignore_ld_path",
+  "claim": "LD_LIBRARY_PATH is excluded from the env hash",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2374,
+  "quote": "\"LD_LIBRARY_PATH\","
+ },
+ {
+  "id": "vllm_root.key.cuda_home_hashed",
+  "claim": "CUDA_HOME is a registered env var and is not in the ignore list, so its value is hashed",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 749,
+  "quote": "\"CUDA_HOME\": lambda: os.environ.get(\"CUDA_HOME\", None),"
+ },
+ {
+  "id": "vllm_root.key.dp_rank_hashed",
+  "claim": "VLLM_DP_RANK is registered and not ignored, so a per-rank value would split the compile hash",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1515,
+  "quote": "\"VLLM_DP_RANK\": lambda: int(os.getenv(\"VLLM_DP_RANK\", \"0\")),"
+ },
+ {
+  "id": "vllm_root.key.nixl_port_hashed",
+  "claim": "Side-channel port VLLM_NIXL_SIDE_CHANNEL_PORT is registered and not ignored (hashed)",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1739,
+  "quote": "\"VLLM_NIXL_SIDE_CHANNEL_PORT\": lambda: int("
+ },
+ {
+  "id": "vllm_root.key.ray_noset",
+  "claim": "RAY_EXPERIMENTAL_NOSET_* variables are appended to the env factors",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2485,
+  "quote": "for var in ray_noset_env_vars:"
+ },
+ {
+  "id": "vllm_aot.engine.torch_pin",
+  "claim": "vLLM v0.32.0 is built against torch 2.13.0",
+  "path": "vendor/vllm-v0.32.0/pyproject.toml",
+  "line": 10,
+  "quote": "\"torch == 2.13.0\","
+ },
+ {
+  "id": "vllm_aot.env.aot_default",
+  "claim": "VLLM_USE_AOT_COMPILE defaults to 1 on torch>=2.10 unless the compile cache is disabled",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 382,
+  "quote": "if is_torch_equal_or_newer(\"2.10.0\") and not disable_compile_cache()"
+ },
+ {
+  "id": "vllm_aot.env.disable",
+  "claim": "VLLM_DISABLE_COMPILE_CACHE (default 0) disables the compile cache",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 374,
+  "quote": "return bool(int(os.getenv(\"VLLM_DISABLE_COMPILE_CACHE\", \"0\")))"
+ },
+ {
+  "id": "vllm_aot.env.mega_default",
+  "claim": "VLLM_USE_MEGA_AOT_ARTIFACT defaults to 1 on torch>=2.12 when AOT compile is on",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 393,
+  "quote": "\"1\" if is_torch_equal_or_newer(\"2.12.0.dev\") and use_aot_compile() else \"0\""
+ },
+ {
+  "id": "vllm_aot.default.dir",
+  "claim": "AOT artifacts live under VLLM_CACHE_ROOT/torch_compile_cache/torch_aot_compile/<hash>",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 568,
+  "quote": "\"torch_aot_compile\","
+ },
+ {
+  "id": "vllm_aot.default.rank_dir",
+  "claim": "Per-rank subdir rank_<rank>_<dp_index> under the hash dir",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 584,
+  "quote": "cache_dir = os.path.join(cache_dir, f\"rank_{rank}_{dp_rank}\")"
+ },
+ {
+  "id": "vllm_aot.default.model_file",
+  "claim": "The AOT artifact is a single file named 'model' per rank",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 585,
+  "quote": "aot_compilation_path = os.path.join(cache_dir, \"model\")"
+ },
+ {
+  "id": "vllm_aot.engine.inductor_dir",
+  "claim": "Inductor cache dir is <hash dir>/inductor_cache",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 574,
+  "quote": "inductor_cache = os.path.join(cache_dir, \"inductor_cache\")"
+ },
+ {
+  "id": "vllm_aot.engine.inductor_override",
+  "claim": "vLLM unconditionally overwrites TORCHINDUCTOR_CACHE_DIR process-wide on the AOT path",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 580,
+  "quote": "os.environ[\"TORCHINDUCTOR_CACHE_DIR\"] = inductor_cache"
+ },
+ {
+  "id": "vllm_aot.engine.override_reason",
+  "claim": "Override is unconditional because torch may already have pre-filled the /tmp default into the env",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 578,
+  "quote": "# Unconditional because torch's cache_dir() may have pre-filled the"
+ },
+ {
+  "id": "vllm_aot.engine.inductor_writes",
+  "claim": "Post-load execution, CUDA-graph capture and autotune/recompile write under {hash}/inductor_cache",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 577,
+  "quote": "# autotune/recompile all need to write under {hash}/inductor_cache/."
+ },
+ {
+  "id": "vllm_aot.engine.shared_ranks",
+  "claim": "The hash-level dir (incl. inductor_cache) is shared by all ranks",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 572,
+  "quote": "# Hash-level dir; shared across ranks on the same node."
+ },
+ {
+  "id": "vllm_aot.key.factors",
+  "claim": "AOT dir hash starts from aot_compile_hash_factors(vllm_config)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 561,
+  "quote": "factors: list[str] = aot_compile_hash_factors(self.vllm_config)"
+ },
+ {
+  "id": "vllm_aot.key.model_hash",
+  "claim": "AOT dir hash also includes a hash of the compiled forward function identity",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 563,
+  "quote": "factors.append(_model_hash_key(self.forward))"
+ },
+ {
+  "id": "vllm_aot.key.sha256",
+  "claim": "AOT dir name is the full sha256 hex of str(factors)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 564,
+  "quote": "hash_key = hashlib.sha256(str(factors).encode()).hexdigest()"
+ },
+ {
+  "id": "vllm_aot.key.version",
+  "claim": "_model_hash_key includes the vLLM version",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 260,
+  "quote": "sha256_hash.update(vllm.__version__.encode())"
+ },
+ {
+  "id": "vllm_aot.key.lineno",
+  "claim": "_model_hash_key includes the forward's first line number (plus qualname)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 262,
+  "quote": "sha256_hash.update(str(fn.__code__.co_firstlineno).encode())"
+ },
+ {
+  "id": "vllm_aot.key.no_sources",
+  "claim": "Traced source files are not part of the AOT dir hash; they are checked at load instead",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 551,
+  "quote": "The {hash} contains all of the factors except for the source files"
+ },
+ {
+  "id": "vllm_aot.key.env_hash",
+  "claim": "AOT factors include the env hash from compile_factors()",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 576,
+  "quote": "env_hash = hash_factors(envs.compile_factors())"
+ },
+ {
+  "id": "vllm_aot.key.config_hash",
+  "claim": "AOT factors include VllmConfig.compute_hash()",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 581,
+  "quote": "config_hash = vllm_config.compute_hash()"
+ },
+ {
+  "id": "vllm_aot.key.inductor_if_mega",
+  "claim": "With the mega artifact, AOT factors also include the Inductor system/torch/config factors",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 586,
+  "quote": "factors.extend(get_inductor_factors())"
+ },
+ {
+  "id": "vllm_aot_io.write.tmp_name",
+  "claim": "AOT save writes to <model>.<pid>.tmp first",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 739,
+  "quote": "tmp_file = f\"{self._aot_compilation_path}.{os.getpid()}.tmp\""
+ },
+ {
+  "id": "vllm_aot_io.write.replace",
+  "claim": "then atomically renames onto the final path (no lock)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 741,
+  "quote": "os.replace(tmp_file, self._aot_compilation_path)"
+ },
+ {
+  "id": "vllm_aot_io.write.no_raise",
+  "claim": "Save failures are logged as warnings, not raised",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 750,
+  "quote": "\"%sunable to save AOT compiled function to %s: %s\","
+ },
+ {
+  "id": "vllm_aot_io.write.skip_loaded",
+  "claim": "No save when the function was loaded from disk",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 727,
+  "quote": "logger.debug(\"AOT compiled function was loaded from cache, skipping save\")"
+ },
+ {
+  "id": "vllm_aot_io.read.skip_if_disabled",
+  "claim": "Load is attempted only when the compile cache is not disabled",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 586,
+  "quote": "if not envs.VLLM_DISABLE_COMPILE_CACHE:"
+ },
+ {
+  "id": "vllm_aot_io.read.open",
+  "claim": "Hit check = open the model file",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 303,
+  "quote": "open(aot_compilation_path, \"rb\") as f,"
+ },
+ {
+  "id": "vllm_aot_io.read.load",
+  "claim": "and deserialize it with torch.compiler.load_compiled_function",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 305,
+  "quote": "loaded_fn = torch.compiler.load_compiled_function("
+ },
+ {
+  "id": "vllm_aot_io.read.source_check",
+  "claim": "Load verifies traced source contents and recompiles on mismatch",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 281,
+  "quote": "\"Source code has changed since the last compilation. Recompiling the model.\""
+ },
+ {
+  "id": "vllm_aot_io.read.corrupt",
+  "claim": "A truncated file (EOFError) is reported as corrupted",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 328,
+  "quote": "message = \"Compile cache file corrupted.\""
+ },
+ {
+  "id": "vllm_aot_io.read.fallback",
+  "claim": "Any load failure falls back to recompiling",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 334,
+  "quote": "\"%sCompiling model again due to a load failure from %s, reason: %s\","
+ },
+ {
+  "id": "vllm_aot_io.read.force",
+  "claim": "VLLM_FORCE_AOT_LOAD=1 turns load failures into errors",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 339,
+  "quote": "if envs.VLLM_FORCE_AOT_LOAD:"
+ },
+ {
+  "id": "vllm_aot_io.read.inductor_makedirs",
+  "claim": "The inductor_cache dir is makedirs'd before every load attempt",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 575,
+  "quote": "os.makedirs(inductor_cache, exist_ok=True)"
+ },
+ {
+  "id": "vllm_aot_io.read.dummy_dir",
+  "claim": "Mega-artifact load uses VLLM_CACHE_ROOT/dummy_cache",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 481,
+  "quote": "dummy_cache_dir = os.path.join(envs.VLLM_CACHE_ROOT, \"dummy_cache\")"
+ },
+ {
+  "id": "vllm_aot_io.read.dummy_makedirs",
+  "claim": "and creates it on every mega-artifact load (a hit)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 482,
+  "quote": "os.makedirs(dummy_cache_dir, exist_ok=True)"
+ },
+ {
+  "id": "vllm_aot_io.reloc.source_by_module",
+  "claim": "The source check re-reads files at the current module paths",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 274,
+  "quote": "file = inspect.getfile(module)"
+ },
+ {
+  "id": "vllm_aot_io.content.pickle",
+  "claim": "The serialized compiled function is a pickle of vLLM's state dict",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 304,
+  "quote": "return pickle.dumps(state)"
+ },
+ {
+  "id": "vllm_aot_io.content.artifacts",
+  "claim": "The state embeds all Inductor standalone-compile artifacts (mega artifact)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 301,
+  "quote": "state[\"standalone_compile_artifacts\"] = standalone_compile_artifacts"
+ },
+ {
+  "id": "vllm_aot_io.content.meta_inputs",
+  "claim": "Example inputs are stored as meta tensors",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 281,
+  "quote": "lambda inp: torch.empty_like(inp, device=\"meta\"),"
+ },
+ {
+  "id": "vllm_aot_io.content.dedup",
+  "claim": "Artifact bytes are deduplicated by SHA-256",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/caching.py",
+  "line": 43,
+  "quote": "`submodule_bytes_store` maps SHA256 hash -> actual bytes"
+ },
+ {
+  "id": "vllm_hash.key.version",
+  "claim": "VllmConfig.compute_hash includes the vLLM version",
+  "path": "vendor/vllm-v0.32.0/vllm/config/vllm.py",
+  "line": 471,
+  "quote": "vllm_factors.append(__version__)"
+ },
+ {
+  "id": "vllm_hash.key.model_config",
+  "claim": "VllmConfig.compute_hash includes the ModelConfig hash",
+  "path": "vendor/vllm-v0.32.0/vllm/config/vllm.py",
+  "line": 473,
+  "quote": "vllm_factors.append(self.model_config.compute_hash())"
+ },
+ {
+  "id": "vllm_hash.key.compilation",
+  "claim": "VllmConfig.compute_hash includes the CompilationConfig hash",
+  "path": "vendor/vllm-v0.32.0/vllm/config/vllm.py",
+  "line": 533,
+  "quote": "vllm_factors.append(self.compilation_config.compute_hash())"
+ },
+ {
+  "id": "vllm_hash.key.all_fields",
+  "claim": "Config hashes include every dataclass field not explicitly ignored",
+  "path": "vendor/vllm-v0.32.0/vllm/config/utils.py",
+  "line": 382,
+  "quote": "for dc_field in fields(config):"
+ },
+ {
+  "id": "vllm_hash.key.model_field",
+  "claim": "ModelConfig.model (repo id or local path string) is a hashed field",
+  "path": "vendor/vllm-v0.32.0/vllm/config/model.py",
+  "line": 154,
+  "quote": "model: str = \"Qwen/Qwen3-0.6B\""
+ },
+ {
+  "id": "vllm_hash.key.cc_ignores_paths",
+  "claim": "CompilationConfig hash ignores its path fields (cache_dir, local_cache_dir, debug_dump_path)",
+  "path": "vendor/vllm-v0.32.0/vllm/config/compilation.py",
+  "line": 802,
+  "quote": "Paths/dirs and runtime/metrics that"
+ },
+ {
+  "id": "vllm_hash.key.parallel_ignores_rank",
+  "claim": "ParallelConfig hash ignores DP rank/rank/master address",
+  "path": "vendor/vllm-v0.32.0/vllm/config/parallel.py",
+  "line": 899,
+  "quote": "\"data_parallel_rank\","
+ },
+ {
+  "id": "vllm_hash.key.no_device",
+  "claim": "VllmConfig.compute_hash contains no device identity",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 48,
+  "quote": "device identity (``DeviceConfig.compute_hash`` is empty)"
+ },
+ {
+  "id": "vllm_hash.key.system",
+  "claim": "Inductor factors include CacheBase.get_system()",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 170,
+  "quote": "system_factors = CacheBase.get_system()"
+ },
+ {
+  "id": "vllm_hash.key.torch_key",
+  "claim": "Inductor factors include torch_key() (hash of the torch build)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 176,
+  "quote": "torch_factors = torch_key()"
+ },
+ {
+  "id": "vllm_hash.key.gpu_name",
+  "claim": "get_system() records the GPU device name",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 298,
+  "quote": "device_info[\"name\"] = device_properties.name"
+ },
+ {
+  "id": "vllm_hash.key.cuda",
+  "claim": "get_system() records torch.version.cuda",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 299,
+  "quote": "version_info[\"cuda\"] = torch.version.cuda"
+ },
+ {
+  "id": "vllm_hash.key.triton",
+  "claim": "get_system() records the Triton key",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 289,
+  "quote": "triton_version = triton_key()"
+ },
+ {
+  "id": "vllm_inductor.engine.standalone_default",
+  "claim": "VLLM_USE_STANDALONE_COMPILE defaults to 1",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 764,
+  "quote": "os.environ.get(\"VLLM_USE_STANDALONE_COMPILE\", \"1\") == \"1\""
+ },
+ {
+  "id": "vllm_inductor.engine.standalone_adaptor",
+  "claim": "With standalone compile, vLLM uses InductorStandaloneAdaptor",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 109,
+  "quote": "return InductorStandaloneAdaptor("
+ },
+ {
+  "id": "vllm_inductor.engine.standalone_init_noenv",
+  "claim": "InductorStandaloneAdaptor.initialize_cache only records the dir and sets no env vars",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 272,
+  "quote": "self.cache_dir = cache_dir"
+ },
+ {
+  "id": "vllm_inductor.engine.legacy_inductor",
+  "claim": "Legacy InductorAdaptor sets TORCHINDUCTOR_CACHE_DIR=<base>/inductor_cache",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 467,
+  "quote": "os.environ[\"TORCHINDUCTOR_CACHE_DIR\"] = inductor_cache"
+ },
+ {
+  "id": "vllm_inductor.engine.legacy_triton_check",
+  "claim": "Legacy adaptor respects a caller-set TRITON_CACHE_DIR",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 471,
+  "quote": "if triton_cache is None or triton_cache == _last_inductor_triton_cache_dir:"
+ },
+ {
+  "id": "vllm_inductor.engine.legacy_triton",
+  "claim": "otherwise sets TRITON_CACHE_DIR=<base>/triton_cache",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 472,
+  "quote": "triton_cache = os.path.join(self.base_cache_dir, \"triton_cache\")"
+ },
+ {
+  "id": "vllm_inductor.default.torch_tmp",
+  "claim": "torch default Inductor dir is <tmp>/torchinductor_<user>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 33,
+  "quote": "\"torchinductor_\" + sanitized_username,"
+ },
+ {
+  "id": "vllm_inductor.engine.torch_prefill",
+  "claim": "torch writes the resolved Inductor dir back into os.environ",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 19,
+  "quote": "os.environ[\"TORCHINDUCTOR_CACHE_DIR\"] = cache_dir"
+ },
+ {
+  "id": "vllm_inductor.engine.torch_triton_default",
+  "claim": "torch uses TRITON_CACHE_DIR if set, else <inductor dir>/triton/<device>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 38,
+  "quote": "if (directory := os.getenv(\"TRITON_CACHE_DIR\")) is not None:"
+ },
+ {
+  "id": "vllm_inductor.engine.torch_triton_setenv",
+  "claim": "torch exports the derived TRITON_CACHE_DIR into os.environ process-wide when it was unset",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 493,
+  "quote": "os.environ[\"TRITON_CACHE_DIR\"] = triton_cache_dir("
+ },
+ {
+  "id": "vllm_inductor.engine.servekit_triton",
+  "claim": "servekit sets TRITON_CACHE_DIR for the engine",
+  "path": "vendor/servekit/src/servekit/jit_cache.py",
+  "line": 17,
+  "quote": "\"TRITON_CACHE_DIR\": \"triton\","
+ },
+ {
+  "id": "vllm_tcc.write.mega_returns",
+  "claim": "In mega-AOT mode standalone compile returns no handle",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 380,
+  "quote": "return compiled_graph, None"
+ },
+ {
+  "id": "vllm_tcc.write.handle_gate",
+  "claim": "Index entries are only recorded when a handle exists",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 373,
+  "quote": "and handle is not None:"
+ },
+ {
+  "id": "vllm_tcc.env.user_dir",
+  "claim": "compilation_config.cache_dir, when given, replaces the computed legacy dir",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1065,
+  "quote": "if not self.compilation_config.cache_dir:"
+ },
+ {
+  "id": "vllm_tcc.default.dir",
+  "claim": "Default legacy dir is VLLM_CACHE_ROOT/torch_compile_cache/<hash10>",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1075,
+  "quote": "envs.VLLM_CACHE_ROOT, \"torch_compile_cache\", hash_key"
+ },
+ {
+  "id": "vllm_tcc.default.rank_prefix",
+  "claim": "with per-rank rank_<rank>_<dp>/<prefix> subdirs",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1084,
+  "quote": "os.path.join(cache_dir, f\"rank_{rank}_{dp_rank}\", self.prefix)"
+ },
+ {
+  "id": "vllm_tcc.key.factors",
+  "claim": "Legacy key factors: env, config, code and compiler hashes",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1070,
+  "quote": "factors = [env_hash, config_hash, code_hash, compiler_hash]"
+ },
+ {
+  "id": "vllm_tcc.key.trunc",
+  "claim": "Legacy dir name is the first 10 hex chars of sha256",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1073,
+  "quote": "hash_key = hashlib.sha256(str(factors).encode()).hexdigest()[:10]"
+ },
+ {
+  "id": "vllm_tcc.key.code_path",
+  "claim": "code_hash includes each traced file's absolute path (and content)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1055,
+  "quote": "hash_content.append(filepath)"
+ },
+ {
+  "id": "vllm_tcc.key.compiler_hash",
+  "claim": "compiler_hash hashes the Inductor factors (truncated to 10 hex)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 265,
+  "quote": "str(factors).encode(), usedforsecurity=False"
+ },
+ {
+  "id": "vllm_tcc.content.artifact_name",
+  "claim": "Artifacts are named artifact_compile_range_<start>_<end>_subgraph_<i>",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 310,
+  "quote": "maybe_key = \"artifact_compile_range_\""
+ },
+ {
+  "id": "vllm_tcc.write.save",
+  "claim": "Artifacts are written by torch CompiledArtifact.save",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 406,
+  "quote": "compiled_graph.save(path=path, format=self.save_format)"
+ },
+ {
+  "id": "vllm_tcc.write.atomic_backport",
+  "claim": "vLLM backports atomic save only for torch < 2.10",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 206,
+  "quote": "Backport of pytorch/pytorch#162432 for torch < 2.10.0."
+ },
+ {
+  "id": "vllm_tcc.env.save_format",
+  "claim": "VLLM_COMPILE_CACHE_SAVE_FORMAT: binary (default) or unpacked",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2148,
+  "quote": "\"VLLM_COMPILE_CACHE_SAVE_FORMAT\", \"binary\", [\"binary\", \"unpacked\"]"
+ },
+ {
+  "id": "vllm_tcc.env.unpacked_unsafe",
+  "claim": "unpacked format is documented as not multi-process safe",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2145,
+  "quote": "NOT multiprocess safe - race conditions may occur with multiple processes."
+ },
+ {
+  "id": "vllm_tcc.write.index_direct",
+  "claim": "vllm_compile_cache.py index is rewritten in place (no temp file, no lock)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 223,
+  "quote": "with open(self.cache_file_path, \"w\") as f:"
+ },
+ {
+  "id": "vllm_tcc.read.literal_eval",
+  "claim": "The index is parsed with ast.literal_eval without a try/except",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 194,
+  "quote": "cache = ast.literal_eval(f.read())"
+ },
+ {
+  "id": "vllm_tcc.read.bad_entry",
+  "claim": "A malformed index entry is treated as a miss",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 249,
+  "quote": "# When the cache is outdated, we should ignore the existing file."
+ },
+ {
+  "id": "vllm_tcc.read.load_path",
+  "claim": "Hits are loaded with CompiledArtifact.load",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 422,
+  "quote": "inductor_compiled_graph = torch._inductor.CompiledArtifact.load("
+ },
+ {
+  "id": "vllm_tcc.reloc.handle_rejoin",
+  "claim": "On load the artifact path is rebuilt from the current cache dir (stored absolute path unused)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 421,
+  "quote": "path = os.path.join(self.cache_dir, handle[0])"
+ },
+ {
+  "id": "vllm_tcc.write.meta_path",
+  "claim": "cache_key_factors.json records the raw hash factors",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1132,
+  "quote": "meta_path = os.path.join(local_cache_dir, \"cache_key_factors.json\")"
+ },
+ {
+  "id": "vllm_tcc.write.meta_once",
+  "claim": "and is written only if absent (inside a try that swallows errors)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1133,
+  "quote": "if not os.path.exists(meta_path):"
+ },
+ {
+  "id": "vllm_tcc.write.graph",
+  "claim": "computation_graph.py is written if absent (no error guard)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1271,
+  "quote": "graph_path = os.path.join(local_cache_dir, \"computation_graph.py\")"
+ },
+ {
+  "id": "vllm_deepgemm.env.name",
+  "claim": "DeepGEMM JIT cache is relocated by DG_JIT_CACHE_DIR",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 279,
+  "quote": "DEEP_GEMM_JIT_CACHE_ENV_NAME = \"DG_JIT_CACHE_DIR\""
+ },
+ {
+  "id": "vllm_deepgemm.engine.set_if_empty",
+  "claim": "vLLM sets it only if unset or empty",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 280,
+  "quote": "if not os.environ.get(DEEP_GEMM_JIT_CACHE_ENV_NAME, None):"
+ },
+ {
+  "id": "vllm_deepgemm.default.root",
+  "claim": "vLLM's default is VLLM_CACHE_ROOT/deep_gemm",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 282,
+  "quote": "envs.VLLM_CACHE_ROOT, \"deep_gemm\""
+ },
+ {
+  "id": "vllm_deepgemm.engine.external_first",
+  "claim": "A pip-installed deep_gemm is preferred",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 194,
+  "quote": "module = importlib.import_module(\"deep_gemm\")"
+ },
+ {
+  "id": "vllm_deepgemm.engine.vendored",
+  "claim": "else the copy vendored in the vLLM wheel is used",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 205,
+  "quote": "module = importlib.import_module(\"vllm.third_party.deep_gemm\")"
+ },
+ {
+  "id": "vllm_deepgemm.engine.vendored_pin",
+  "claim": "The wheel vendors DeepGEMM under vllm/third_party/deep_gemm",
+  "path": "vendor/vllm-v0.32.0/cmake/external_projects/deepgemm.cmake",
+  "line": 97,
+  "quote": "# We vendor DeepGEMM into vllm/third_party/deep_gemm/ and bundle:"
+ },
+ {
+  "id": "vllm_deepgemm.engine.trial_import",
+  "claim": "has_deep_gemm() trial-imports deep_gemm before DG_JIT_CACHE_DIR is set",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/import_utils.py",
+  "line": 519,
+  "quote": "return _has_module(\"deep_gemm\") or _has_module(\"vllm.third_party.deep_gemm\")"
+ },
+ {
+  "id": "vllm_deepgemm.engine.direct_import",
+  "claim": "Mega-MoE calls the raw deep_gemm module, bypassing _lazy_init()",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/layers/fused_moe/deep_gemm_mega_moe.py",
+  "line": 390,
+  "quote": "deep_gemm.fp8_fp4_mega_moe("
+ },
+ {
+  "id": "vllm_deepgemm.read.lazy_runtime",
+  "claim": "DeepGEMM's JIT runtime is constructed lazily",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/csrc/runtime/jit.hpp",
+  "line": 12,
+  "quote": "inline deep_jit::LazyInit<deep_jit::Runtime<deep_jit::CUDA>> jit(nullptr);"
+ },
+ {
+  "id": "vllm_deepgemm.read.env_at_runtime",
+  "claim": "The cache dir env is read when the runtime is constructed",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/runtime/runtime.hpp",
+  "line": 43,
+  "quote": "disk_cache(DiskCache::from_env(env)),"
+ },
+ {
+  "id": "vllm_deepgemm.env.prefix_fallback",
+  "claim": "DeepJIT falls back from <prefix>_JIT_CACHE_DIR to DJ_JIT_CACHE_DIR",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/utils/env.hpp",
+  "line": 69,
+  "quote": "return get_with_prefix<T>(\"DJ\", suffix);"
+ },
+ {
+  "id": "vllm_deepgemm.default.home_dj",
+  "claim": "DeepJIT's own default is $HOME/.dj",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 105,
+  "quote": "paths.emplace_back(std::filesystem::path(home) / \".dj\");"
+ },
+ {
+  "id": "vllm_deepgemm.read.ro_layers",
+  "claim": "DG_JIT_CACHE_DIR may list one writable root plus read-only lookup roots",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 88,
+  "quote": "// Parse PATH_1:PATH_2:PATH_3 into a writable cache root followed by"
+ },
+ {
+  "id": "vllm_deepgemm.write.commit_marker",
+  "claim": "DeepJIT entries are published with a .committed marker after building in tmp/<uuid>",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 77,
+  "quote": "and are published with a"
+ },
+ {
+  "id": "vllm_deepgemm.env.warmup",
+  "claim": "VLLM_DEEP_GEMM_WARMUP selects skip/full/relax (default relax)",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1645,
+  "quote": "\"VLLM_DEEP_GEMM_WARMUP\": env_with_choices("
+ },
+ {
+  "id": "vllm_deepgemm.engine.warmup_gate",
+  "claim": "Warmup runs when DeepGEMM is supported and the mode is not skip",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 239,
+  "quote": "is_deep_gemm_supported() and envs.VLLM_DEEP_GEMM_WARMUP != \"skip\""
+ },
+ {
+  "id": "vllm_deepgemm.key.relax_m",
+  "claim": "relax compiles a heuristic set of M values per weight N",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/deep_gemm_warmup.py",
+  "line": 158,
+  "quote": "return _generate_optimal_warmup_m_values(max_tokens, n, device)"
+ },
+ {
+  "id": "vllm_deepgemm.key.sms",
+  "claim": "relax M values depend on the GPU SM count",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/deep_gemm_warmup.py",
+  "line": 51,
+  "quote": "num_sms = num_compute_units(device.index)"
+ },
+ {
+  "id": "vllm_deepgemm.key.full_m",
+  "claim": "full compiles every M in 1..max_num_batched_tokens",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/deep_gemm_warmup.py",
+  "line": 165,
+  "quote": "return list(range(1, max_tokens + 1))"
+ },
+ {
+  "id": "vllm_deepgemm.key.grouped_dp",
+  "claim": "MoE grouped-GEMM warmup scales max tokens by DP world size",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/deep_gemm_warmup.py",
+  "line": 216,
+  "quote": "max_tokens = get_dp_group().world_size * max_tokens"
+ },
+ {
+  "id": "vllm_fi_dg.engine.first_choice",
+  "claim": "First-choice CUDA FP8 block-scaled linear kernel is the FlashInfer/DeepGEMM dynamic kernel",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/linear/__init__.py",
+  "line": 482,
+  "quote": "FlashInferFp8DeepGEMMDynamicBlockScaledKernel,"
+ },
+ {
+  "id": "vllm_fi_dg.engine.small_m",
+  "claim": "M < 32 runs FlashInfer's kernel",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/linear/scaled_mm/flashinfer.py",
+  "line": 155,
+  "quote": "- Small batches (M < 32): FlashInfer's swapAB trick for better utilisation."
+ },
+ {
+  "id": "vllm_fi_dg.engine.large_m",
+  "claim": "M >= 32 runs DeepGEMM",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/linear/scaled_mm/flashinfer.py",
+  "line": 156,
+  "quote": "- Large batches (M >= 32): DeepGEMM for peak throughput."
+ },
+ {
+  "id": "vllm_fi_dg.engine.cond",
+  "claim": "The switch is a torch.cond on M < 32",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/linear/scaled_mm/flashinfer.py",
+  "line": 301,
+  "quote": "condition = input.shape[0] < 32"
+ },
+ {
+  "id": "vllm_fi_dg.engine.fi_symbol",
+  "claim": "The FlashInfer branch is flashinfer.gemm.fp8_blockscale_gemm_sm90",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/flashinfer.py",
+  "line": 1155,
+  "quote": "\"flashinfer.gemm\", \"fp8_blockscale_gemm_sm90\""
+ },
+ {
+  "id": "vllm_fi_dg.engine.sm90_only",
+  "claim": "The FlashInfer branch exists only on SM 9.0",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/flashinfer.py",
+  "line": 1164,
+  "quote": "and current_platform.is_device_capability(90)"
+ },
+ {
+  "id": "vllm_fi_dg.env.flag_default",
+  "claim": "VLLM_BLOCKSCALE_FP8_GEMM_FLASHINFER defaults to 1",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1692,
+  "quote": "int(os.getenv(\"VLLM_BLOCKSCALE_FP8_GEMM_FLASHINFER\", \"1\"))"
+ },
+ {
+  "id": "vllm_fi_dg.engine.moe_ep_expose",
+  "claim": "FlashInfer MoE-EP gets vLLM's DeepGEMM injected as sys.modules['deep_gemm']",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/layers/fused_moe/flashinfer_moe_ep.py",
+  "line": 281,
+  "quote": "sys.modules.setdefault(\"deep_gemm\", deep_gemm)"
+ },
+ {
+  "id": "vllm_fi_dg.engine.moe_ep_no_lazy_init",
+  "claim": "via _import_deep_gemm(), which does not run _lazy_init() (no DG_JIT_CACHE_DIR default)",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/layers/fused_moe/flashinfer_moe_ep.py",
+  "line": 276,
+  "quote": "deep_gemm = _import_deep_gemm()"
+ },
+ {
+  "id": "vllm_fi_dg.engine.moe_ep_blackwell",
+  "claim": "FlashInfer MoE-EP is Blackwell-only (SM 10.0/10.3)",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/layers/fused_moe/flashinfer_moe_ep.py",
+  "line": 40,
+  "quote": "_SUPPORTED_CAPABILITIES = frozenset({(10, 0), (10, 3)})"
+ },
+ {
+  "id": "vllm_fi_autotune.env.dir",
+  "claim": "VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR overrides the autotune cache root",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1810,
+  "quote": "\"VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR\", None"
+ },
+ {
+  "id": "vllm_fi_autotune.env.override",
+  "claim": "The override is expanduser'd",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_autotune_cache.py",
+  "line": 41,
+  "quote": "root = Path(override_dir).expanduser()"
+ },
+ {
+  "id": "vllm_fi_autotune.default.root",
+  "claim": "Default root is VLLM_CACHE_ROOT/flashinfer_autotune_cache",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_autotune_cache.py",
+  "line": 48,
+  "quote": "/ \"flashinfer_autotune_cache\""
+ },
+ {
+  "id": "vllm_fi_autotune.default.ws",
+  "claim": "followed by the last two components of FlashInfer's workspace dir",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_autotune_cache.py",
+  "line": 45,
+  "quote": "flashinfer_workspace = flashinfer_jit_env.FLASHINFER_WORKSPACE_DIR"
+ },
+ {
+  "id": "vllm_fi_autotune.key.fi_ver_arch",
+  "claim": "FlashInfer's workspace dir ends in <flashinfer version>/<arch>",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer/jit/env.py",
+  "line": 364,
+  "quote": "return FLASHINFER_CACHE_DIR / flashinfer_version / arch"
+ },
+ {
+  "id": "vllm_fi_autotune.key.config_hash",
+  "claim": "Autotune dir key is the VllmConfig hash without the vLLM version",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_autotune_cache.py",
+  "line": 34,
+  "quote": "config_hash = vllm_config.compute_hash(include_version=False)"
+ },
+ {
+  "id": "vllm_fi_autotune.key.hash_dir",
+  "claim": "stored as a sha256 subdirectory",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_autotune_cache.py",
+  "line": 53,
+  "quote": "output_dir = root / flashinfer_autotune_cache_hash(runner)"
+ },
+ {
+  "id": "vllm_fi_autotune.key.rank_file",
+  "claim": "One file per DP rank and world rank",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 457,
+  "quote": "f\"{cache_path.stem}_dp{dp_rank}_rank{world.rank_in_group}{cache_path.suffix}\""
+ },
+ {
+  "id": "vllm_fi_autotune.key.not_compile_hash",
+  "claim": "The override var is not part of the torch.compile env hash",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2401,
+  "quote": "\"VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR\","
+ },
+ {
+  "id": "vllm_fi_autotune.engine.default_on",
+  "claim": "FlashInfer autotune is enabled at the default O2 level",
+  "path": "vendor/vllm-v0.32.0/vllm/config/vllm.py",
+  "line": 307,
+  "quote": "\"enable_flashinfer_autotune\": True,"
+ },
+ {
+  "id": "vllm_fi_autotune.engine.sm90_gate",
+  "claim": "Autotune runs on SM >= 9.0 when FlashInfer is installed",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 267,
+  "quote": "elif has_flashinfer() and current_platform.has_device_capability(90):"
+ },
+ {
+  "id": "vllm_fi_autotune.engine.fi_pin",
+  "claim": "FlashInfer pinned to 0.7.0.post1",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 13,
+  "quote": "flashinfer-python==0.7.0.post1"
+ },
+ {
+  "id": "vllm_fi_autotune.read.all_ranks",
+  "claim": "Configs load only if every rank has a matching file",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 467,
+  "quote": "if _all_ranks_have_matching_cache(cache_path, tune_group):"
+ },
+ {
+  "id": "vllm_fi_autotune.read.bad_json",
+  "claim": "Unreadable or corrupt JSON counts as no file (re-tune)",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 389,
+  "quote": "except (OSError, ValueError, AttributeError):"
+ },
+ {
+  "id": "vllm_fi_autotune.read.load",
+  "claim": "Hit = FlashInfer AutoTuner.load_configs",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 468,
+  "quote": "loaded = tuner.load_configs(str(cache_path))"
+ },
+ {
+  "id": "vllm_fi_autotune.read.mkdir",
+  "claim": "The cache dir is mkdir'd on every start (ok if it exists)",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_autotune_cache.py",
+  "line": 54,
+  "quote": "output_dir.mkdir(parents=True, exist_ok=True)"
+ },
+ {
+  "id": "vllm_fi_autotune.write.dirty_only",
+  "claim": "The file is rewritten only if something new was tuned",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 503,
+  "quote": "if tuner._dirty:"
+ },
+ {
+  "id": "vllm_fi_autotune.write.save",
+  "claim": "Writes go through FlashInfer AutoTuner.save_configs",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/kernel_warmup.py",
+  "line": 504,
+  "quote": "tuner.save_configs(str(cache_path))"
+ },
+ {
+  "id": "vllm_fi_autotune.write.fi_merge",
+  "claim": "save_configs merges with an existing file of matching metadata",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer/autotuner/autotuner.py",
+  "line": 3376,
+  "quote": "matches the current environment (or the file predates"
+ },
+ {
+  "id": "vllm_fi_autotune.write.fi_mkstemp_unguarded",
+  "claim": "FlashInfer creates the temp file outside its try block (raises on a read-only dir)",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer/autotuner/autotuner.py",
+  "line": 3521,
+  "quote": "fd, tmp_path = tempfile.mkstemp("
+ },
+ {
+  "id": "vllm_fi_autotune.write.fi_atomic",
+  "claim": "and publishes with os.replace (atomic, no lock)",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer/autotuner/autotuner.py",
+  "line": 3541,
+  "quote": "os.replace(tmp_path, abs_path)"
+ },
+ {
+  "id": "vllm_fi_autotune.write.sm120_shared_file",
+  "claim": "SM120 sparse-MLA autotune writes the unsuffixed file from every rank",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_sparse_mla_warmup.py",
+  "line": 211,
+  "quote": "write_flashinfer_autotune_cache(cache_path, tune_results)"
+ },
+ {
+  "id": "vllm_fi_autotune.write.helper_atomic",
+  "claim": "via vLLM's mkstemp + os.replace helper",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/flashinfer_autotune_cache.py",
+  "line": 104,
+  "quote": "os.replace(tmp_path, cache_path)"
+ },
+ {
+  "id": "vllm_startup_plan.env.enable",
+  "claim": "Startup plan is opt-in via VLLM_ENABLE_STARTUP_PLAN=1",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1996,
+  "quote": "int(os.getenv(\"VLLM_ENABLE_STARTUP_PLAN\", \"0\"))"
+ },
+ {
+  "id": "vllm_startup_plan.default.path",
+  "claim": "File is VLLM_CACHE_ROOT/startup_plan/startup_plan_<fp>.json",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 83,
+  "quote": "envs.VLLM_CACHE_ROOT, \"startup_plan\", f\"startup_plan_{fingerprint}.json\""
+ },
+ {
+  "id": "vllm_startup_plan.key.ignored",
+  "claim": "The flag is excluded from the compile hash",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2366,
+  "quote": "\"VLLM_ENABLE_STARTUP_PLAN\","
+ },
+ {
+  "id": "vllm_startup_plan.key.config",
+  "claim": "Fingerprint includes the VllmConfig hash",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 64,
+  "quote": "\"vllm_config\": vllm_config.compute_hash(),"
+ },
+ {
+  "id": "vllm_startup_plan.key.device_name",
+  "claim": "Fingerprint includes the GPU name",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 65,
+  "quote": "\"device_name\": current_platform.get_device_name(),"
+ },
+ {
+  "id": "vllm_startup_plan.key.capability",
+  "claim": "Fingerprint includes compute capability",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 67,
+  "quote": "\"device_capability\": str(capability) if capability else \"\","
+ },
+ {
+  "id": "vllm_startup_plan.key.cuda",
+  "claim": "Fingerprint includes the CUDA version torch was built with",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 69,
+  "quote": "\"cuda\": torch.version.cuda or \"\","
+ },
+ {
+  "id": "vllm_startup_plan.key.world",
+  "claim": "Fingerprint includes rank and world size",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 71,
+  "quote": "\"world_size\": world_size,"
+ },
+ {
+  "id": "vllm_startup_plan.key.driver",
+  "claim": "Driver version is deliberately not in the key",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 53,
+  "quote": "Driver-only changes are not part of the key; the free-memory gate at"
+ },
+ {
+  "id": "vllm_startup_plan.key.trunc",
+  "claim": "Fingerprint is 16 hex chars of sha256",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 74,
+  "quote": "return digest[:16]"
+ },
+ {
+  "id": "vllm_startup_plan.write.tmp",
+  "claim": "Write goes to <path>.tmp.<pid>",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 185,
+  "quote": "tmp = f\"{path}.tmp.{os.getpid()}\""
+ },
+ {
+  "id": "vllm_startup_plan.write.replace",
+  "claim": "then os.replace",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 188,
+  "quote": "os.replace(tmp, path)"
+ },
+ {
+  "id": "vllm_startup_plan.write.warn",
+  "claim": "OSError on save is logged, not raised",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 191,
+  "quote": "logger.warning(\"Failed to save startup plan to %s: %s\", path, e)"
+ },
+ {
+  "id": "vllm_startup_plan.write.save_gate",
+  "claim": "Saved only when memory profiling ran (no explicit or applied kv-cache size)",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/gpu_worker.py",
+  "line": 980,
+  "quote": "if self.cache_config.kv_cache_memory_bytes is None and hasattr("
+ },
+ {
+  "id": "vllm_startup_plan.write.save_call",
+  "claim": "The save call site",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/gpu_worker.py",
+  "line": 1036,
+  "quote": "maybe_save_startup_plan(self, kv_cache_memory_bytes_to_requested_limit)"
+ },
+ {
+  "id": "vllm_startup_plan.read.tolerant",
+  "claim": "Unreadable or garbled plans are ignored",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 95,
+  "quote": "except (OSError, json.JSONDecodeError) as e:"
+ },
+ {
+  "id": "vllm_startup_plan.read.gate",
+  "claim": "A plan is applied only if current free memory >= recorded baseline",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/worker/startup_plan.py",
+  "line": 122,
+  "quote": "if current_free_memory < baseline:"
+ },
+ {
+  "id": "vllm_p2p.default.path",
+  "claim": "P2P cache file is VLLM_CACHE_ROOT/gpu_p2p_access_cache_for_<key>.json",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 368,
+  "quote": "envs.VLLM_CACHE_ROOT, f\"gpu_p2p_access_cache_for_{cache_key}.json\""
+ },
+ {
+  "id": "vllm_p2p.key.physical",
+  "claim": "Key is the ordered physical GPU id list when known",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 360,
+  "quote": "cache_key = \",\".join(str(i) for i in assigned_physical_gpu_ids)"
+ },
+ {
+  "id": "vllm_p2p.key.cvd",
+  "claim": "else CUDA_VISIBLE_DEVICES, else 0..N-1 (no host, GPU model or driver)",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 365,
+  "quote": "cache_key = cuda_visible_devices or \",\".join(str(i) for i in range(num_dev))"
+ },
+ {
+  "id": "vllm_p2p.write.who",
+  "claim": "Only node-local rank 0 writes",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 373,
+  "quote": "if (not is_distributed or get_world_group().local_rank == 0) and ("
+ },
+ {
+  "id": "vllm_p2p.write.absent",
+  "claim": "and only if the file does not exist",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 374,
+  "quote": "not os.path.exists(path)"
+ },
+ {
+  "id": "vllm_p2p.write.open",
+  "claim": "The file is written in place (no temp file, no lock)",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 423,
+  "quote": "with open(path, \"w\") as f:"
+ },
+ {
+  "id": "vllm_p2p.write.dump",
+  "claim": "as JSON",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 424,
+  "quote": "json.dump(cache, f, indent=4)"
+ },
+ {
+  "id": "vllm_p2p.read.makedirs",
+  "claim": "The cache root is makedirs'd on every check",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 370,
+  "quote": "os.makedirs(os.path.dirname(path), exist_ok=True)"
+ },
+ {
+  "id": "vllm_p2p.read.barrier",
+  "claim": "Other ranks wait on a barrier",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 426,
+  "quote": "get_world_group().barrier()"
+ },
+ {
+  "id": "vllm_p2p.read.load",
+  "claim": "then json.load the file without error handling",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/all_reduce_utils.py",
+  "line": 429,
+  "quote": "cache = json.load(f)"
+ },
+ {
+  "id": "vllm_p2p.engine.when",
+  "claim": "The check runs for single-node custom all-reduce groups",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/custom_all_reduce.py",
+  "line": 284,
+  "quote": "and not _can_p2p(rank, world_size)"
+ },
+ {
+  "id": "vllm_p2p.engine.skip",
+  "claim": "VLLM_SKIP_P2P_CHECK bypasses the cache file",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/custom_all_reduce.py",
+  "line": 90,
+  "quote": "if envs.VLLM_SKIP_P2P_CHECK:"
+ },
+ {
+  "id": "vllm_modelinfo.default.dir",
+  "claim": "Model-info cache lives in VLLM_CACHE_ROOT/modelinfos",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/models/registry.py",
+  "line": 969,
+  "quote": "return Path(envs.VLLM_CACHE_ROOT) / \"modelinfos\""
+ },
+ {
+  "id": "vllm_modelinfo.key.name",
+  "claim": "One file per model module/class",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/models/registry.py",
+  "line": 972,
+  "quote": "cls_name = f\"{self.module_name}-{self.class_name}\".replace(\".\", \"-\")"
+ },
+ {
+  "id": "vllm_modelinfo.key.bytes",
+  "claim": "Key hashes the model module source bytes",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/models/registry.py",
+  "line": 990,
+  "quote": "hasher.update(path.read_bytes())"
+ },
+ {
+  "id": "vllm_modelinfo.reloc.relative",
+  "claim": "using paths relative to the module dir (relocatable)",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/models/registry.py",
+  "line": 988,
+  "quote": "hasher.update(path.relative_to(root_path).as_posix().encode(\"utf-8\"))"
+ },
+ {
+  "id": "vllm_modelinfo.read.hash",
+  "claim": "Stale hash = miss",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/models/registry.py",
+  "line": 1008,
+  "quote": "if mi_dict[\"hash\"] != module_hash:"
+ },
+ {
+  "id": "vllm_modelinfo.write.atomic_writer",
+  "claim": "Saved with atomic_writer",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/models/registry.py",
+  "line": 1038,
+  "quote": "with atomic_writer(modelinfo_path, encoding=\"utf-8\") as f:"
+ },
+ {
+  "id": "vllm_modelinfo.write.mkstemp",
+  "claim": "atomic_writer creates a temp file in the target dir",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/model_loader/weight_utils.py",
+  "line": 125,
+  "quote": "temp_fd, temp_path = tempfile.mkstemp(dir=temp_dir)"
+ },
+ {
+  "id": "vllm_modelinfo.write.replace",
+  "claim": "and os.replace's it",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/model_loader/weight_utils.py",
+  "line": 134,
+  "quote": "os.replace(temp_path, filepath)"
+ },
+ {
+  "id": "vllm_modelinfo.write.errors",
+  "claim": "Save errors are logged, not raised",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/models/registry.py",
+  "line": 1041,
+  "quote": "logger.exception(\"Error saving model info cache.\")"
+ },
+ {
+  "id": "vllm_tilelang.engine.cleanup",
+  "claim": "The only TileLang env var vLLM touches is TILELANG_CLEANUP_TEMP_FILES (setdefault 1)",
+  "path": "vendor/vllm-v0.32.0/vllm/env_override.py",
+  "line": 183,
+  "quote": "os.environ.setdefault(\"TILELANG_CLEANUP_TEMP_FILES\", \"1\")"
+ },
+ {
+  "id": "vllm_tilelang.default.cleanup",
+  "claim": "TileLang 0.1.12 already defaults it to 1",
+  "path": "vendor/src/tilelang-0.1.12/tilelang/env.py",
+  "line": 349,
+  "quote": "\"TILELANG_CLEANUP_TEMP_FILES\", \"1\""
+ },
+ {
+  "id": "vllm_tilelang.default.cache_dir",
+  "claim": "TileLang's cache stays at its default ~/.tilelang/cache",
+  "path": "vendor/src/tilelang-0.1.12/tilelang/env.py",
+  "line": 337,
+  "quote": "EnvVar(\"TILELANG_CACHE_DIR\", os.path.expanduser(\"~/.tilelang/cache\"))"
+ },
+ {
+  "id": "vllm_tilelang.default.print",
+  "claim": "TileLang prints each kernel compile by default",
+  "path": "vendor/src/tilelang-0.1.12/tilelang/env.py",
+  "line": 341,
+  "quote": "EnvVar(\"TILELANG_PRINT_ON_COMPILATION\", \"1\")"
+ },
+ {
+  "id": "vllm_tilelang.engine.pin",
+  "claim": "TileLang pinned to 0.1.12",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 15,
+  "quote": "tilelang==0.1.12"
+ },
+ {
+  "id": "vllm_tilelang.engine.jit",
+  "claim": "Kernels use plain tilelang.jit with pass configs, no cache arguments",
+  "path": "vendor/vllm-v0.32.0/vllm/tilelang_utils/__init__.py",
+  "line": 109,
+  "quote": "return tilelang.jit(pass_configs=_get_pass_configs())(kernel_function)"
+ },
+ {
+  "id": "vllm_tilelang.engine.dsv41",
+  "claim": "DeepSeek-V4.1 uses the TileLang mHC kernels",
+  "path": "vendor/vllm-v0.32.0/vllm/models/deepseek_v41/nvidia/model.py",
+  "line": 30,
+  "quote": "mhc_pre_delayed_tilelang,"
+ },
+ {
+  "id": "vllm_tilelang.engine.dg_switch",
+  "claim": "With DeepGEMM available the pre-norm GEMM runs in DeepGEMM instead of TileLang",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/mhc/tilelang.py",
+  "line": 38,
+  "quote": "use_deep_gemm = is_deep_gemm_supported() or not use_tilelang_fallback"
+ },
+ {
+  "id": "vllm_tilelang.key.dynamic",
+  "claim": "The token dimension is declared T.dynamic",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/mhc/tilelang_kernels.py",
+  "line": 151,
+  "quote": "num_tokens = T.dynamic(\"num_tokens\")"
+ },
+ {
+  "id": "vllm_tilelang.key.tirvar",
+  "claim": "T.dynamic returns a plain TIR var, not a constexpr",
+  "path": "vendor/src/tilelang-0.1.12/tilelang/language/symbolics.py",
+  "line": 30,
+  "quote": "return tirx.Var(name, dtype)"
+ },
+ {
+  "id": "vllm_tilelang.key.constexpr_only",
+  "claim": "Only constexpr dims enter TileLang's per-call specialization key",
+  "path": "vendor/src/tilelang-0.1.12/tilelang/language/eager/builder.py",
+  "line": 1049,
+  "quote": "if s in constexpr and s not in matcher:"
+ },
+ {
+  "id": "vllm_tilelang.key.sms",
+  "claim": "Split factors depend on the GPU SM count",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/mhc/tilelang_kernels.py",
+  "line": 47,
+  "quote": "n_sms = device_props.multi_processor_count"
+ },
+ {
+  "id": "vllm_tilelang.key.split",
+  "claim": "and on ceil(num_tokens/64), so they vary in token bands",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/mhc/tilelang_kernels.py",
+  "line": 1366,
+  "quote": "compute_num_split(64, pre_gemm_k, (num_tokens + 63) // 64)"
+ },
+ {
+  "id": "vllm_tilelang.key.bucket",
+  "claim": "The DSv4.1 delayed path buckets splits to {1,4,16}",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/mhc/warmup.py",
+  "line": 21,
+  "quote": "return 1 if splits == 1 else 4 if splits <= 4 else 16"
+ },
+ {
+  "id": "vllm_tilelang.key.bands",
+  "claim": "Pre-norm GEMM compile keys come in three token bands",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/mhc/tilelang_kernels.py",
+  "line": 1182,
+  "quote": "128 if value < 128 else 1024 if value < 1024 else max_tokens + 1"
+ },
+ {
+  "id": "vllm_tilelang.engine.warmup_default",
+  "claim": "JIT warmup is on by default",
+  "path": "vendor/vllm-v0.32.0/vllm/config/kernel.py",
+  "line": 291,
+  "quote": "enable_jit_warmup: bool = True"
+ },
+ {
+  "id": "vllm_tilelang.engine.compile_only",
+  "claim": "Warmup compiles TileLang specializations without launching",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/jit_warmup_tilelang_helper.py",
+  "line": 103,
+  "quote": "compiled = jit_impl.compile(*args, **kwargs)"
+ },
+ {
+  "id": "vllm_tilelang.engine.quiet",
+  "claim": "Warmup silences TileLang's compile/cache loggers",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/jit_warmup_tilelang_helper.py",
+  "line": 31,
+  "quote": "logging.getLogger(\"tilelang.cache.kernel_cache\"),"
+ },
+ {
+  "id": "vllm_cutedsl.engine.options",
+  "claim": "vLLM compiles CuTe-DSL kernels with --enable-tvm-ffi",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/jit_warmup_cutedsl_helper.py",
+  "line": 12,
+  "quote": "DEFAULT_CUTEDSL_COMPILE_OPTIONS = \"--enable-tvm-ffi\""
+ },
+ {
+  "id": "vllm_cutedsl.engine.inmem",
+  "claim": "into an in-process dict (nothing persisted by vLLM)",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/warmup/jit_warmup_cutedsl_helper.py",
+  "line": 63,
+  "quote": "self._compiled_cache[compile_key] = compile_cutedsl("
+ },
+ {
+  "id": "vllm_cutedsl.engine.pin",
+  "claim": "CuTe-DSL pinned to nvidia-cutlass-dsl 4.8.0",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 24,
+  "quote": "nvidia-cutlass-dsl[cu13]==4.8.0"
+ },
+ {
+  "id": "vllm_cutedsl.engine.quack_pin",
+  "claim": "QuACK pinned to 0.6.5",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 25,
+  "quote": "quack-kernels==0.6.5  # Required by MSA"
+ },
+ {
+  "id": "vllm_cutedsl.engine.quack_use",
+  "claim": "QuACK is used only for compile helpers such as make_fake_tensor",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/kernels/attention/dsa/dcp_indexer_cutedsl.py",
+  "line": 12,
+  "quote": "from quack.compile_utils import make_fake_tensor"
+ },
+ {
+  "id": "vllm_cutedsl.engine.tvmffi_pin",
+  "claim": "apache-tvm-ffi pinned to 0.1.11",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 14,
+  "quote": "apache-tvm-ffi==0.1.11"
+ },
+ {
+  "id": "vllm_fa4.engine.git_tag",
+  "claim": "FA4 comes from vllm-flash-attention@9cd61de",
+  "path": "vendor/vllm-v0.32.0/cmake/external_projects/vllm_flash_attn.cmake",
+  "line": 42,
+  "quote": "GIT_TAG 9cd61de38763d712bb6ce56e2a02cc2bf718c89f"
+ },
+ {
+  "id": "vllm_fa4.engine.path",
+  "claim": "and is shipped as vllm/vllm_flash_attn/cute",
+  "path": "vendor/vllm-v0.32.0/vllm/vllm_flash_attn/flash_attn_interface.py",
+  "line": 36,
+  "quote": "os.path.dirname(__file__), \"cute\", \"interface.py\""
+ },
+ {
+  "id": "vllm_fa4.env.enabled",
+  "claim": "FA4's persistent cache is off unless FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 34,
+  "quote": "os.getenv(\"FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED\", \"0\") == \"1\""
+ },
+ {
+  "id": "vllm_fa4.env.dir",
+  "claim": "FLASH_ATTENTION_CUTE_DSL_CACHE_DIR relocates it",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 39,
+  "quote": "os.getenv(\"FLASH_ATTENTION_CUTE_DSL_CACHE_DIR\", None)"
+ },
+ {
+  "id": "vllm_fa4.default.dir",
+  "claim": "default <tmp>/<user>/flash_attention_cute_dsl_cache",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 46,
+  "quote": "getuser() / \"flash_attention_cute_dsl_cache\""
+ },
+ {
+  "id": "vllm_fa4.key.python",
+  "claim": "Fingerprint includes the Python minor version",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 66,
+  "quote": "h.update(f\"py{sys.version_info.major}.{sys.version_info.minor}\".encode())"
+ },
+ {
+  "id": "vllm_fa4.key.cutlass",
+  "claim": "and the cutlass-dsl version (plus tvm_ffi)",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 67,
+  "quote": "h.update(f\"cutlass={cutlass.__version__}\".encode())"
+ },
+ {
+  "id": "vllm_fa4.key.sources",
+  "claim": "and every flash_attn/cute source file",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 70,
+  "quote": "for src in sorted(cute_root.rglob(\"*.py\")):"
+ },
+ {
+  "id": "vllm_fa4.key.file",
+  "claim": "File name is sha256 of the pickled compile key",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 249,
+  "quote": "return hashlib.sha256(pickle.dumps(key)).hexdigest()"
+ },
+ {
+  "id": "vllm_fa4.lock.flock",
+  "claim": "Writers/readers use fcntl.flock on <hash>.lock",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 127,
+  "quote": "fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)"
+ },
+ {
+  "id": "vllm_fa4.lock.timeout",
+  "claim": "with a 15 s timeout",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 180,
+  "quote": "LOCK_TIMEOUT_SECONDS = 15"
+ },
+ {
+  "id": "vllm_fa4.write.export",
+  "claim": "export_to_c writes <hash>.o directly (no temp/rename)",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 243,
+  "quote": "object_file_path=str(obj_path),"
+ },
+ {
+  "id": "vllm_fa4.read.load",
+  "claim": "A hit is loaded with cute.runtime.load_module",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 219,
+  "quote": "m = cute.runtime.load_module(str(obj_path), enable_tvm_ffi=True)"
+ },
+ {
+  "id": "vllm_fa4.read.creat",
+  "claim": "Readers open the lock file with O_CREAT",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 118,
+  "quote": "else os.O_RDONLY | os.O_CREAT"
+ },
+ {
+  "id": "vllm_snapshot.engine.docstring",
+  "claim": "Snapshot code assumes vLLM redirects Inductor and Triton under VLLM_CACHE_ROOT",
+  "path": "vendor/vllm-v0.32.0/vllm/snapshot/runtime.py",
+  "line": 81,
+  "quote": "vLLM redirects Inductor and Triton under ``VLLM_CACHE_ROOT`` when it"
+ },
+ {
+  "id": "vllm_snapshot.engine.inductor",
+  "claim": "It counts TORCHINDUCTOR_CACHE_DIR as a generated cache",
+  "path": "vendor/vllm-v0.32.0/vllm/snapshot/runtime.py",
+  "line": 90,
+  "quote": "inductor_root = os.environ.get(\"TORCHINDUCTOR_CACHE_DIR\")"
+ },
+ {
+  "id": "vllm_snapshot.engine.root",
+  "claim": "and VLLM_CACHE_ROOT",
+  "path": "vendor/vllm-v0.32.0/vllm/snapshot/runtime.py",
+  "line": 94,
+  "quote": "envs.VLLM_CACHE_ROOT,"
+ },
+ {
+  "id": "vllm_snapshot.engine.triton",
+  "claim": "and TRITON_CACHE_DIR or ~/.triton/cache",
+  "path": "vendor/vllm-v0.32.0/vllm/snapshot/runtime.py",
+  "line": 95,
+  "quote": "os.environ.get(\"TRITON_CACHE_DIR\") or \"~/.triton/cache\","
+ },
+ {
+  "id": "vllm_snapshot.engine.flashinfer",
+  "claim": "and a hard-coded ~/.cache/flashinfer",
+  "path": "vendor/vllm-v0.32.0/vllm/snapshot/runtime.py",
+  "line": 96,
+  "quote": "\"~/.cache/flashinfer\","
+ },
+ {
+  "id": "vllm_snapshot.engine.tmp_inductor",
+  "claim": "and /tmp/torchinductor_* when TORCHINDUCTOR_CACHE_DIR is unset",
+  "path": "vendor/vllm-v0.32.0/vllm/snapshot/runtime.py",
+  "line": 103,
+  "quote": "os.path.join(os.path.realpath(tempfile.gettempdir()), \"torchinductor_\"),"
+ },
+ {
+  "id": "vllm_misc.default.assets",
+  "claim": "VLLM_ASSETS_CACHE defaults from XDG, not from VLLM_CACHE_ROOT",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 963,
+  "quote": "os.path.join(get_default_cache_root(), \"vllm\", \"assets\"),"
+ },
+ {
+  "id": "vllm_misc.write.assets_mkdir",
+  "claim": "Assets cache is created only when example assets are fetched",
+  "path": "vendor/vllm-v0.32.0/vllm/assets/base.py",
+  "line": 16,
+  "quote": "path.mkdir(parents=True, exist_ok=True)"
+ },
+ {
+  "id": "vllm_misc.env.outlines_optin",
+  "claim": "Outlines disk cache is opt-in",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1612,
+  "quote": "os.environ.get(\"VLLM_V1_USE_OUTLINES_CACHE\", \"0\") == \"1\""
+ },
+ {
+  "id": "vllm_misc.env.outlines_dir",
+  "claim": "Outlines cache dir from OUTLINES_CACHE_DIR",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/structured_output/utils.py",
+  "line": 211,
+  "quote": "outlines_cache_dir = os.getenv(\"OUTLINES_CACHE_DIR\")"
+ },
+ {
+  "id": "vllm_misc.default.outlines_xdg",
+  "claim": "else $XDG_CACHE_HOME/.cache/outlines (extra .cache)",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/structured_output/utils.py",
+  "line": 219,
+  "quote": "return os.path.join(xdg_cache_home, \".cache\", \"outlines\")"
+ },
+ {
+  "id": "vllm_misc.env.nccl_optin",
+  "claim": "NCCL symmetric-memory allocator is opt-in",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2100,
+  "quote": "int(os.getenv(\"VLLM_USE_NCCL_SYMM_MEM\", \"0\"))"
+ },
+ {
+  "id": "vllm_misc.default.nccl_tmp",
+  "claim": "and is JIT-built into the system temp dir",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/pynccl_allocator.py",
+  "line": 75,
+  "quote": "out_dir = tempfile.gettempdir()"
+ },
+ {
+  "id": "vllm_misc.write.nccl_build_dir",
+  "claim": "as the cpp_extension load_inline build directory",
+  "path": "vendor/vllm-v0.32.0/vllm/distributed/device_communicators/pynccl_allocator.py",
+  "line": 89,
+  "quote": "build_directory=out_dir,"
+ },
+ {
+  "id": "vllm_misc.engine.numba_inkling",
+  "claim": "numba on-disk caching is used in the Inkling processor",
+  "path": "vendor/vllm-v0.32.0/vllm/transformers_utils/processors/inkling.py",
+  "line": 123,
+  "quote": "@njit(cache=True)"
+ },
+ {
+  "id": "vllm_misc.engine.numba_kimi",
+  "claim": "and the Kimi-K2.5 vision processor",
+  "path": "vendor/vllm-v0.32.0/vllm/transformers_utils/processors/kimi_k25_vision_fused.py",
+  "line": 26,
+  "quote": "@njit(parallel=True, cache=True)"
+ },
+ {
+  "id": "vllm_misc.engine.numba_pin",
+  "claim": "requirements pin numba 0.65.0",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 4,
+  "quote": "numba == 0.65.0 # Required for N-gram speculative decoding"
+ },
+ {
+  "id": "vllm_misc.read.tuned_folder",
+  "claim": "VLLM_TUNED_CONFIG_FOLDER is only read",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/layers/fused_moe/fused_moe.py",
+  "line": 1135,
+  "quote": "user_defined_config_folder = envs.VLLM_TUNED_CONFIG_FOLDER"
+ },
+ {
+  "id": "vllm_misc.engine.rocm_triton",
+  "claim": "ROCm segmented attention setdefaults TRITON_CACHE_DIR under VLLM_CACHE_ROOT",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/attention/backends/rocm_segmented_attn.py",
+  "line": 207,
+  "quote": "str(Path(envs.VLLM_CACHE_ROOT) / \"rocm_segmented_attention\" / \"triton\"),"
+ },
+ {
+  "id": "vllm_root.key.symm_mem_set",
+  "claim": "The platform's vllm_base env sets VLLM_ALLREDUCE_USE_SYMM_MEM, a hashed compile factor",
+  "path": "vendor/model-launch/src/swiss_ai_model_launch/assets/envs/vllm_base.toml",
+  "line": 31,
+  "quote": "VLLM_ALLREDUCE_USE_SYMM_MEM = \"0\""
+ },
+ {
+  "id": "vllm_inductor.engine.triton_knob",
+  "claim": "Triton's cache dir knob is TRITON_CACHE_DIR",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 347,
+  "quote": "env_str_callable_default(\"TRITON_CACHE_DIR\","
+ },
+ {
+  "id": "vllm_inductor.engine.triton_reads_env",
+  "claim": "Triton reads the env var at each access, so a later process-wide export applies to later compiles",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 118,
+  "quote": "env_val = getenv(self.key)"
+ }
+]

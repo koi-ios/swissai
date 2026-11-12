@@ -1,0 +1,11 @@
+{
+ "sglang_py_files": 3356,
+ "sglang_py_MB": 50.3,
+ "srt_files": 1865,
+ "srt_MB": 30.8,
+ "compile_all_srt_s_median_of_3": 1.96,
+ "min": 1.86,
+ "max": 1.99,
+ "MBps": 15.7,
+ "machine": "macOS arm64 (M-series), CPython 3.12, single thread"
+}

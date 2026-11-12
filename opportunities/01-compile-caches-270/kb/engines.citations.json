@@ -1,0 +1,366 @@
+[
+ {
+  "id": "sglang.engine.redirect_call",
+  "claim": "import sglang calls redirect_third_party_caches() before torch/FlashInfer import",
+  "path": "vendor/sglang-v0.5.20/python/sglang/__init__.py",
+  "line": 14,
+  "quote": "_redirect_third_party_caches()"
+ },
+ {
+  "id": "sglang.engine.redirect_triton",
+  "claim": "SGLang setdefaults TRITON_CACHE_DIR to $SGLANG_CACHE_DIR/triton",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1926,
+  "quote": "\"TRITON_CACHE_DIR\": os.path.join(base, \"triton\"),"
+ },
+ {
+  "id": "sglang.engine.redirect_inductor",
+  "claim": "SGLang setdefaults TORCHINDUCTOR_CACHE_DIR to $SGLANG_CACHE_DIR/inductor",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1927,
+  "quote": "\"TORCHINDUCTOR_CACHE_DIR\": os.path.join(base, \"inductor\"),"
+ },
+ {
+  "id": "sglang.engine.redirect_nv",
+  "claim": "SGLang setdefaults CUDA_CACHE_PATH to $SGLANG_CACHE_DIR/nv",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1928,
+  "quote": "\"CUDA_CACHE_PATH\": os.path.join(base, \"nv\"),"
+ },
+ {
+  "id": "sglang.engine.redirect_flashinfer",
+  "claim": "SGLang setdefaults FLASHINFER_WORKSPACE_BASE to $SGLANG_CACHE_DIR",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1931,
+  "quote": "\"FLASHINFER_WORKSPACE_BASE\": base,"
+ },
+ {
+  "id": "sglang.engine.redirect_setdefault",
+  "claim": "the redirect uses os.environ.setdefault (explicit values win)",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1947,
+  "quote": "os.environ.setdefault(key, value)"
+ },
+ {
+  "id": "sglang.default.cache_root_env",
+  "claim": "SGLANG_CACHE_DIR defaults to ~/.cache/sglang (not XDG)",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1164,
+  "quote": "SGLANG_CACHE_DIR = EnvStr(os.path.expanduser(\"~/.cache/sglang\"))"
+ },
+ {
+  "id": "sglang.env.jit_cache_dir",
+  "claim": "SGLANG_JIT_CACHE_DIR is its own variable, unset by default",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1171,
+  "quote": "SGLANG_JIT_CACHE_DIR = EnvStr(None)"
+ },
+ {
+  "id": "sglang.default.jit_cache_dir",
+  "claim": "unset SGLANG_JIT_CACHE_DIR resolves to ~/.cache/sglang/jit, not under SGLANG_CACHE_DIR",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/utils/compile/cache.py",
+  "line": 302,
+  "quote": "configured = envs.SGLANG_JIT_CACHE_DIR.get() or \"~/.cache/sglang/jit\""
+ },
+ {
+  "id": "sglang.env.cute_aot",
+  "claim": "SGLANG_CUTE_AOT_CACHE_DIR defaults to $SGLANG_CACHE_DIR/cute_aot",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1168,
+  "quote": "SGLANG_CUTE_AOT_CACHE_DIR = EnvStr(lambda: _default_cache_subdir(\"cute_aot\"))"
+ },
+ {
+  "id": "sglang.env.dg_cache",
+  "claim": "SGLANG_DG_CACHE_DIR defaults to $SGLANG_CACHE_DIR/deep_gemm",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1154,
+  "quote": "SGLANG_DG_CACHE_DIR = EnvStr(lambda: _default_cache_subdir(\"deep_gemm\"))"
+ },
+ {
+  "id": "sglang.engine.dg_env_set",
+  "claim": "SGLang sets DG_JIT_CACHE_DIR from SGLANG_DG_CACHE_DIR at import",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+  "line": 46,
+  "quote": "os.environ[\"DG_JIT_CACHE_DIR\"] = envs.SGLANG_DG_CACHE_DIR.get()"
+ },
+ {
+  "id": "sglang.engine.legacy_dirs_log",
+  "claim": "SGLang 0.5.20 logs that ~/.triton, ~/.cache/flashinfer, ~/.cache/deep_gemm are no longer used",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/entrypoints/engine.py",
+  "line": 1792,
+  "quote": "\"Compiled-kernel caches now live under SGLANG_CACHE_DIR (%s). These \""
+ },
+ {
+  "id": "sglang.key.anchor_normalize",
+  "claim": "SGLang JIT build keys replace known roots with anchor tokens (relocatable keys)",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/utils/compile/cache.py",
+  "line": 297,
+  "quote": "text = text.replace(str(root), f\"<{token}>\")"
+ },
+ {
+  "id": "vllm.default.cache_root",
+  "claim": "VLLM_CACHE_ROOT defaults to $XDG_CACHE_HOME/vllm or ~/.cache/vllm",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 715,
+  "quote": "os.path.join(get_default_cache_root(), \"vllm\"),"
+ },
+ {
+  "id": "vllm.default.xdg",
+  "claim": "vLLM's default cache root follows XDG_CACHE_HOME",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 340,
+  "quote": "\"XDG_CACHE_HOME\","
+ },
+ {
+  "id": "vllm.engine.inductor_forced",
+  "claim": "vLLM sets TORCHINDUCTOR_CACHE_DIR under its per-hash compile dir (overrides the caller)",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 467,
+  "quote": "os.environ[\"TORCHINDUCTOR_CACHE_DIR\"] = inductor_cache"
+ },
+ {
+  "id": "vllm.engine.triton_unless_set",
+  "claim": "vLLM puts Triton under the per-hash dir only when the caller did not set TRITON_CACHE_DIR",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 471,
+  "quote": "if triton_cache is None or triton_cache == _last_inductor_triton_cache_dir:"
+ },
+ {
+  "id": "vllm.engine.triton_set",
+  "claim": "vLLM exports TRITON_CACHE_DIR process-wide after compile init",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/compiler_interface.py",
+  "line": 475,
+  "quote": "os.environ[\"TRITON_CACHE_DIR\"] = triton_cache"
+ },
+ {
+  "id": "vllm.key.compile_factors",
+  "claim": "vLLM compile dir hash = env, config, traced-code and compiler hashes",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1070,
+  "quote": "factors = [env_hash, config_hash, code_hash, compiler_hash]"
+ },
+ {
+  "id": "vllm.layout.compile_dir",
+  "claim": "compile cache dir is VLLM_CACHE_ROOT/torch_compile_cache/<hash>",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1075,
+  "quote": "envs.VLLM_CACHE_ROOT, \"torch_compile_cache\", hash_key"
+ },
+ {
+  "id": "vllm.layout.rank_dir",
+  "claim": "per-rank subdir rank_<rank>_<dp_rank>/<prefix>",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/backends.py",
+  "line": 1084,
+  "quote": "local_cache_dir = os.path.join(cache_dir, f\"rank_{rank}_{dp_rank}\", self.prefix)"
+ },
+ {
+  "id": "vllm.layout.aot_dir",
+  "claim": "AOT compile artifacts under torch_compile_cache/torch_aot_compile/<sha256>",
+  "path": "vendor/vllm-v0.32.0/vllm/compilation/decorators.py",
+  "line": 568,
+  "quote": "\"torch_aot_compile\","
+ },
+ {
+  "id": "vllm.default.aot_on",
+  "claim": "AOT compile is on by default for torch >= 2.10",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 382,
+  "quote": "if is_torch_equal_or_newer(\"2.10.0\") and not disable_compile_cache()"
+ },
+ {
+  "id": "vllm.key.model_path_in_hash",
+  "claim": "ModelConfig.compute_hash ignores served_model_name but not the model path",
+  "path": "vendor/vllm-v0.32.0/vllm/config/model.py",
+  "line": 481,
+  "quote": "\"served_model_name\","
+ },
+ {
+  "id": "vllm.key.all_fields",
+  "claim": "get_hash_factors hashes every dataclass field not explicitly ignored",
+  "path": "vendor/vllm-v0.32.0/vllm/config/utils.py",
+  "line": 384,
+  "quote": "if factor in ignored_factors:"
+ },
+ {
+  "id": "vllm.key.model_field",
+  "claim": "ModelConfig has a `model` (name or path) field",
+  "path": "vendor/vllm-v0.32.0/vllm/config/model.py",
+  "line": 154,
+  "quote": "model: str = \"Qwen/Qwen3-0.6B\""
+ },
+ {
+  "id": "vllm.key.cache_root_ignored",
+  "claim": "VLLM_CACHE_ROOT itself is excluded from the compile hash",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2364,
+  "quote": "\"VLLM_CACHE_ROOT\","
+ },
+ {
+  "id": "vllm.engine.dg_env_name",
+  "claim": "vLLM uses DG_JIT_CACHE_DIR for DeepGEMM",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 279,
+  "quote": "DEEP_GEMM_JIT_CACHE_ENV_NAME = \"DG_JIT_CACHE_DIR\""
+ },
+ {
+  "id": "vllm.engine.dg_default",
+  "claim": "vLLM defaults DG_JIT_CACHE_DIR to VLLM_CACHE_ROOT/deep_gemm when unset",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 282,
+  "quote": "envs.VLLM_CACHE_ROOT, \"deep_gemm\""
+ },
+ {
+  "id": "vllm.engine.dg_vendored",
+  "claim": "vLLM falls back to its vendored vllm.third_party.deep_gemm",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 205,
+  "quote": "module = importlib.import_module(\"vllm.third_party.deep_gemm\")"
+ },
+ {
+  "id": "vllm.write.binary_safe",
+  "claim": "binary compile-cache format is documented as multi-process safe",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2143,
+  "quote": "#     Safe for multiple vllm serve processes accessing the same torch compile cache."
+ },
+ {
+  "id": "vllm.write.unpacked_unsafe",
+  "claim": "unpacked format is documented as not multi-process safe",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 2145,
+  "quote": "#     NOT multiprocess safe - race conditions may occur with multiple processes."
+ },
+ {
+  "id": "vllm.env.startup_plan",
+  "claim": "VLLM_ENABLE_STARTUP_PLAN persists memory profiling under VLLM_CACHE_ROOT/startup_plan",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1990,
+  "quote": "# and the free-memory baseline) under VLLM_CACHE_ROOT/startup_plan/,"
+ },
+ {
+  "id": "vllm.env.flashinfer_autotune",
+  "claim": "VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR overrides the FlashInfer autotune cache dir",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 1809,
+  "quote": "\"VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR\": lambda: os.getenv("
+ },
+ {
+  "id": "vllm.engine.inductor_threads",
+  "claim": "import vllm forces TORCHINDUCTOR_COMPILE_THREADS=1 (serial Inductor compile)",
+  "path": "vendor/vllm-v0.32.0/vllm/env_override.py",
+  "line": 168,
+  "quote": "os.environ[\"TORCHINDUCTOR_COMPILE_THREADS\"] = \"1\""
+ },
+ {
+  "id": "vllm.engine.triton_autotune_cache",
+  "claim": "import vllm setdefaults TRITON_CACHE_AUTOTUNING=1 (autotune results go to TRITON_CACHE_DIR)",
+  "path": "vendor/vllm-v0.32.0/vllm/env_override.py",
+  "line": 176,
+  "quote": "os.environ.setdefault(\"TRITON_CACHE_AUTOTUNING\", \"1\")"
+ },
+ {
+  "id": "vllm.engine.tilelang_tmp",
+  "claim": "import vllm setdefaults TILELANG_CLEANUP_TEMP_FILES=1 (avoids a world-shared /tmp dir)",
+  "path": "vendor/vllm-v0.32.0/vllm/env_override.py",
+  "line": 183,
+  "quote": "os.environ.setdefault(\"TILELANG_CLEANUP_TEMP_FILES\", \"1\")"
+ },
+ {
+  "id": "triton.reloc.group_abs",
+  "claim": "Triton group files keep a child only if its stored (absolute) path exists",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 90,
+  "quote": "if os.path.exists(p):"
+ },
+ {
+  "id": "triton.write.tmpdir",
+  "claim": "Triton put() writes into a tmp.pid_<pid>_<uuid4> dir inside the cache dir",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 115,
+  "quote": "temp_dir = os.path.join(self.cache_dir, f\"tmp.pid_{pid}_{rnd_id}\")"
+ },
+ {
+  "id": "triton.write.replace",
+  "claim": "Triton publishes each file with os.replace (atomic), no lock",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 124,
+  "quote": "os.replace(temp_path, filepath)"
+ },
+ {
+  "id": "inductor.env.cache_dir_var",
+  "claim": "TORCHINDUCTOR_CACHE_DIR relocates the Inductor cache",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 15,
+  "quote": "cache_dir = os.environ.get(\"TORCHINDUCTOR_CACHE_DIR\")"
+ },
+ {
+  "id": "inductor.engine.setdefault",
+  "claim": "the first cache_dir() call pins TORCHINDUCTOR_CACHE_DIR in os.environ",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 19,
+  "quote": "os.environ[\"TORCHINDUCTOR_CACHE_DIR\"] = cache_dir"
+ },
+ {
+  "id": "inductor.default.tmp",
+  "claim": "default is <tempfile.gettempdir()>/torchinductor_<user>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 33,
+  "quote": "\"torchinductor_\" + sanitized_username,"
+ },
+ {
+  "id": "inductor.pch.default_dir",
+  "claim": "precompiled headers deliberately use default_cache_dir(), ignoring TORCHINDUCTOR_CACHE_DIR",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3542,
+  "quote": "_HEADER_DIR = os.path.join(default_cache_dir(), \"precompiled_headers\")"
+ },
+ {
+  "id": "inductor.lock.dir",
+  "claim": "Inductor takes lock files under <cache>/locks (a read-only cache fails with EACCES)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 423,
+  "quote": "lock_dir = os.path.join(cache_dir(), \"locks\")"
+ },
+ {
+  "id": "inductor.write.tmpname",
+  "claim": "write_atomic temp name is .<pid>.<thread id>.tmp in the target dir (can collide across nodes)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 538,
+  "quote": "tmp_path = path.parent / f\".{os.getpid()}.{threading.get_ident()}.tmp\""
+ },
+ {
+  "id": "inductor.write.rename",
+  "claim": "write_atomic publishes with rename",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 543,
+  "quote": "tmp_path.rename(target=path)"
+ },
+ {
+  "id": "torch.macos.brew",
+  "claim": "on macOS Inductor's OpenMP probe runs `brew --prefix libomp` (local tests only)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/cpp_builder.py",
+  "line": 1410,
+  "quote": "subprocess.check_output([\"brew\", \"--prefix\", \"libomp\"])"
+ },
+ {
+  "id": "ml.env.no_cache_vars",
+  "claim": "sglang_base sets SGL_ENABLE_JIT_DEEPGEMM=0 and no cache variable",
+  "path": "vendor/model-launch/src/swiss_ai_model_launch/assets/envs/sglang_base.toml",
+  "line": 31,
+  "quote": "SGL_ENABLE_JIT_DEEPGEMM = \"0\""
+ },
+ {
+  "id": "ml.launch.arch_placeholder",
+  "claim": "sml resolves {arch} in the env TOML on the batch host with sed",
+  "path": "vendor/model-launch/src/swiss_ai_model_launch/launchers/framework.py",
+  "line": 498,
+  "quote": "sed \"s|{arch}|${SML_ARCH}|g\" \"$SML_ENV_FILE\" > \"$SML_RESOLVED_ENV\""
+ },
+ {
+  "id": "ml.launch.writable",
+  "claim": "rank sruns run with --container-writable",
+  "path": "vendor/model-launch/src/swiss_ai_model_launch/launchers/framework.py",
+  "line": 545,
+  "quote": "\"    --container-writable \\\\\\n\""
+ }
+]

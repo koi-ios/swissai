@@ -1,0 +1,120 @@
+From a8ec9d2bdbc67327e5f7a3a7ee5a575fac3d1d5b Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:35:16 +0100
+Subject: [PATCH 1/2] fix(patches): apply the sglang#35715 backport to sglang
+ >= 0.5.19
+
+sglang v0.5.19 (2d8484740d, #35314) changed the forward_prepare fill-in to
+`if self.attn_mha.kv_b_proj is None and hasattr(self, "kv_b_proj"):`, so the
+backport's anchor matched zero times on 0.5.19-0.5.23 and on main, and
+`apply_all` dropped it with one log line. On the platform's 0.5.20 image an MLA
+model (GLM-5.x, DeepSeek, Kimi-K3) then fails to load from a presharded
+checkpoint again with `KeyError: ...attn_mha.kv_b_proj.weight` (#19).
+
+Accept both spellings of the fill-in; the __init__ anchor is unchanged. Tested
+on the old fixture, a 0.5.19-style fixture, and the real v0.5.20 file when a
+vendored sglang checkout sits next to servekit.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/servekit/_patches/sglang_35715.py | 27 ++++++++++++++++------
+ tests/test_patches.py                 | 33 +++++++++++++++++++++++++++
+ 2 files changed, 53 insertions(+), 7 deletions(-)
+
+diff --git a/src/servekit/_patches/sglang_35715.py b/src/servekit/_patches/sglang_35715.py
+index b324cab..4b1610a 100644
+--- a/src/servekit/_patches/sglang_35715.py
++++ b/src/servekit/_patches/sglang_35715.py
+@@ -18,11 +18,22 @@ NEW_INIT = (
+     "        # as a submodule: a second state_dict name breaks sharded_state round-trips.\n"
+     '        object.__setattr__(self.attn_mha, "kv_b_proj", self.kv_b_proj)\n'
+ )
+-OLD_FORWARD = (
+-    "        if self.attn_mha.kv_b_proj is None:\n"
+-    "            self.attn_mha.kv_b_proj = self.kv_b_proj\n"
+-    "\n"
++# The forward_prepare fill-in, as each sglang spells it. v0.5.19 added the
++# hasattr guard (sglang 2d8484740d, #35314); matching only the older spelling
++# made the patch drop itself on 0.5.19-0.5.23 and left MLA unloadable again.
++OLD_FORWARDS = (
++    (
++        "        if self.attn_mha.kv_b_proj is None:\n"
++        "            self.attn_mha.kv_b_proj = self.kv_b_proj\n"
++        "\n"
++    ),
++    (
++        '        if self.attn_mha.kv_b_proj is None and hasattr(self, "kv_b_proj"):\n'
++        "            self.attn_mha.kv_b_proj = self.kv_b_proj\n"
++        "\n"
++    ),
+ )
++OLD_FORWARD = OLD_FORWARDS[0]  # kept for callers of the old name
+ 
+ 
+ RELATIVE = Path("srt") / "models" / "deepseek_v2.py"
+@@ -111,8 +122,10 @@ def main() -> int:
+     if NEW_INIT in text:
+         print(f"[SERVEKIT] sglang#35715 already applied to {path}", flush=True)
+         return 0
+-    for anchor, what in ((OLD_INIT, "the __init__ assignment"), (OLD_FORWARD, "the forward_prepare fill-in")):
+-        if text.count(anchor) != 1:
++    forwards = [f for f in OLD_FORWARDS if text.count(f) == 1]
++    for ok, what in ((text.count(OLD_INIT) == 1, "the __init__ assignment"),
++                     (len(forwards) == 1, "the forward_prepare fill-in")):
++        if not ok:
+             print(
+                 f"error: {what} is not in {path} exactly once; sglang#35715 does not "
+                 f"fit this build and the checkpoint would silently lose kv_b_proj",
+@@ -120,7 +133,7 @@ def main() -> int:
+             )
+             return 1
+ 
+-    path.write_text(text.replace(OLD_INIT, NEW_INIT, 1).replace(OLD_FORWARD, "", 1))
++    path.write_text(text.replace(OLD_INIT, NEW_INIT, 1).replace(forwards[0], "", 1))
+     print(f"[SERVEKIT] applied sglang#35715 to {path}", flush=True)
+     return 0
+ 
+diff --git a/tests/test_patches.py b/tests/test_patches.py
+index 843f69c..03ce4af 100644
+--- a/tests/test_patches.py
++++ b/tests/test_patches.py
+@@ -156,3 +156,36 @@ def test_a_patch_with_nowhere_to_apply_is_dropped_with_the_reason(tmp_path, sys_
+     err = capsys.readouterr().err
+     assert "[SERVEKIT] dropping sglang_35715" in err
+     assert "no sglang holding" in err
++
++
++# The same two spots as sglang v0.5.20 writes them (deepseek_v2.py:1920 and
++# :2070-2071): v0.5.19 added `and hasattr(self, "kv_b_proj")` to the fill-in.
++SOURCE_0520 = SOURCE.replace(
++    "        if self.attn_mha.kv_b_proj is None:\n",
++    '        if self.attn_mha.kv_b_proj is None and hasattr(self, "kv_b_proj"):\n',
++)
++
++
++def test_patch_applies_to_the_0_5_19_spelling(tmp_path, sys_path):
++    real = _install(tmp_path / "sglang", source=SOURCE_0520)
++    sys_path.insert(0, str(tmp_path))
++
++    assert sglang_35715.main() == 0
++    patched = real.read_text()
++    assert "object.__setattr__(self.attn_mha" in patched
++    assert "self.attn_mha.kv_b_proj = self.kv_b_proj" not in patched
++    assert sglang_35715.main() == 0 and real.read_text() == patched
++
++
++VENDORED = Path(__file__).resolve().parents[2] / "sglang" / "python" / "sglang"
++
++
++@pytest.mark.skipif(not (VENDORED / REAL).is_file(), reason="no vendored sglang checkout next to servekit")
++def test_patch_applies_to_the_real_v0_5_20_file(tmp_path, sys_path):
++    real = _install(tmp_path / "sglang", source=(VENDORED / REAL).read_text())
++    sys_path.insert(0, str(tmp_path))
++    assert sglang_35715.main() == 0
++    text = real.read_text()
++    assert text.count('object.__setattr__(self.attn_mha, "kv_b_proj", self.kv_b_proj)') == 1
++    assert "self.attn_mha.kv_b_proj = self.kv_b_proj" not in text
++    assert "self.attn_mha.kv_b_proj = None" not in text
+-- 
+2.50.1 (Apple Git-155)
+

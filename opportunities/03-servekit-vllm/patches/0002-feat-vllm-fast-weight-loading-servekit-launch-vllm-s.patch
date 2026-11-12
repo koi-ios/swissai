@@ -1,0 +1,2418 @@
+From 6b2236645ed4148951653b01c662b8e8284642fa Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:37:00 +0100
+Subject: [PATCH 2/3] feat: vllm fast weight loading (servekit launch -- vllm
+ serve ...)
+
+The roadmap's "Support vllm fast weight loading": presharding with vLLM's
+own sharded_state, per-node sliced staging into /dev/shm, --overlap, and
+the manifest checks, for `vllm serve MODEL` and `--model MODEL`.
+
+- Command reading: the positional model (it wins over --model, as in vLLM),
+  -tp/-pp, and the multiprocessing backend's --nnodes/--node-rank/
+  --master-addr. vLLM's pipeline files are model-pp-{pp}-tp-{tp}, not
+  SGLang's -rank-, so shard_glob takes the engine.
+- prepare: a vLLM sharder (adapted from vLLM's save_sharded_state example)
+  that takes every `vllm serve` flag, forces eager mode and one data-parallel
+  replica, and skips stale *.index.json. A follower node serves headless
+  until the head writes the manifest; vLLM's save RPC already waits for every
+  worker, so no done-markers are needed.
+- launch: --served-model-name is pinned to the original path, or vLLM would
+  rename the model to /dev/shm/servekit/<name> for every client. Under
+  --overlap, shards are staged into a hidden directory and renamed in when
+  complete, so an engine without the barrier cannot read a half-written file.
+  A headless worker node frees its copy once every local rank recorded its load.
+- A vLLM plugin (vllm.general_plugins, inert unless servekit launched the
+  engine) replaces the class behind `sharded_state` with a subclass that
+  waits on the stage barrier, turns ShardedStateLoader's narrowing and
+  dtype-cast warnings into errors (a TP-mismatched checkpoint otherwise
+  serves wrong weights), and records each rank's load time, since vLLM logs
+  "Model loading took" on local rank 0 only.
+- vllm_guard: quantized checkpoints, MLA, expert parallelism, LoRA and
+  speculative decoding are served on vLLM's own loader, not presharded:
+  ShardedStateLoader reruns process_weights_after_loading on post-processed
+  weights, and MLA registers W_UV/W_UK_T after loading. Ray-placed ranks
+  likewise, since servekit cannot map them to nodes. A manifest from another
+  vLLM minor version is a mismatch.
+- Compile caches: VLLM_CACHE_ROOT and TileLang join the JIT caches in a
+  separate module. They are written back beside the checkpoint after the
+  first launch, because vLLM's cache key includes the served model path.
+  servekit never sets VLLM_PLUGINS, which vLLM hashes into that key.
+
+Tests: tests/test_vllm.py (59) with a fake sharder, a fake engine, the plugin
+against a stand-in vllm package, and one end-to-end --overlap run through a
+mock `vllm serve` subprocess behind the real run_profile. Nothing has run on
+a GPU yet.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pyproject.toml                                |   7 +
+ .../_prepare/save_sharded_state_vllm.py       | 148 ++++
+ src/servekit/_vllm_plugin.py                  | 253 ++++++
+ src/servekit/cli.py                           |   6 +-
+ src/servekit/engine_args.py                   |  71 +-
+ src/servekit/launch.py                        | 292 ++++++-
+ src/servekit/prepare.py                       |  87 +-
+ src/servekit/profile.py                       |  22 +
+ src/servekit/topology.py                      |  24 +-
+ src/servekit/vllm_cache.py                    |  74 ++
+ src/servekit/vllm_guard.py                    | 136 ++++
+ tests/test_launch.py                          |   8 +-
+ tests/test_topology.py                        |   4 +-
+ tests/test_vllm.py                            | 770 ++++++++++++++++++
+ 14 files changed, 1838 insertions(+), 64 deletions(-)
+ create mode 100644 src/servekit/_prepare/save_sharded_state_vllm.py
+ create mode 100644 src/servekit/_vllm_plugin.py
+ create mode 100644 src/servekit/vllm_cache.py
+ create mode 100644 src/servekit/vllm_guard.py
+ create mode 100644 tests/test_vllm.py
+
+diff --git a/pyproject.toml b/pyproject.toml
+index e8a2007..3926990 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,6 +17,13 @@ servekit = "servekit.cli:main"
+ [project.entry-points."sglang.srt.plugins"]
+ servekit_pp = "servekit._shim:install"
+ 
++# vLLM runs these in every process, workers included, before the model loads.
++# It does nothing unless `servekit launch` started the engine
++# (SERVEKIT_VLLM_LOADER=1): then it puts the --overlap barrier, strict loads and
++# per-rank load records in front of `--load-format sharded_state`.
++[project.entry-points."vllm.general_plugins"]
++servekit = "servekit._vllm_plugin:register"
++
+ [build-system]
+ requires = ["setuptools>=61"]
+ build-backend = "setuptools.build_meta"
+diff --git a/src/servekit/_prepare/save_sharded_state_vllm.py b/src/servekit/_prepare/save_sharded_state_vllm.py
+new file mode 100644
+index 0000000..1d156f5
+--- /dev/null
++++ b/src/servekit/_prepare/save_sharded_state_vllm.py
+@@ -0,0 +1,148 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Write a TP/PP-presharded checkpoint for `vllm serve --load-format sharded_state`.
++
++Adapted from vLLM's examples/features/sharded_state/save_sharded_state_offline.py
++(v0.33.0, Apache-2.0, Copyright contributors to the vLLM project). Changes:
++
++- it parses every `vllm serve` flag, not only the engine's, so `prepare` can
++  hand it the serve command it will later launch;
++- it forces what saving does not need: eager mode (no torch.compile, no CUDA
++  graphs), one data-parallel replica (DP replicas would write the same file
++  names at once), and the source checkpoint's own loader;
++- it skips stale `*.index.json` files and subdirectories when copying metadata;
++- it reports what the engine resolved (`--servekit-resolved-out`) for the manifest.
++
++The head node runs this. Every other node of a multi-node layout runs the
++headless worker its serve command describes (`vllm serve ... --headless`), and
++`save_sharded_state` is a collective RPC that returns only once every worker,
++remote ones included, has written its files (vllm/v1/executor/abstract.py:328).
++"""
++from __future__ import annotations
++
++import dataclasses
++import json
++import os
++import shutil
++import sys
++from pathlib import Path
++
++from servekit import vllm_guard
++
++# Saving needs one replica and no compilation; everything else is the serve command's.
++FORCED = {"enforce_eager": True, "load_format": "auto"}
++ONE_REPLICA = (
++    "data_parallel_size", "data_parallel_size_local", "data_parallel_rank",
++    "data_parallel_start_rank", "data_parallel_address", "data_parallel_rpc_port",
++    "data_parallel_hybrid_lb", "data_parallel_external_lb", "api_server_count",
++)
++
++
++def _parser():
++    try:
++        from vllm.utils.argparse_utils import FlexibleArgumentParser
++    except ImportError:  # vLLM < 0.11
++        from vllm.utils import FlexibleArgumentParser
++    parser = FlexibleArgumentParser()
++    make_arg_parser = None
++    for module in ("vllm.entrypoints.common.cli_args", "vllm.entrypoints.openai.cli_args"):
++        try:
++            make_arg_parser = __import__(module, fromlist=["make_arg_parser"]).make_arg_parser
++            break
++        except (ImportError, AttributeError):
++            continue
++    if make_arg_parser is not None:
++        parser = make_arg_parser(parser)
++    else:
++        from vllm import EngineArgs
++
++        EngineArgs.add_cli_args(parser)
++    parser.add_argument("--output", "-o", required=True, type=str, help="path to output checkpoint")
++    parser.add_argument("--file-pattern", type=str, default=None, help="saved file names")
++    parser.add_argument("--max-file-size", type=int, default=5 * 1024**3,
++                        help="max size (in bytes) of each safetensors file")
++    parser.add_argument("--servekit-resolved-out", type=str, default=None)
++    return parser
++
++
++def _defaults(cls) -> dict:
++    out = {}
++    for f in dataclasses.fields(cls):
++        if f.default is not dataclasses.MISSING:
++            out[f.name] = f.default
++        elif f.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
++            out[f.name] = f.default_factory()  # type: ignore[misc]
++    return out
++
++
++def resolved(llm, engine_args) -> dict:
++    """What the engine decided: --dtype auto becomes the checkpoint's dtype."""
++    import vllm
++
++    model_config = getattr(llm.llm_engine, "model_config", None)
++    dtype = getattr(model_config, "dtype", None) if model_config is not None else None
++    quantization = getattr(model_config, "quantization", None) if model_config is not None else None
++    return {
++        "engine": "vllm",
++        "engine_version": getattr(vllm, "__version__", "unknown"),
++        "tp_size": engine_args.tensor_parallel_size,
++        "pp_size": engine_args.pipeline_parallel_size,
++        "dp_size": 1,
++        "dtype": str(dtype).replace("torch.", "") if dtype is not None else str(engine_args.dtype),
++        "quantization": quantization if quantization is not None else engine_args.quantization,
++    }
++
++
++def main(argv=None) -> int:
++    args = _parser().parse_args(argv)
++    from vllm import LLM, EngineArgs
++
++    if getattr(args, "model_tag", None):
++        args.model = args.model_tag
++    engine_args = EngineArgs.from_cli_args(args)
++    model_path = engine_args.model
++    if not Path(model_path).is_dir():
++        raise ValueError("model path must be a local directory")
++
++    # Before the engine, so an unsupported checkpoint costs a second rather than
++    # a full load followed by a dump nobody can trust.
++    unsupported = vllm_guard.check_command(Path(model_path), sys.argv[1:] if argv is None else argv)
++    if unsupported:
++        print(vllm_guard.explain(unsupported, model_path).replace("serving it", "not presharding it"),
++              file=sys.stderr)
++        return 2
++
++    defaults = _defaults(EngineArgs)
++    for name in ONE_REPLICA:
++        if hasattr(engine_args, name) and name in defaults:
++            setattr(engine_args, name, defaults[name])
++    for name, value in FORCED.items():
++        setattr(engine_args, name, value)
++
++    out = Path(args.output)
++    out.mkdir(parents=True, exist_ok=True)
++    llm = LLM.from_engine_args(engine_args)
++    llm.llm_engine.engine_core.save_sharded_state(
++        path=str(out), pattern=args.file_pattern, max_size=args.max_file_size
++    )
++
++    for file in sorted(os.listdir(model_path)):
++        src = os.path.join(model_path, file)
++        if os.path.isdir(src):
++            print(f"  skipping directory {file}/")
++            continue
++        if os.path.splitext(file)[1] in (".bin", ".pt", ".pth", ".safetensors"):
++            continue
++        if file.endswith(".index.json"):
++            print(f"  skipping stale weight index {file}")
++            continue
++        shutil.copy(src, os.path.join(out, file))
++
++    if args.servekit_resolved_out:
++        with open(args.servekit_resolved_out, "w") as f:
++            json.dump(resolved(llm, engine_args), f)
++    print(f"saved sharded checkpoint to {out}", flush=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/src/servekit/_vllm_plugin.py b/src/servekit/_vllm_plugin.py
+new file mode 100644
+index 0000000..b637341
+--- /dev/null
++++ b/src/servekit/_vllm_plugin.py
+@@ -0,0 +1,253 @@
++"""vLLM plugin: the --overlap stage barrier, strict loads, and per-rank load
++records for `--load-format sharded_state`.
++
++vLLM spawns its workers as fresh interpreters, so a patch made in servekit's
++process never reaches the code that reads the weights; the same reason
++servekit's SGLang half is a plugin (servekit._shim). vLLM runs every
++`vllm.general_plugins` entry point in every process, workers included, before
++the model loads (vllm/v1/worker/worker_base.py:287-289), and lets a plugin
++replace the class behind a load format (register_model_loader,
++vllm/model_executor/model_loader/__init__.py:69-120). So this needs no fork.
++
++The class keeps the name `sharded_state` on purpose: vLLM special-cases that
++name (it does not untie word embeddings for it, vllm/config/vllm.py:1612-1620),
++and a new name would lose that.
++
++Over vLLM's own ShardedStateLoader it adds three things, all in load_weights:
++
++1. the stage barrier: block until servekit's stage into the model directory
++   has published done (servekit._shim's marker protocol; no marker, no wait),
++   right before the read, so model construction still overlaps the stage;
++2. strictness: ShardedStateLoader narrows a tensor that is smaller than its
++   parameter and casts one of another dtype, with only a warning
++   (sharded_state_loader.py:224-244). A checkpoint presharded for TP=4 and
++   loaded at TP=2 does exactly that, and serves. Those warnings become errors;
++3. a record per rank: vLLM logs "Model loading took" on local rank 0 only
++   (info_once, scope "local"), so the slowest rank is invisible, and a
++   headless node never says it is done reading. Each rank writes its own load
++   time next to the staged copy; servekit reports the max and frees a node's
++   copy only once every local rank has read it.
++
++None of it happens unless servekit started the engine: launch sets
++SERVEKIT_VLLM_LOADER=1, which vLLM does not hash into its compile cache key
++(only its own variables are hashed). VLLM_PLUGINS is hashed, so servekit
++never sets that.
++
++vLLM imports stay inside function bodies: servekit imports this module to read
++markers, and must not pull vLLM into its own process.
++"""
++from __future__ import annotations
++
++import json
++import logging
++import os
++import sys
++import time
++from typing import Dict, Iterable, List, Optional, Tuple
++
++from . import _shim
++
++ENV_FLAG = "SERVEKIT_VLLM_LOADER"
++STRICT_ENV = "SERVEKIT_VLLM_STRICT"
++STAGE_TIMEOUT_ENV = "SERVEKIT_STAGE_TIMEOUT"
++ENTRY_POINT_GROUP = "vllm.general_plugins"
++ENTRY_POINT_NAME = "servekit"
++LOAD_FORMAT = "sharded_state"
++
++# The two things ShardedStateLoader logs and then does anyway.
++_SILENT_TEMPLATES = ("loading tensor of shape", "Attempted to load weight")
++
++
++# --- per-rank load records ---------------------------------------------------
++
++def loaded_dir(dest: str) -> str:
++    p = os.path.normpath(dest)
++    return os.path.join(os.path.dirname(p), f".{os.path.basename(p)}.loaded")
++
++
++def rank_key(pp_rank: int, tp_rank: int) -> str:
++    return f"pp{pp_rank}-tp{tp_rank}"
++
++
++def record_loaded(dest: str, key: str, info: dict) -> None:
++    """Atomically write one rank's record; a reader never sees half of one."""
++    d = loaded_dir(dest)
++    os.makedirs(d, exist_ok=True)
++    final = os.path.join(d, f"{key}.json")
++    tmp = f"{final}.{os.getpid()}.tmp"
++    with open(tmp, "w") as f:
++        json.dump(info, f)
++    os.replace(tmp, final)
++
++
++def read_loaded(dest: str) -> Dict[str, dict]:
++    d = loaded_dir(dest)
++    out: Dict[str, dict] = {}
++    try:
++        names = os.listdir(d)
++    except FileNotFoundError:
++        return out
++    for name in names:
++        if not name.endswith(".json"):
++            continue
++        try:
++            with open(os.path.join(d, name)) as f:
++                out[name[: -len(".json")]] = json.load(f)
++        except (OSError, json.JSONDecodeError):
++            continue
++    return out
++
++
++def wait_for_loaded(
++    dest: str, keys: Iterable[str], timeout_s: float = 1800, poll_s: float = 0.2
++) -> Dict[str, dict]:
++    """Block until every rank in `keys` has recorded its load; return the records."""
++    want = list(keys)
++    deadline = time.monotonic() + timeout_s
++    while True:
++        seen = read_loaded(dest)
++        pending = [k for k in want if k not in seen]
++        if not pending:
++            return {k: seen[k] for k in want}
++        if time.monotonic() > deadline:
++            raise TimeoutError(
++                f"timed out after {timeout_s}s waiting for {len(pending)} rank(s) to finish "
++                f"reading {dest}: {', '.join(pending)}"
++            )
++        time.sleep(poll_s)
++
++
++def clear_loaded(dest: str) -> None:
++    d = loaded_dir(dest)
++    try:
++        names = os.listdir(d)
++    except FileNotFoundError:
++        return
++    for name in names:
++        try:
++            os.unlink(os.path.join(d, name))
++        except FileNotFoundError:
++            pass
++    try:
++        os.rmdir(d)
++    except OSError:
++        pass
++
++
++# --- the loader ----------------------------------------------------------------
++
++class _Collector(logging.Handler):
++    """Keeps the narrowing and dtype-cast warnings a load emits."""
++
++    def __init__(self) -> None:
++        super().__init__(level=logging.WARNING)
++        self.messages: List[str] = []
++
++    def emit(self, record: logging.LogRecord) -> None:
++        if isinstance(record.msg, str) and record.msg.startswith(_SILENT_TEMPLATES):
++            try:
++                self.messages.append(record.getMessage())
++            except Exception:  # noqa: BLE001 - a bad format string is still a hit
++                self.messages.append(str(record.msg))
++
++
++def _strict() -> bool:
++    return os.environ.get(STRICT_ENV, "1") != "0"
++
++
++def _ranks() -> Tuple[int, int, int]:
++    """(global rank, tp rank, pp rank) of this worker; zeros outside a process group."""
++    try:
++        from vllm.distributed import get_pp_group, get_tensor_model_parallel_rank
++
++        tp_rank = get_tensor_model_parallel_rank()
++        pp_rank = get_pp_group().rank_in_group
++    except Exception:  # noqa: BLE001 - single process, or an older vLLM
++        tp_rank = pp_rank = 0
++    try:
++        import torch.distributed as dist
++
++        rank = dist.get_rank() if dist.is_initialized() else 0
++    except Exception:  # noqa: BLE001
++        rank = 0
++    return rank, tp_rank, pp_rank
++
++
++def make_loader(base: type) -> type:
++    """A subclass of vLLM's ShardedStateLoader with the barrier, strictness and records."""
++
++    class ServekitShardedStateLoader(base):  # type: ignore[misc, valid-type]
++        def load_weights(self, model, model_config) -> None:
++            dest = getattr(model_config, "model_weights", None) or model_config.model
++            t_wait = time.monotonic()
++            _shim.wait_for_stage(dest, timeout_s=float(os.environ.get(STAGE_TIMEOUT_ENV, 1800)))
++            waited = time.monotonic() - t_wait
++
++            collector = _Collector()
++            logger = logging.getLogger(base.__module__)
++            logger.addHandler(collector)
++            t0 = time.monotonic()
++            try:
++                super().load_weights(model, model_config)
++            finally:
++                logger.removeHandler(collector)
++            seconds = time.monotonic() - t0
++
++            if collector.messages and _strict():
++                shown = "; ".join(collector.messages[:3])
++                more = f" (+{len(collector.messages) - 3} more)" if len(collector.messages) > 3 else ""
++                raise ValueError(
++                    f"[SERVEKIT] refusing to serve {dest}: vLLM narrowed or cast "
++                    f"{len(collector.messages)} tensor(s) while loading it, which means the "
++                    f"checkpoint was presharded for different settings: {shown}{more}. "
++                    f"Re-prepare it, or set {STRICT_ENV}=0 to load anyway."
++                )
++
++            rank, tp_rank, pp_rank = _ranks()
++            record_loaded(dest, rank_key(pp_rank, tp_rank), {
++                "rank": rank, "tp_rank": tp_rank, "pp_rank": pp_rank, "pid": os.getpid(),
++                "load_s": round(seconds, 3), "barrier_wait_s": round(waited, 3),
++            })
++
++    ServekitShardedStateLoader.__qualname__ = ServekitShardedStateLoader.__name__
++    return ServekitShardedStateLoader
++
++
++def register() -> None:
++    """vLLM plugin entry point; runs in every vLLM process, so it must be idempotent."""
++    if os.environ.get(ENV_FLAG) != "1":
++        return
++    try:
++        from vllm.model_executor.model_loader import register_model_loader
++        from vllm.model_executor.model_loader.sharded_state_loader import ShardedStateLoader
++    except Exception as e:  # noqa: BLE001 - a missing piece is a log line, not a crash
++        print(f"[SERVEKIT] not registering the sharded_state barrier: {e}", file=sys.stderr, flush=True)
++        return
++    register_model_loader(LOAD_FORMAT)(make_loader(ShardedStateLoader))
++
++
++# --- for launch: will the plugin be there? -----------------------------------
++
++def plugin_problem(env: Optional[Dict[str, str]] = None) -> Optional[str]:
++    """Why the engine would load without this plugin, or None if it will have it.
++
++    Checks this interpreter's installed entry points, which is the engine's
++    when `vllm` runs from the same environment as servekit, and the allowlist
++    vLLM applies to them (vllm/plugins/__init__.py:56-64).
++    """
++    env = dict(os.environ if env is None else env)
++    try:
++        from importlib.metadata import entry_points
++
++        found = entry_points(group=ENTRY_POINT_GROUP)
++    except Exception as e:  # noqa: BLE001
++        return f"cannot read installed entry points ({e})"
++    if not any(ep.name == ENTRY_POINT_NAME and ep.value.startswith(__name__) for ep in found):
++        return (
++            f"servekit's {ENTRY_POINT_GROUP} entry point is not installed in this environment "
++            f"(reinstall servekit with pip)"
++        )
++    allowed = env.get("VLLM_PLUGINS")
++    if allowed is not None and ENTRY_POINT_NAME not in allowed.split(","):
++        return f"VLLM_PLUGINS={allowed!r} does not allow the {ENTRY_POINT_NAME!r} plugin"
++    return None
+diff --git a/src/servekit/cli.py b/src/servekit/cli.py
+index 1f73c5c..77693a4 100644
+--- a/src/servekit/cli.py
++++ b/src/servekit/cli.py
+@@ -21,7 +21,7 @@ USAGE = """usage:
+   servekit bench --url URL (--into PATH | --out PATH) [--wait-ready SECONDS] [...]
+   servekit verify --url URL (--record PATH | --reference PATH) [--wait-ready SECONDS] [...]
+ 
+-`launch` wraps an engine command. It writes a presharded checkpoint into
++`launch` wraps an engine command (SGLang, or `vllm serve`). It writes a presharded checkpoint into
+ --servekit-artifact-path if there is not one there already, copies it into
+ /dev/shm, starts the engine against the copy, and frees the copy once the server
+ reports ready -- returning the RAM to the running job while it serves. It
+@@ -37,6 +37,8 @@ against it.
+ 
+   servekit launch --servekit-artifact-path /scratch/llama70b-tp4 -- \\
+       python -m sglang.launch_server --model-path /store/llama70b --tensor-parallel-size 4
++  servekit launch --servekit-artifact-path /scratch/llama70b-vllm-tp4 --overlap -- \\
++      vllm serve /store/llama70b --tensor-parallel-size 4
+ 
+ To profile and bench one run, put them side by side and join on the report file:
+ 
+@@ -140,7 +142,7 @@ def _launch(argv: List[str]) -> int:
+     parser.add_argument(
+         "--overlap",
+         action="store_true",
+-        help="start the engine concurrently with the stage; sglang only",
++        help="start the engine concurrently with the stage (sglang and vllm)",
+     )
+     args = parser.parse_args(options)
+ 
+diff --git a/src/servekit/engine_args.py b/src/servekit/engine_args.py
+index 49442fa..1cc6248 100644
+--- a/src/servekit/engine_args.py
++++ b/src/servekit/engine_args.py
+@@ -28,24 +28,65 @@ def _find_flag(command: List[str], flags: List[str]) -> Optional[Tuple[int, str]
+     return None
+ 
+ 
++def _find_positional(command: List[str], subcommand: str) -> Optional[Tuple[int, str]]:
++    """The argument right after `subcommand`, if it is not an option.
++
++    Only a `subcommand` before the first long option counts, so an option value
++    that happens to spell it (`--served-model-name serve`) is not one; single-dash
++    ones before it are the interpreter's (`python -m vllm.entrypoints.cli.main
++    serve`). A model placed after options (`vllm serve -tp 2 /m`) is not found
++    here: telling it from an option's value needs the engine's whole parser.
++    """
++    for i, arg in enumerate(command):
++        if arg.startswith("--"):
++            return None
++        if arg == subcommand:
++            if i + 1 < len(command) and not command[i + 1].startswith("-"):
++                return i + 1, command[i + 1]
++            return None
++    return None
++
++
+ def find_model_path(command: List[str], spec: FrameworkSpec) -> Tuple[int, str]:
+     """Return (index of the argv element holding the path, the path).
+ 
+     For `--model-path=/x` the index is that single element; for
+-    `--model-path /x` it is the value that follows.
++    `--model-path /x` it is the value that follows; for `vllm serve /x` it is
++    the positional.
+     """
+-    if not spec.model_flags:
++    if not spec.model_flags and spec.model_positional_after is None:
+         raise ValueError(
+             f"servekit launch does not know where the model path is in a {spec.name} command yet; "
+             f"use `servekit profile` instead"
+         )
++    if spec.model_positional_after is not None:
++        found = _find_positional(command, spec.model_positional_after)
++        if found is not None:
++            return found
+     found = _find_flag(command, spec.model_flags)
+     if found is None:
+         flags = " / ".join(spec.model_flags)
++        if spec.model_positional_after is not None:
++            flags = f"model after `{spec.model_positional_after}` and no {flags}"
+         raise ValueError(f"no {flags} in the {spec.name} command")
+     return found
+ 
+ 
++def served_name_args(command: List[str], spec: FrameworkSpec) -> List[str]:
++    """What to append so the API keeps answering to the name it would have had.
++
++    vLLM serves under the model argument unless --served-model-name says
++    otherwise, so pointing the command at a staged copy would rename the model
++    to /dev/shm/... for every client and router. Pinning the old name keeps the
++    rewrite invisible.
++    """
++    if spec.name != "vllm":
++        return []
++    if _find_flag(command, ["--served-model-name", "--served_model_name"]) is not None:
++        return []
++    return ["--served-model-name", find_model_path(command, spec)[1]]
++
++
+ def replace_model_path(command: List[str], spec: FrameworkSpec, new_path: str) -> List[str]:
+     """`command` with the model path swapped for `new_path`. Nothing else changes."""
+     idx, old = find_model_path(command, spec)
+@@ -54,11 +95,26 @@ def replace_model_path(command: List[str], spec: FrameworkSpec, new_path: str) -
+     return out
+ 
+ 
+-def check_manifest(command: List[str], spec: FrameworkSpec, manifest: Manifest) -> List[str]:
++def _minor(version: str) -> Optional[Tuple[str, str]]:
++    parts = version.split(".")
++    return (parts[0], parts[1]) if len(parts) >= 2 else None
++
++
++def check_manifest(
++    command: List[str],
++    spec: FrameworkSpec,
++    manifest: Manifest,
++    engine_version: Optional[str] = None,
++) -> List[str]:
+     """Ways `command` cannot load `manifest`'s checkpoint, in plain words.
+ 
+     Empty means go ahead. Parallelism the engine catches late and cryptically;
+     dtype and quantization it does not catch at all.
++
++    `engine_version` is the installed engine's, when the caller knows it. Only
++    vLLM is held to it: its shards are the model's state after
++    process_weights_after_loading, whose layout may change between releases.
++    A patch release is trusted, a minor one is not.
+     """
+     problems = []
+ 
+@@ -93,4 +149,13 @@ def check_manifest(command: List[str], spec: FrameworkSpec, manifest: Manifest)
+         if found[1] != prepared:
+             problems.append(f"{name}: the checkpoint was written as {prepared}, {flag} says {found[1]}")
+ 
++    if spec.name == "vllm" and manifest.engine == "vllm" and engine_version:
++        made, now = _minor(manifest.engine_version), _minor(engine_version)
++        if made is not None and now is not None and made != now:
++            problems.append(
++                f"engine_version: the checkpoint was written by vllm {manifest.engine_version}, "
++                f"this is vllm {engine_version}; its shards are post-processed weights, so "
++                f"re-prepare it with this version"
++            )
++
+     return problems
+diff --git a/src/servekit/launch.py b/src/servekit/launch.py
+index aa87aa5..1d0457a 100644
+--- a/src/servekit/launch.py
++++ b/src/servekit/launch.py
+@@ -17,6 +17,23 @@ Multi-node is the same command on every node, under one srun task per node, with
+ the engine's own `--nnodes / --node-rank / --dist-init-addr` set. Each node
+ stages only the shards its own ranks read, profiles itself, and frees its own
+ copy; the nodes never talk to each other and each writes its own report.
++
++vLLM (`-- vllm serve MODEL ...`) takes the same path with what differs:
++
++- servekit's vLLM plugin (servekit._vllm_plugin) is the barrier; it also
++  refuses a load that narrows or casts tensors, and records each rank's load;
++- the API keeps the model's name: --served-model-name is pinned to the
++  original path unless the command sets one;
++- the stage never writes where the engine looks: under --overlap the shards
++  land in a hidden directory and are renamed into place only when complete, so
++  an engine somehow running without the plugin fails to find them instead of
++  reading half-written ones;
++- a headless worker node prints no ready line and only local rank 0 logs its
++  load, so a node frees its copy once every local rank's load record is in;
++- what vLLM's sharded_state cannot round-trip (vllm_guard), and Ray-placed
++  ranks, which servekit cannot map to nodes, run on vLLM's own loader;
++- compile caches (VLLM_CACHE_ROOT and friends) are written back beside the
++  checkpoint after the first launch, since their key holds the served path.
+ """
+ from __future__ import annotations
+ 
+@@ -29,11 +46,14 @@ from pathlib import Path
+ from typing import List, Optional
+ 
+ from . import _shim
++from . import _vllm_plugin
+ from . import jit_cache
+ from . import manifest as manifest_mod
+ from . import quant_guard
++from . import vllm_cache
++from . import vllm_guard
+ from ._patches import apply_all
+-from .engine_args import check_manifest, find_model_path, replace_model_path
++from .engine_args import _find_flag, check_manifest, find_model_path, replace_model_path, served_name_args
+ from .prepare import prepare
+ from .profile import Phase, ProfileReport, detect_framework, render_table, run_profile, save_json
+ from .stage import DEFAULT_SLICES, stage
+@@ -42,6 +62,13 @@ from .topology import SHARDED_FORMAT, Topology, read_topology, shard_glob, wants
+ DEFAULT_ROOT = Path("/dev/shm/servekit")
+ DEFAULT_CACHE_ROOT = jit_cache.NODE_LOCAL_ROOT
+ 
++# Under --overlap a vLLM stage writes here, inside the staged copy, and renames
++# each file into place when the whole stage is done.
++PARTIAL_DIR = ".servekit-partial"
++# How long a vLLM worker node waits for its ranks' load records before it
++# leaves its staged copy in place.
++LOADED_TIMEOUT_S = 1800.0
++
+ OVERLAP_WARNING = (
+     "[SERVEKIT] --overlap: the engine starts before staging finishes; it blocks at the weight "
+     "read until the stage into this node's copy is done."
+@@ -73,31 +100,121 @@ def _copy_metadata(src: Path, dest: Path) -> int:
+     return len(files)
+ 
+ 
+-def _sharder_args(command: List[str]) -> List[str]:
++def _strip_load_format(args: List[str]) -> List[str]:
++    out: List[str] = []
++    skip = False
++    for arg in args:
++        if skip:
++            skip = False
++        elif arg == "--load-format":
++            skip = True
++        elif not arg.startswith("--load-format="):
++            out.append(arg)
++    return out
++
++
++def _vllm_flags(command: List[str]) -> List[str]:
++    """Everything after `serve MODEL` (or after `-m vllm...`): vLLM's own flags.
++
++    Not "from the first long option", which would drop the short ones vLLM
++    takes before it (`vllm serve /m -tp 4 --max-model-len ...`).
++    """
++    head = []
++    for arg in command:
++        if arg.startswith("--"):
++            break
++        head.append(arg)
++    start = None
++    if "serve" in head:
++        start = head.index("serve") + 1
++    else:
++        for i in range(1, len(head)):
++            if head[i - 1] == "-m" and head[i].startswith("vllm"):
++                start = i + 1
++                break
++    if start is None:
++        return [a for i, a in enumerate(command) if any(c.startswith("--") for c in command[: i + 1])]
++    rest = list(command[start:])
++    if rest and not rest[0].startswith("-"):
++        rest = rest[1:]  # the positional model; the sharder is handed --model itself
++    return rest
++
++
++def _sharder_args(command: List[str], engine: str = "sglang") -> List[str]:
+     """The engine flags from a launch command, as the sharding run should see them.
+ 
+     Everything up to the first long option is the interpreter, which the sharding
+-    run supplies itself. `--load-format` goes because the sharder reads the source
+-    checkpoint, which is not presharded yet.
++    run supplies itself (for vLLM, everything up to `serve MODEL`). `--load-format`
++    goes because the sharder reads the source checkpoint, which is not presharded yet.
+     """
++    if engine == "vllm":
++        return _strip_load_format(_vllm_flags(command))
+     args: List[str] = []
+     for i, arg in enumerate(command):
+         if arg.startswith("--"):
+             args = list(command[i:])
+             break
++    return _strip_load_format(args)
++
++
++def _installed_vllm_version() -> Optional[str]:
++    """This environment's vLLM, read off its metadata (importing it takes seconds)."""
++    try:
++        from importlib.metadata import PackageNotFoundError, version
++    except ImportError:  # pragma: no cover - Python < 3.8
++        return None
++    try:
++        return version("vllm")
++    except PackageNotFoundError:
++        return None
+ 
++
++def _vllm_layout_refusals(command: List[str], topo: Topology) -> List[str]:
++    """Layouts whose ranks servekit cannot place on nodes, so it cannot stage for them."""
+     out: List[str] = []
+-    skip = False
+-    for arg in args:
+-        if skip:
+-            skip = False
+-        elif arg == "--load-format":
+-            skip = True
+-        elif not arg.startswith("--load-format="):
+-            out.append(arg)
++    backend = _find_flag(command, ["--distributed-executor-backend", "--distributed_executor_backend"])
++    if backend is not None and backend[1] == "ray":
++        out.append(
++            "--distributed-executor-backend ray (Ray decides which node runs which rank; "
++            "use the multiprocessing backend's --nnodes/--node-rank/--master-addr to stage per node)"
++        )
++    dp = _find_flag(command, ["--data-parallel-size", "--data_parallel_size", "-dp"])
++    if topo.is_multinode and dp is not None and dp[1] not in ("1",):
++        out.append("--data-parallel-size with --nnodes (servekit stages tensor/pipeline layouts only)")
+     return out
+ 
+ 
++def _promote(partial: Path, dest: Path) -> int:
++    """Rename every file a finished stage wrote under `partial` into `dest`."""
++    moved = 0
++    for f in sorted(partial.iterdir()):
++        if f.is_file():
++            os.replace(f, dest / f.name)
++            moved += 1
++    partial.rmdir()
++    return moved
++
++
++def _local_rank_keys(topo: Topology) -> List[str]:
++    """The (pp, tp) load-record keys of the ranks this node runs."""
++    lo, hi = topo.local_rank_range
++    return [_vllm_plugin.rank_key(r // topo.tp_size, r % topo.tp_size) for r in range(lo, hi + 1)]
++
++
++def _report_loads(dest: Path, keys: List[str]) -> None:
++    records = _vllm_plugin.read_loaded(str(dest))
++    times = [(rec.get("load_s", 0.0), key) for key, rec in records.items() if key in keys]
++    if not times:
++        return
++    slowest, which = max(times)
++    waits = [records[k].get("barrier_wait_s", 0.0) for _, k in times]
++    print(
++        f"[SERVEKIT] weight load per rank: max {slowest:.2f} s ({which}) over {len(times)} of "
++        f"{len(keys)} local rank(s); barrier wait max {max(waits):.2f} s",
++        flush=True,
++    )
++
++
+ def _writable(path: Path) -> bool:
+     """Whether a prepared checkpoint could be written to `path`.
+ 
+@@ -112,17 +229,23 @@ def _writable(path: Path) -> bool:
+     return probe.is_dir() and os.access(probe, os.W_OK | os.X_OK)
+ 
+ 
+-def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact: Path) -> int:
++def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact: Path,
++                      engine: str = "sglang") -> int:
+     print(f"[SERVEKIT] no prepared checkpoint in {artifact}; preparing one now", flush=True)
++    kwargs = {}
++    if engine == "vllm":
++        # A follower node serves headless with its own command, on the source checkpoint.
++        kwargs = {"engine": "vllm", "follower_command": _strip_load_format(list(command))}
+     return prepare(
+         model,
+         artifact,
+         topo.tp_size,
+-        engine_args=_sharder_args(command),
++        engine_args=_sharder_args(command, engine),
+         pp=topo.pp_size,
+         nnodes=topo.nnodes,
+         node_rank=topo.node_rank,
+         dist_init_addr=topo.dist_init_addr,
++        **kwargs,
+     )
+ 
+ 
+@@ -174,12 +297,26 @@ def launch(
+         print(f"error: model path {src} is not a directory", file=sys.stderr)
+         return 2
+ 
++    is_vllm = spec.name == "vllm"
++    # vLLM: what sharded_state cannot round-trip, and layouts servekit cannot
++    # place, run on vLLM's own loader. Asked before preparing, so nothing is
++    # presharded that could never be served.
++    refused: List[str] = []
++    if is_vllm:
++        refused = vllm_guard.check_command(src_path, command) + _vllm_layout_refusals(command, topo)
++        if refused:
++            print(vllm_guard.explain(refused, src), flush=True)
++            if only_prepare:
++                print("error: --only-prepare: nothing servekit can preshard here", file=sys.stderr)
++                return 2
++
+     artifact = Path(artifact)
++    engine_version = _installed_vllm_version() if is_vllm else None
+     prepared = manifest_mod.read(artifact)
+-    problems = check_manifest(command, spec, prepared) if prepared is not None else []
++    problems = check_manifest(command, spec, prepared, engine_version) if prepared is not None else []
+ 
+     unwritable = False
+-    if prepared is None or (only_prepare and problems):
++    if not refused and (prepared is None or (only_prepare and problems)):
+         if not _writable(artifact):
+             unwritable = True
+             print(f"[SERVEKIT] warning: cannot write a prepared checkpoint to {artifact}", flush=True)
+@@ -187,26 +324,27 @@ def launch(
+                 print("error: --only-prepare had nowhere to write", file=sys.stderr)
+                 return 1
+         else:
+-            rc = _prepare_artifact(command, topo, src_path, artifact)
++            rc = _prepare_artifact(command, topo, src_path, artifact, spec.name)
+             if rc != 0:
+                 return rc
+             # A worker returns from prepare before the head has written the
+             # manifest, so an absent one here is the head still gating, not a
+             # failure.
+             prepared = manifest_mod.read(artifact)
+-            problems = check_manifest(command, spec, prepared) if prepared is not None else []
++            problems = check_manifest(command, spec, prepared, engine_version) if prepared is not None else []
+ 
+     if only_prepare:
+         return 0
+ 
+-    plain = unwritable or bool(problems)
++    plain = unwritable or bool(problems) or bool(refused)
+     if plain:
+         if problems:
+             print(f"[SERVEKIT] warning: {artifact} does not match this command:", flush=True)
+             for problem in problems:
+                 print(f"[SERVEKIT]   {problem}", flush=True)
+         print("[SERVEKIT] falling back to the default loader (slower cold start).", flush=True)
+-        print("[SERVEKIT] re-run with --only-prepare to rebuild the artifact for these settings.", flush=True)
++        if not refused:
++            print("[SERVEKIT] re-run with --only-prepare to rebuild the artifact for these settings.", flush=True)
+     else:
+         src_path = artifact
+         src = str(artifact)
+@@ -214,17 +352,30 @@ def launch(
+     # A checkpoint written before this check existed is still unusable, and so
+     # is one whose serve-time flags reach a path the dump did not. Either way it
+     # looks like a healthy server answering from dead weights.
+-    if not plain:
++    if not plain and not is_vllm:
+         unsupported = quant_guard.check_command(src_path, command)
+         if unsupported:
+             print(quant_guard.refusal(unsupported, src), file=sys.stderr)
+             return 2
+ 
++    # vLLM's barrier, strictness and per-rank records live in its plugin. An
++    # engine without it still loads correctly when the stage is serial; it just
++    # cannot wait for an overlapped stage, nor tell a worker node when to free.
++    plugin_problem = _vllm_plugin.plugin_problem() if (is_vllm and not plain) else None
++    if plugin_problem is not None:
++        print(f"[SERVEKIT] warning: the vLLM engine will run without servekit's plugin: {plugin_problem}",
++              flush=True)
++        if overlap:
++            print("[SERVEKIT] staging before launch instead of --overlap", flush=True)
++            overlap = False
++
+     dest = shm_root / src_path.name
+     if plain:
+         engine_command = list(command)
+     else:
+         engine_command = replace_model_path(command, spec, str(dest))
++        # Without this vLLM would serve the model as /dev/shm/servekit/<name>.
++        engine_command += served_name_args(command, spec)
+         if not wants_sharded_state(command):
+             engine_command += ["--load-format", SHARDED_FORMAT]
+     t0 = time.time()
+@@ -238,26 +389,32 @@ def launch(
+     # it: the stager truncates every destination to full size first, so an early
+     # reader would get a zero-filled config. Copy them up front and overlap only
+     # the shards, as experiments/clariden-loading-exp does.
+-    split = overlap and any(src_path.glob("*.safetensors"))
++    # vLLM's API server reads the config before any worker exists, so its
++    # metadata always goes up front, overlapped or not.
++    split = (overlap or is_vllm) and any(src_path.glob("*.safetensors"))
+     if sliced:
+-        pattern = shard_glob(topo)
++        pattern = shard_glob(topo, spec.name)
+     elif split:
+         pattern = "*.safetensors"
+     else:
+         pattern = "*"
+     # Either way the stage skips the non-weight files, which every node needs.
+     replicate_metadata = sliced or split
++    # Overlapped vLLM shards are written out of the engine's sight and renamed
++    # in when whole: an engine without the barrier then fails loudly ("Could not
++    # find checkpoint files") instead of loading a half-written file.
++    stage_dest = dest / PARTIAL_DIR if (is_vllm and overlap) else dest
+ 
+     staged: dict = {}
+ 
+     def do_stage() -> None:
+         try:
+-            staged["result"] = stage(src_path, dest, slices=slices, file_pattern=pattern)
++            staged["result"] = stage(src_path, stage_dest, slices=slices, file_pattern=pattern)
+             # The stager's byte gate passes trivially for a glob that matched
+             # the wrong files, so count them too.
+             if pattern != "*":
+                 want = len(list(src_path.glob(pattern)))
+-                got = len(list(dest.glob(pattern)))
++                got = len(list(stage_dest.glob(pattern)))
+                 if want == 0:
+                     # Otherwise a pattern that fits no filename in this checkpoint
+                     # stages nothing and passes the count below as 0 of 0.
+@@ -268,7 +425,9 @@ def launch(
+                     staged["error"] = RuntimeError(
+                         f"staged {got} of {want} files matching {pattern!r}; refusing to trust {dest}"
+                     )
+-        except RuntimeError as e:
++            if stage_dest != dest and "error" not in staged:
++                _promote(stage_dest, dest)
++        except (RuntimeError, OSError) as e:
+             staged["error"] = e
+         if overlap:
+             _shim.publish_stage(str(dest), str(staged["error"]) if "error" in staged else _shim.STAGE_OK)
+@@ -315,17 +474,61 @@ def launch(
+         # serves anything, and it is a few MB. The copy is what the engine writes
+         # to, so a read-only checkpoint serves and concurrent jobs share nothing.
+         cache_src = src_path / jit_cache.CACHE_DIR_NAME
+-        cache_dest = jit_cache.copy_into(cache_src, jit_cache.node_local(cache_root, src_path.name))
+-        if cache_dest is None:
+-            print(f"[SERVEKIT] no JIT caches in {src}; the engine will JIT from cold", flush=True)
++        if is_vllm:
++            # Always pointed at the node-local root, seeded or not, so whatever
++            # this launch compiles can be kept for the next one.
++            cache_dest = jit_cache.node_local(cache_root, src_path.name)
++            seeded = jit_cache.copy_into(cache_src, cache_dest)
++            cache_env = {**vllm_cache.create(cache_dest), _vllm_plugin.ENV_FLAG: "1"}
++            if seeded is None:
++                print(f"[SERVEKIT] no compile caches in {src} yet; vLLM compiles from cold and "
++                      f"servekit keeps what it writes", flush=True)
++            else:
++                print(f"[SERVEKIT] staged compile and JIT caches from {cache_src}", flush=True)
++            _vllm_plugin.clear_loaded(str(dest))
+         else:
+-            cache_env = jit_cache.env_for(cache_dest)
+-            print(f"[SERVEKIT] staged JIT caches from {cache_src}", flush=True)
++            cache_dest = jit_cache.copy_into(cache_src, jit_cache.node_local(cache_root, src_path.name))
++            if cache_dest is None:
++                print(f"[SERVEKIT] no JIT caches in {src}; the engine will JIT from cold", flush=True)
++            else:
++                cache_env = jit_cache.env_for(cache_dest)
++                print(f"[SERVEKIT] staged JIT caches from {cache_src}", flush=True)
+ 
+     print(f"[SERVEKIT] launching: {' '.join(engine_command)}", flush=True)
+ 
+     emitted = {"done": False}
+     joined = {"done": False}
++    engine_exited = threading.Event()
++    background: List[threading.Thread] = []
++
++    def write_back_caches() -> None:
++        kept = src_path / jit_cache.CACHE_DIR_NAME
++        if not _writable(kept):
++            return
++        added = vllm_cache.write_back(jit_cache.node_local(cache_root, src_path.name), kept)
++        if added:
++            print(f"[SERVEKIT] kept {added} new compile/JIT cache files in {kept}", flush=True)
++
++    def free_when_loaded() -> None:
++        """A vLLM worker node: free once every local rank has read its shards."""
++        keys = _local_rank_keys(topo)
++        deadline = time.monotonic() + LOADED_TIMEOUT_S
++        while not engine_exited.is_set() and time.monotonic() < deadline:
++            seen = _vllm_plugin.read_loaded(str(dest))
++            if all(k in seen for k in keys):
++                _report_loads(dest, keys)
++                freed = free(dest)
++                print(f"[SERVEKIT] freed {freed / 1e9:.1f} GB from {dest}", flush=True)
++                _vllm_plugin.clear_loaded(str(dest))
++                return
++            engine_exited.wait(0.5)
++        print(f"[SERVEKIT] warning: not every local rank recorded its load; {dest} left in place "
++              f"(rm -r {dest})", file=sys.stderr, flush=True)
++
++    def in_background(target) -> None:
++        thread_ = threading.Thread(target=target)
++        thread_.start()
++        background.append(thread_)
+ 
+     def join_stage() -> None:
+         if joined["done"]:
+@@ -359,11 +562,27 @@ def launch(
+         emitted["done"] = True
+         join_stage()
+         emit(report)
+-        if not plain:
++        if plain:
++            return
++        if is_vllm and not topo.is_head:
++            # A vLLM worker's "ready" is its local rank 0 finishing its load;
++            # the other local ranks may still be reading. Never block here:
++            # this callback runs on the thread that drains the engine's output.
++            if plugin_problem is None:
++                in_background(free_when_loaded)
++            else:
++                print(f"[SERVEKIT] warning: without the plugin this node cannot tell when its ranks "
++                      f"are done reading; {dest} left in place (rm -r {dest})", file=sys.stderr, flush=True)
++        else:
++            if is_vllm:
++                _report_loads(dest, _local_rank_keys(topo))
++                _vllm_plugin.clear_loaded(str(dest))
+             freed = free(dest)
+             print(f"[SERVEKIT] freed {freed / 1e9:.1f} GB from {dest}", flush=True)
+-            if overlap:
+-                _shim.clear_stage(str(dest))
++        if overlap:
++            _shim.clear_stage(str(dest))
++        if is_vllm:
++            in_background(write_back_caches)
+ 
+     report = run_profile(
+         engine_command,
+@@ -372,6 +591,9 @@ def launch(
+         head=topo.is_head,
+         env=cache_env,
+     )
++    engine_exited.set()
++    for thread_ in background:
++        thread_.join()
+ 
+     if not emitted["done"]:
+         join_stage()
+@@ -380,6 +602,8 @@ def launch(
+             print(f"[SERVEKIT] server never reported ready; {dest} left in place (rm -r {dest})", file=sys.stderr)
+             if overlap:
+                 _shim.clear_stage(str(dest))
++            if is_vllm:
++                _vllm_plugin.clear_loaded(str(dest))
+ 
+     if "error" in staged:
+         print(f"error: the stage failed: {staged['error']}", file=sys.stderr)
+diff --git a/src/servekit/prepare.py b/src/servekit/prepare.py
+index 2a8d8a6..3351210 100644
+--- a/src/servekit/prepare.py
++++ b/src/servekit/prepare.py
+@@ -8,18 +8,27 @@ import os
+ import subprocess
+ import sys
+ import tempfile
++import time
+ from pathlib import Path
+ from typing import List, Optional, Sequence
+ 
+ from . import jit_cache
++from . import manifest as manifest_mod
++from . import vllm_cache
+ from ._shim import PP_PATTERN
+ from .manifest import Manifest
+ 
+ SAVE_SCRIPT = Path(__file__).parent / "_prepare" / "save_sharded_state.py"
++SAVE_SCRIPT_VLLM = Path(__file__).parent / "_prepare" / "save_sharded_state_vllm.py"
+ 
+ FORMAT = "sharded_state"
+ 
+ TP_PATTERN = "model-rank-{rank}-part-{part}.safetensors"
++# vLLM's own pipeline-parallel names (sharded_state_loader.py:39), not SGLang's.
++VLLM_PP_PATTERN = "model-pp-{pp_rank}-tp-{rank}-part-{part}.safetensors"
++
++# How long a vLLM follower node waits for the head to finish the save.
++FOLLOW_TIMEOUT_S = 7200
+ 
+ PLUGIN_FLOOR = "0.5.11"
+ 
+@@ -46,8 +55,11 @@ def _plugins_available() -> bool:
+     return (root / "srt" / "plugins" / "hook_registry.py").is_file()
+ 
+ 
+-def _missing_shards(out: Path, tp_size: int, pp_size: int = 1) -> List[str]:
+-    pattern = PP_PATTERN if pp_size > 1 else TP_PATTERN
++def _missing_shards(out: Path, tp_size: int, pp_size: int = 1, engine: str = "sglang") -> List[str]:
++    if pp_size == 1:
++        pattern = TP_PATTERN
++    else:
++        pattern = VLLM_PP_PATTERN if engine == "vllm" else PP_PATTERN
+     names = [
+         pattern.format(pp_rank=pp, rank=tp, part=0)
+         for pp in range(pp_size)
+@@ -67,11 +79,20 @@ def prepare(
+     dist_init_addr: Optional[str] = None,
+     pp: int = 1,
+     cache_root: Path = jit_cache.NODE_LOCAL_ROOT,
++    engine: str = "sglang",
++    follower_command: Optional[Sequence[str]] = None,
+ ) -> int:
++    """Write a presharded checkpoint plus its manifest into `out`.
++
++    `engine` picks the sharder. For vLLM, a node other than the head does not
++    run the sharder: it runs `follower_command`, its own headless serve command,
++    whose workers the head's save reaches over the collective RPC, and stops it
++    once the head has written the manifest.
++    """
+     if not model.is_dir():
+         print(f"error: model path {model} is not a directory", file=sys.stderr)
+         return 2
+-    if pp > 1 and not _plugins_available():
++    if pp > 1 and engine == "sglang" and not _plugins_available():
+         print(f"error: {NO_PLUGINS}", file=sys.stderr)
+         return 2
+     if nnodes > 1:
+@@ -85,22 +106,27 @@ def prepare(
+     # Built where `launch` will read them: the engine bakes this path into its
+     # ninja build dirs, so a cache compiled elsewhere rebuilds and buys nothing.
+     cache_build = jit_cache.node_local(cache_root, out.name)
+-    env = {**os.environ, **jit_cache.create(cache_build)}
++    caches = vllm_cache if engine == "vllm" else jit_cache
++    env = {**os.environ, **caches.create(cache_build)}
++
++    if engine == "vllm" and node_rank != 0:
++        return _follow(out, list(follower_command or []), env, node_rank, nnodes)
+ 
+     dist_args: List[str] = []
+     if nnodes > 1:
++        rendezvous = "--master-addr" if engine == "vllm" else "--dist-init-addr"
+         dist_args = [
+             "--nnodes", str(nnodes),
+             "--node-rank", str(node_rank),
+-            "--dist-init-addr", str(dist_init_addr),
++            rendezvous, str(dist_init_addr),
+         ]
+ 
+     with tempfile.TemporaryDirectory() as tmp:
+         resolved_path = Path(tmp) / "resolved.json"
+         command = [
+             python or sys.executable,
+-            str(SAVE_SCRIPT),
+-            "--model-path", str(model),
++            str(SAVE_SCRIPT_VLLM if engine == "vllm" else SAVE_SCRIPT),
++            "--model" if engine == "vllm" else "--model-path", str(model),
+             "--output", str(out),
+             "--tensor-parallel-size", str(tp),
+             "--pipeline-parallel-size", str(pp),
+@@ -124,7 +150,7 @@ def prepare(
+             return 1
+         resolved = json.loads(resolved_path.read_text())
+ 
+-    missing = _missing_shards(out, tp, pp)
++    missing = _missing_shards(out, tp, pp, engine)
+     if missing:
+         print(f"error: {out} is missing shards: {', '.join(missing)}", file=sys.stderr)
+         return 1
+@@ -143,10 +169,51 @@ def prepare(
+     manifest = Manifest(format=FORMAT, source=str(model), **resolved)
+     path = manifest.write(out)
+     print(f"[SERVEKIT] prepared {tp * pp} ranks in {out}; manifest written to {path}", flush=True)
++    engine_cmd = (
++        f"vllm serve {model}" if engine == "vllm"
++        else f"python -m sglang.launch_server --model-path {model}"
++    )
+     print(
+         f"[SERVEKIT] launch it with: servekit launch --servekit-artifact-path {out} -- "
+-        f"python -m sglang.launch_server --model-path {model} "
+-        f"--tensor-parallel-size {tp} --pipeline-parallel-size {pp}",
++        f"{engine_cmd} --tensor-parallel-size {tp} --pipeline-parallel-size {pp}",
+         flush=True,
+     )
+     return 0
++
++
++def _follow(out: Path, command: List[str], env: dict, node_rank: int, nnodes: int,
++            timeout_s: float = FOLLOW_TIMEOUT_S, poll_s: float = 1.0) -> int:
++    """A vLLM follower node during prepare: serve headless until the head is done.
++
++    The head's save is a collective RPC over every worker, this node's
++    included, and it writes the manifest only after that RPC returned. So the
++    manifest appearing means this node's shards are on disk. The follower is
++    then stopped; like an SGLang worker's, its exit code says nothing, and the
++    head gates.
++    """
++    if not command:
++        print(f"error: node {node_rank}: no follower command to run", file=sys.stderr)
++        return 2
++    print(f"[SERVEKIT] node {node_rank} of {nnodes}: serving headless while the head shards: "
++          f"{' '.join(command)}", flush=True)
++    proc = subprocess.Popen(command, env=env)
++    deadline = time.monotonic() + timeout_s
++    try:
++        while proc.poll() is None:
++            if manifest_mod.read(out) is not None:
++                print(f"[SERVEKIT] node {node_rank}: the head wrote the manifest; stopping", flush=True)
++                break
++            if time.monotonic() > deadline:
++                print(f"[SERVEKIT] node {node_rank}: no manifest after {timeout_s:.0f} s; stopping", flush=True)
++                break
++            time.sleep(poll_s)
++    finally:
++        if proc.poll() is None:
++            proc.terminate()
++            try:
++                proc.wait(timeout=60)
++            except subprocess.TimeoutExpired:
++                proc.kill()
++                proc.wait()
++    print(f"[SERVEKIT] node {node_rank}: shards written; the head gates the result", flush=True)
++    return 0
+diff --git a/src/servekit/profile.py b/src/servekit/profile.py
+index 40eebe2..58d526a 100644
+--- a/src/servekit/profile.py
++++ b/src/servekit/profile.py
+@@ -45,6 +45,9 @@ class FrameworkSpec:
+     # What a worker node prints instead of ready_pattern, which only the head
+     # ever prints. None means servekit cannot wrap a worker for this engine.
+     worker_ready_pattern: Optional["re.Pattern"] = None
++    # A subcommand whose next argument, if it is not an option, is the model
++    # path (`vllm serve /store/m`). It wins over model_flags, as in the engine.
++    model_positional_after: Optional[str] = None
+ 
+ 
+ SGLANG = FrameworkSpec(
+@@ -144,6 +147,25 @@ VLLM = FrameworkSpec(
+         ),
+     ],
+     command_markers=[re.compile(r"\bvllm\b")],
++    # `vllm serve MODEL` (vllm/entrypoints/cli/serve.py:55-57 lets the
++    # positional win over --model), or --model for the api_server module.
++    model_flags=["--model"],
++    model_positional_after="serve",
++    # No dp_size: data-parallel replicas read the same (pp, tp) files, so DP
++    # does not change how a vLLM checkpoint is sharded.
++    parallel_flags={
++        "tp_size": ["--tensor-parallel-size", "--tensor_parallel_size", "-tp"],
++        "pp_size": ["--pipeline-parallel-size", "--pipeline_parallel_size", "-pp"],
++    },
++    # The multiprocessing backend's own multi-node flags (vLLM >= 0.11).
++    dist_flags={
++        "nnodes": ["--nnodes", "-n"],
++        "node_rank": ["--node-rank", "--node_rank", "-r"],
++        "dist_init_addr": ["--master-addr", "--master_addr"],
++    },
++    # A --headless node binds no API server and prints no ready line. Its local
++    # rank 0 logs this (info_once, scope "local"), and only that rank does.
++    worker_ready_pattern=re.compile(r"Model loading took .*? and [\d.]+ seconds"),
+ )
+ 
+ FRAMEWORKS = [SGLANG, VLLM]
+diff --git a/src/servekit/topology.py b/src/servekit/topology.py
+index fc8b999..6fc8ac0 100644
+--- a/src/servekit/topology.py
++++ b/src/servekit/topology.py
+@@ -86,8 +86,9 @@ def read_topology(command: List[str], spec: FrameworkSpec) -> Topology:
+     if not 0 <= node_rank < nnodes:
+         raise ValueError(f"--node-rank {node_rank} is outside the {nnodes} nodes asked for")
+     if dist_init_addr is None:
++        addr_flag = spec.dist_flags["dist_init_addr"][0]
+         raise ValueError(
+-            "--nnodes > 1 needs --dist-init-addr: without it every node rendezvouses "
++            f"--nnodes > 1 needs {addr_flag}: without it every node rendezvouses "
+             "on its own 127.0.0.1 and the process group never forms"
+         )
+     if (tp_size * pp_size) % nnodes != 0:
+@@ -114,30 +115,37 @@ def _index_glob(lo: int, hi: int, what: str) -> str:
+     return f"[{lo}-{hi}]"
+ 
+ 
+-def shard_glob(topo: Topology) -> str:
++# How each engine's ShardedStateLoader names a pipeline stage's files: servekit's
++# SGLang shim follows SGLang's own pipeline branch, and vLLM has its own
++# (PP_AND_TP_PATTERN, vllm/model_executor/model_loader/sharded_state_loader.py:39).
++_PP_TP_SEPARATOR = {"sglang": "rank", "vllm": "tp"}
++
++
++def shard_glob(topo: Topology, engine: str = "sglang") -> str:
+     """The presharded files this node's own ranks will read, and no others.
+ 
+-    SGLang's ShardedStateLoader globs only its own rank's files, so staging just
+-    this pattern loads with no engine change.
++    Both engines' ShardedStateLoaders glob only their own rank's files, so
++    staging just this pattern loads with no engine change.
+     """
+     lo, hi = topo.local_rank_range
+     if topo.pp_size == 1:
+         return f"model-rank-{_index_glob(lo, hi, 'ranks')}-part-*.safetensors"
+ 
+-    # global_rank = tp_size * pp_rank + tp_rank, so a node's contiguous range is
+-    # a contiguous slice of pipeline stages.
++    # global_rank = tp_size * pp_rank + tp_rank in both engines, so a node's
++    # contiguous range is a contiguous slice of pipeline stages.
+     tp = topo.tp_size
++    sep = _PP_TP_SEPARATOR[engine]
+     first_stage, last_stage = lo // tp, hi // tp
+     if first_stage == last_stage:
+         ranks = _index_glob(lo % tp, hi % tp, "tp ranks")
+-        return f"model-pp-{first_stage}-rank-{ranks}-part-*.safetensors"
++        return f"model-pp-{first_stage}-{sep}-{ranks}-part-*.safetensors"
+     if lo % tp != 0 or hi % tp != tp - 1:
+         raise ValueError(
+             f"this node holds ranks {lo}-{hi}, a partial slice of stages "
+             f"{first_stage}-{last_stage}, which needs more than one glob"
+         )
+     stages = _index_glob(first_stage, last_stage, "pipeline stages")
+-    return f"model-pp-{stages}-rank-{_index_glob(0, tp - 1, 'tp ranks')}-part-*.safetensors"
++    return f"model-pp-{stages}-{sep}-{_index_glob(0, tp - 1, 'tp ranks')}-part-*.safetensors"
+ 
+ 
+ def wants_sharded_state(command: List[str]) -> bool:
+diff --git a/src/servekit/vllm_cache.py b/src/servekit/vllm_cache.py
+new file mode 100644
+index 0000000..0bab2d7
+--- /dev/null
++++ b/src/servekit/vllm_cache.py
+@@ -0,0 +1,74 @@
++"""Where a vLLM engine's compile and JIT caches live, so they outlive the job.
++
++The same scheme as `jit_cache` (a node-local copy at a fixed path, kept beside
++the checkpoint), with what vLLM adds:
++
++- VLLM_CACHE_ROOT holds torch.compile's artifacts
++  (<root>/torch_compile_cache/<hash>/rank_<r>_<dp>/, vllm/compilation/backends.py:1086-1104),
++  Inductor's cache (forced under it, compiler_interface.py:29-34), DeepGEMM's
++  JIT cache unless DG_JIT_CACHE_DIR is set (vllm/utils/deep_gemm.py:280-285),
++  and the opt-in startup plan. vLLM leaves it out of its compile cache key
++  (vllm/envs.py:2366), so moving it is safe;
++- TileLang, which follows none of them.
++
++The cache key does include the model path (vllm/config/model.py:457-525). The
++engine reads /dev/shm/servekit/<artifact name> on every launch, so the key is
++stable from one launch to the next. But no other run's cache fits it: not the
++sharding run's, which reads the source checkpoint, and not a plain vLLM run's.
++So the cache is written back after the first launch that compiled, instead of
++during prepare.
++"""
++from __future__ import annotations
++
++import os
++import shutil
++from pathlib import Path
++from typing import Dict
++
++from . import jit_cache
++
++CACHES: Dict[str, str] = {
++    **jit_cache.CACHES,
++    "VLLM_CACHE_ROOT": "vllm",
++    "TILELANG_CACHE_DIR": "tilelang",
++}
++
++
++def env_for(root: Path) -> Dict[str, str]:
++    return {var: str(root / subdir) for var, subdir in CACHES.items()}
++
++
++def create(root: Path) -> Dict[str, str]:
++    for subdir in CACHES.values():
++        (root / subdir).mkdir(parents=True, exist_ok=True)
++    return env_for(root)
++
++
++def write_back(node_local: Path, kept: Path) -> int:
++    """Copy the files `kept` does not have yet from `node_local`; return how many.
++
++    Never overwrites: a file already kept was written by an earlier launch or
++    by another node, and concurrent launches would otherwise race on it. Each
++    file lands under a temporary name and is renamed, so a launch seeding from
++    `kept` at the same time sees whole files or none. Several nodes can write
++    back into one artifact: each adds its own ranks' files.
++    """
++    if not node_local.is_dir():
++        return 0
++    added = 0
++    for src in sorted(p for p in node_local.rglob("*") if p.is_file() and not p.is_symlink()):
++        dest = kept / src.relative_to(node_local)
++        if dest.exists():
++            continue
++        dest.parent.mkdir(parents=True, exist_ok=True)
++        tmp = dest.with_name(f".{dest.name}.servekit-{os.getpid()}.tmp")
++        try:
++            shutil.copy2(src, tmp)
++            os.replace(tmp, dest)
++            added += 1
++        except OSError:
++            try:
++                tmp.unlink()
++            except OSError:
++                pass
++    return added
+diff --git a/src/servekit/vllm_guard.py b/src/servekit/vllm_guard.py
+new file mode 100644
+index 0000000..ca22a3a
+--- /dev/null
++++ b/src/servekit/vllm_guard.py
+@@ -0,0 +1,136 @@
++"""What vLLM's `sharded_state` cannot round-trip, so servekit will not preshard it.
++
++vLLM's saver dumps the model's state dict *after* process_weights_after_loading
++(vllm/model_executor/model_loader/sharded_state_loader.py:268-303), and its
++loader copies that dump into a freshly built model in checkpoint layout, then
++runs process_weights_after_loading a second time (base_loader.py:88, 109).
++vLLM's own weight cache (`--load-format ipc_cache`) solves the same problem
++properly: it refuses any quant method that does not declare
++`supports_pre_processed_weights` and re-runs the hook under
++`weights_already_processed()` (weight_cache/ipc_loader.py:295-313).
++ShardedStateLoader does neither. So, as of vLLM 0.33:
++
++- quantized checkpoints are post-processed twice;
++- MLA layers register W_UV / W_UK_T as new parameters after loading
++  (layers/attention/mla_attention.py:1347-1350), which a freshly built model
++  has no slot for;
++- expert parallelism gives each data-parallel rank its own experts under the
++  same file name (the names carry only pp and tp ranks);
++- LoRA pads parameters that the dump does not have, and vLLM's own saver
++  refuses it;
++- a speculative draft model is loaded with the same --load-format from a
++  checkpoint nobody presharded.
++
++Unlike `quant_guard`, nothing here was observed corrupting a model: the rules
++come from reading vLLM 0.33. A refusal therefore means "serve with vLLM's own
++loader", not an error. SERVEKIT_VLLM_ALLOW_QUANTIZED=1 lifts only the
++quantization rule, for experiments that run `servekit verify` before trusting
++the result.
++"""
++from __future__ import annotations
++
++import json
++import os
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import List, Mapping, Optional, Sequence
++
++from .engine_args import _find_flag
++
++ALLOW_QUANTIZED_ENV = "SERVEKIT_VLLM_ALLOW_QUANTIZED"
++
++
++@dataclass(frozen=True)
++class Setup:
++    """The checkpoint's config and the serve flags that change what a rank holds."""
++
++    config: Mapping = field(default_factory=dict)
++    quantization_flag: Optional[str] = None
++    gguf_files: bool = False
++    expert_parallel: bool = False
++    lora: bool = False
++    speculative: bool = False
++    config_file: bool = False
++    allow_quantized: bool = False
++
++    def _get(self, key: str):
++        """A key from the top-level config, or from a multimodal model's text_config."""
++        if key in self.config:
++            return self.config[key]
++        text = self.config.get("text_config") or {}
++        return text.get(key) if isinstance(text, Mapping) else None
++
++    @property
++    def quantized(self) -> bool:
++        flag = (self.quantization_flag or "").lower()
++        return bool(self._get("quantization_config")) or flag not in ("", "none") or self.gguf_files
++
++    @property
++    def mla(self) -> bool:
++        return bool(self._get("kv_lora_rank"))
++
++
++RULES = [
++    ("a quantized checkpoint (post-processed twice on reload)",
++     lambda s: s.quantized and not s.allow_quantized),
++    ("MLA attention (W_UV / W_UK_T are created after loading)",
++     lambda s: s.mla),
++    ("--enable-expert-parallel (experts differ per data-parallel rank under one file name)",
++     lambda s: s.expert_parallel),
++    ("--enable-lora (padded parameters the shards do not have)",
++     lambda s: s.lora),
++    ("--speculative-config (the draft model is not presharded)",
++     lambda s: s.speculative),
++    ("--config (servekit cannot see the settings in a config file; put them on the command line)",
++     lambda s: s.config_file),
++]
++
++
++def check(setup: Setup) -> List[str]:
++    """What about this setup servekit will not preshard for vLLM. Empty means go ahead."""
++    return [name for name, triggers in RULES if triggers(setup)]
++
++
++def _read_config(model_dir: Path) -> dict:
++    path = Path(model_dir) / "config.json"
++    if not path.is_file():
++        return {}
++    try:
++        config = json.loads(path.read_text())
++    except (json.JSONDecodeError, OSError):
++        return {}
++    return config if isinstance(config, dict) else {}
++
++
++def _has(command: Sequence[str], *flags: str) -> bool:
++    """A boolean flag that is on: `--x`, or `--x=true`; `--no-x` and `--x=false` are off."""
++    for arg in command:
++        for flag in flags:
++            if arg == flag:
++                return True
++            if arg.startswith(flag + "="):
++                return arg.split("=", 1)[1].lower() not in ("false", "0", "no")
++    return False
++
++
++def check_command(model_dir: Path, command: Sequence[str]) -> List[str]:
++    """`check` for a checkpoint directory and a `vllm serve` command line."""
++    command = list(command)
++    found = _find_flag(command, ["--quantization", "-q"])
++    return check(Setup(
++        config=_read_config(model_dir),
++        quantization_flag=found[1] if found else None,
++        gguf_files=any(Path(model_dir).glob("*.gguf")),
++        expert_parallel=_has(command, "--enable-expert-parallel", "--enable_expert_parallel", "-ep"),
++        lora=_has(command, "--enable-lora", "--enable_lora"),
++        speculative=_find_flag(command, ["--speculative-config", "--speculative_config", "-sc"]) is not None,
++        config_file=_find_flag(command, ["--config"]) is not None,
++        allow_quantized=os.environ.get(ALLOW_QUANTIZED_ENV) == "1",
++    ))
++
++
++def explain(unsupported: Sequence[str], model_dir) -> str:
++    return (
++        f"[SERVEKIT] vllm's sharded_state cannot round-trip {', '.join(unsupported)} ({model_dir}); "
++        f"serving it with vllm's own loader instead"
++    )
+diff --git a/tests/test_launch.py b/tests/test_launch.py
+index cc3994e..bb9af48 100644
+--- a/tests/test_launch.py
++++ b/tests/test_launch.py
+@@ -69,11 +69,9 @@ def test_a_flag_with_no_value_is_rejected():
+         find_model_path(["python", "-m", "sglang.launch_server", "--model-path"], SGLANG)
+ 
+ 
+-def test_vllm_staging_is_not_supported_yet():
+-    """Phase 4's job. Better a clear refusal than a command rewritten by guess."""
+-    assert VLLM.model_flags == []
+-    with pytest.raises(ValueError, match="does not know where the model path is"):
+-        find_model_path(["vllm", "serve", "/store/m"], VLLM)
++def test_vllm_commands_are_read_too():
++    """Phase 4: the rest of the vLLM path is in test_vllm.py."""
++    assert find_model_path(["vllm", "serve", "/store/m"], VLLM) == (2, "/store/m")
+ 
+ 
+ def test_launch_rejects_an_unusable_command(tmp_path):
+diff --git a/tests/test_topology.py b/tests/test_topology.py
+index 4903d1f..03d10cb 100644
+--- a/tests/test_topology.py
++++ b/tests/test_topology.py
+@@ -63,8 +63,8 @@ def test_a_world_that_does_not_split_evenly_is_refused():
+         read_topology(sglang("--tp-size", "6", "--nnodes", "4", "--node-rank", "0", "--dist-init-addr", "h:1"), SGLANG)
+ 
+ 
+-def test_an_engine_with_no_dist_flags_is_always_one_node():
+-    """vLLM: servekit cannot read its topology, so it must not guess at one."""
++def test_a_vllm_command_without_dist_flags_is_one_node():
++    """vLLM's multi-node flags are read in test_vllm.py; without them it is one node."""
+     assert read_topology(["vllm", "serve", "/store/m"], VLLM) == Topology()
+ 
+ 
+diff --git a/tests/test_vllm.py b/tests/test_vllm.py
+new file mode 100644
+index 0000000..d6d0f4d
+--- /dev/null
++++ b/tests/test_vllm.py
+@@ -0,0 +1,770 @@
++"""`servekit launch -- vllm serve ...`: the argv rewrite, the guard, prepare,
++launch, the vLLM plugin and the compile-cache write-back. No GPU and no vLLM:
++the sharder and the engine are fakes, and the plugin runs against a stand-in
++`vllm` package with the same module paths and log templates as vLLM 0.33."""
++import hashlib
++import json
++import logging
++import os
++import stat
++import sys
++import textwrap
++import threading
++import time
++from pathlib import Path
++
++import pytest
++
++from servekit import _shim, _vllm_plugin, jit_cache, vllm_cache, vllm_guard
++from servekit import manifest as manifest_mod
++from servekit.cli import main
++from servekit.engine_args import check_manifest, find_model_path, replace_model_path, served_name_args
++from servekit.launch import _sharder_args, _vllm_flags
++from servekit.manifest import Manifest
++from servekit.prepare import prepare
++from servekit.profile import VLLM, ProfileReport, detect_framework
++from servekit.stage import StageResult
++from servekit.topology import Topology, read_topology, shard_glob
++
++RESOLVED = {
++    "engine": "vllm", "engine_version": "0.33.0", "tp_size": 2, "pp_size": 1, "dp_size": 1,
++    "dtype": "bfloat16", "quantization": None,
++}
++
++
++def vllm(*args):
++    return ["vllm", "serve", "/store/apertus8b", *args]
++
++
++# --- reading and rewriting the command -----------------------------------------
++
++@pytest.mark.parametrize(
++    "command, expected",
++    [
++        (vllm("--tensor-parallel-size", "2"), "/store/apertus8b"),
++        (["vllm", "serve", "--model", "/store/m", "-tp", "2"], "/store/m"),
++        (["vllm", "serve", "--model=/store/m"], "/store/m"),
++        (["python", "-m", "vllm.entrypoints.openai.api_server", "--model", "/store/m"], "/store/m"),
++        (["python", "-m", "vllm.entrypoints.cli.main", "serve", "/store/m"], "/store/m"),
++        # The positional wins over --model, as in vLLM (entrypoints/cli/serve.py:55-57).
++        (["vllm", "serve", "/store/a", "--model", "/store/b"], "/store/a"),
++    ],
++)
++def test_finds_the_vllm_model_path(command, expected):
++    assert detect_framework(command) is VLLM
++    assert find_model_path(command, VLLM)[1] == expected
++
++
++def test_an_option_value_spelled_serve_is_not_the_subcommand():
++    command = ["vllm", "serve", "--served-model-name", "serve", "--model", "/store/m"]
++    assert find_model_path(command, VLLM)[1] == "/store/m"
++
++
++def test_a_vllm_command_without_a_model_is_rejected():
++    with pytest.raises(ValueError, match="no model after `serve` and no --model"):
++        find_model_path(["vllm", "serve", "--tensor-parallel-size", "2"], VLLM)
++
++
++def test_rewriting_the_positional_changes_nothing_else():
++    command = vllm("--tensor-parallel-size", "2", "--max-model-len", "4096")
++    out = replace_model_path(command, VLLM, "/dev/shm/servekit/apertus8b-tp2")
++    assert out == ["vllm", "serve", "/dev/shm/servekit/apertus8b-tp2", "--tensor-parallel-size", "2",
++                   "--max-model-len", "4096"]
++
++
++def test_the_served_name_survives_the_rewrite():
++    """vLLM serves under the model argument; clients and routers must not see /dev/shm."""
++    assert served_name_args(vllm(), VLLM) == ["--served-model-name", "/store/apertus8b"]
++    assert served_name_args(vllm("--served-model-name", "apertus"), VLLM) == []
++    assert served_name_args(vllm("--served_model_name=apertus"), VLLM) == []
++
++
++@pytest.mark.parametrize(
++    "command, expected",
++    [
++        (vllm("-tp", "4", "--max-model-len", "8192", "--load-format", "sharded_state"),
++         ["-tp", "4", "--max-model-len", "8192"]),
++        (["python", "-m", "vllm.entrypoints.openai.api_server", "--model", "/m", "-tp", "2"],
++         ["--model", "/m", "-tp", "2"]),
++        (["python", "-m", "vllm.entrypoints.cli.main", "serve", "/m", "-tp", "2"], ["-tp", "2"]),
++    ],
++)
++def test_the_sharder_gets_every_vllm_flag_but_the_load_format(command, expected):
++    """Short flags first (`-tp 4`) must not be dropped, as "from the first long option" would."""
++    assert _sharder_args(command, "vllm") == expected
++
++
++def test_vllm_flags_of_a_bare_serve():
++    assert _vllm_flags(["vllm", "serve", "/m"]) == []
++
++
++# --- topology ---------------------------------------------------------------------
++
++def test_reads_vllms_multinode_flags():
++    topo = read_topology(vllm("-tp", "8", "--nnodes", "2", "--node-rank", "1", "--master-addr", "nid1"), VLLM)
++    assert topo.is_multinode and not topo.is_head
++    assert topo.local_rank_range == (4, 7)
++    assert topo.dist_init_addr == "nid1"
++    short = read_topology(vllm("-tp", "8", "-n", "2", "-r", "1", "--master-addr=nid1"), VLLM)
++    assert short == topo
++
++
++def test_vllm_multinode_without_a_master_address_is_refused():
++    with pytest.raises(ValueError, match="--master-addr"):
++        read_topology(vllm("-tp", "8", "--nnodes", "2", "--node-rank", "1"), VLLM)
++
++
++def test_vllm_pipeline_stages_are_globbed_with_vllms_own_names():
++    """vLLM names stages model-pp-{pp}-tp-{tp}; SGLang's shim uses -rank-."""
++    whole_stage = Topology(nnodes=2, node_rank=1, tp_size=4, pp_size=2)
++    assert shard_glob(whole_stage, "vllm") == "model-pp-1-tp-[0-3]-part-*.safetensors"
++    assert shard_glob(whole_stage) == "model-pp-1-rank-[0-3]-part-*.safetensors"
++    assert shard_glob(Topology(nnodes=2, node_rank=1, tp_size=8), "vllm") == "model-rank-[4-7]-part-*.safetensors"
++
++
++# --- manifest -----------------------------------------------------------------------
++
++PREPARED = Manifest(format="sharded_state", source="/store/apertus8b", **RESOLVED)
++
++
++def test_a_matching_vllm_command_has_no_problems():
++    assert check_manifest(vllm("--tensor-parallel-size", "2"), VLLM, PREPARED, "0.33.1") == []
++
++
++def test_a_tp_mismatch_is_caught_before_vllm_narrows_it_silently():
++    """vLLM's ShardedStateLoader would load TP=2's files into TP=1 parameters with a warning."""
++    assert check_manifest(vllm("-tp", "1"), VLLM, PREPARED) == [
++        "tp_size: the checkpoint is sharded for 2, the command asks for 1"
++    ]
++
++
++def test_data_parallel_does_not_change_vllms_sharding():
++    assert check_manifest(vllm("-tp", "2", "-dp", "4"), VLLM, PREPARED) == []
++
++
++def test_another_vllm_minor_version_is_a_mismatch():
++    problems = check_manifest(vllm("-tp", "2"), VLLM, PREPARED, "0.34.0")
++    assert len(problems) == 1 and problems[0].startswith("engine_version: ")
++
++
++def test_an_sglang_checkpoint_is_not_served_by_vllm():
++    sglang = Manifest(format="sharded_state", source="/store/apertus8b", **{**RESOLVED, "engine": "sglang"})
++    assert check_manifest(vllm("-tp", "2"), VLLM, sglang)[0].startswith("engine: ")
++
++
++# --- the guard ------------------------------------------------------------------------
++
++def _model(tmp_path, config, name="apertus8b"):
++    d = tmp_path / name
++    d.mkdir()
++    (d / "config.json").write_text(json.dumps(config))
++    return d
++
++
++@pytest.mark.parametrize(
++    "config, args, rule",
++    [
++        ({"quantization_config": {"quant_method": "fp8"}}, [], "quantized"),
++        ({"text_config": {"quantization_config": {"quant_method": "fp8"}}}, [], "quantized"),
++        ({}, ["--quantization", "fp8"], "quantized"),
++        ({"kv_lora_rank": 512}, [], "MLA"),
++        ({}, ["--enable-expert-parallel"], "expert-parallel"),
++        ({}, ["-ep"], "expert-parallel"),
++        ({}, ["--enable-lora"], "enable-lora"),
++        ({}, ["--speculative-config", '{"method": "eagle"}'], "speculative"),
++        ({}, ["--config", "serve.yaml"], "--config"),
++    ],
++)
++def test_the_guard_names_what_sharded_state_cannot_round_trip(tmp_path, config, args, rule):
++    found = vllm_guard.check_command(_model(tmp_path, config), vllm(*args))
++    assert len(found) == 1 and rule in found[0]
++
++
++def test_a_plain_bf16_checkpoint_passes_the_guard(tmp_path):
++    assert vllm_guard.check_command(_model(tmp_path, {"torch_dtype": "bfloat16"}), vllm("-tp", "2")) == []
++
++
++def test_the_quantized_rule_alone_can_be_lifted_for_experiments(tmp_path, monkeypatch):
++    monkeypatch.setenv(vllm_guard.ALLOW_QUANTIZED_ENV, "1")
++    model = _model(tmp_path, {"quantization_config": {"quant_method": "fp8"}, "kv_lora_rank": 512})
++    assert [r for r in vllm_guard.check_command(model, vllm()) if "quantized" in r] == []
++    assert any("MLA" in r for r in vllm_guard.check_command(model, vllm()))
++
++
++def test_expert_parallel_off_is_not_refused(tmp_path):
++    assert vllm_guard.check_command(_model(tmp_path, {}), vllm("--enable-expert-parallel=false")) == []
++
++
++# --- prepare -----------------------------------------------------------------------------
++
++FAKE_VLLM_SHARDER = '''
++import json, sys
++args = sys.argv[1:]
++def arg(name):
++    return args[args.index(name) + 1]
++out, tp, pp = arg("--output"), int(arg("--tensor-parallel-size")), int(arg("--pipeline-parallel-size"))
++assert "--model" in args and "--model-path" not in args, args
++for p in range(pp):
++    for r in range(tp):
++        name = f"model-pp-{p}-tp-{r}-part-0" if pp > 1 else f"model-rank-{r}-part-0"
++        open(f"{out}/{name}.safetensors", "wb").write(b"weights")
++if "--dump-args" in args:
++    json.dump(args, open(arg("--dump-args"), "w"))
++resolved = json.load(open(arg("--fake-resolved")))
++resolved["tp_size"], resolved["pp_size"] = tp, pp
++json.dump(resolved, open(arg("--servekit-resolved-out"), "w"))
++'''
++
++
++@pytest.fixture
++def fake_vllm_sharder(tmp_path, monkeypatch):
++    script = tmp_path / "fake_vllm_sharder.py"
++    script.write_text(FAKE_VLLM_SHARDER)
++    monkeypatch.setattr("servekit.prepare.SAVE_SCRIPT_VLLM", script)
++    resolved = tmp_path / "resolved.json"
++    resolved.write_text(json.dumps(RESOLVED))
++    return ["--fake-resolved", str(resolved)]
++
++
++def test_prepare_writes_a_vllm_manifest(tmp_path, fake_vllm_sharder):
++    model = _model(tmp_path, {"torch_dtype": "bfloat16"})
++    out = tmp_path / "apertus8b-tp2"
++    dumped = tmp_path / "args.json"
++
++    rc = prepare(model, out, tp=2, engine="vllm", cache_root=tmp_path / "caches",
++                 engine_args=fake_vllm_sharder + ["--dump-args", str(dumped)])
++
++    assert rc == 0
++    assert manifest_mod.read(out) == Manifest(format="sharded_state", source=str(model), **RESOLVED)
++    assert json.loads(dumped.read_text())[:2] == ["--model", str(model)]
++
++
++def test_prepare_checks_for_vllms_pipeline_names(tmp_path, fake_vllm_sharder):
++    model = _model(tmp_path, {})
++    out = tmp_path / "apertus8b-tp2pp2"
++
++    assert prepare(model, out, tp=2, pp=2, engine="vllm", cache_root=tmp_path / "c",
++                   engine_args=fake_vllm_sharder) == 0
++    assert (out / "model-pp-1-tp-1-part-0.safetensors").is_file()
++    assert manifest_mod.read(out).pp_size == 2
++
++
++def test_a_vllm_follower_serves_headless_until_the_head_writes_the_manifest(tmp_path):
++    out = tmp_path / "apertus8b-tp8"
++    out.mkdir()
++    ran = tmp_path / "follower-ran"
++    follower = [sys.executable, "-c", f"open({str(ran)!r}, 'w').close(); import time; time.sleep(60)"]
++
++    def head_finishes():
++        time.sleep(0.5)
++        Manifest(format="sharded_state", source=str(tmp_path / "m"), **{**RESOLVED, "tp_size": 8}).write(out)
++
++    threading.Thread(target=head_finishes).start()
++    t0 = time.monotonic()
++    rc = prepare(_model(tmp_path, {}, "m"), out, tp=8, engine="vllm", nnodes=2, node_rank=1,
++                 dist_init_addr="nid1", cache_root=tmp_path / "c", follower_command=follower)
++
++    assert rc == 0
++    assert ran.exists()
++    assert time.monotonic() - t0 < 30, "the follower was not stopped when the manifest appeared"
++
++
++def test_launch_hands_a_vllm_follower_its_own_command(tmp_path, monkeypatch):
++    seen = {}
++
++    def fake_prepare(model, out, tp, engine_args=(), **kwargs):
++        seen.update(engine_args=list(engine_args), **kwargs)
++        return 0
++
++    monkeypatch.setattr("servekit.launch.prepare", fake_prepare)
++    model = _model(tmp_path, {})
++    command = ["vllm", "serve", str(model), "-tp", "8", "--nnodes", "2", "--node-rank", "1",
++               "--master-addr", "nid1", "--headless", "--load-format", "sharded_state"]
++    assert main(["launch", "--servekit-artifact-path", str(tmp_path / "a"), "--only-prepare", "--", *command]) == 0
++    assert seen["engine"] == "vllm" and seen["node_rank"] == 1 and seen["dist_init_addr"] == "nid1"
++    assert seen["follower_command"] == command[:-2]
++    assert seen["engine_args"] == ["-tp", "8", "--nnodes", "2", "--node-rank", "1", "--master-addr", "nid1",
++                                   "--headless"]
++
++
++def test_only_prepare_refuses_what_the_guard_refuses(tmp_path, monkeypatch, capsys):
++    monkeypatch.setattr("servekit.launch.prepare", lambda *a, **k: pytest.fail("must not preshard"))
++    model = _model(tmp_path, {"kv_lora_rank": 512})
++    rc = main(["launch", "--servekit-artifact-path", str(tmp_path / "a"), "--only-prepare",
++               "--", "vllm", "serve", str(model)])
++    assert rc == 2
++    assert "MLA" in capsys.readouterr().out
++
++
++# --- launch ------------------------------------------------------------------------------
++
++@pytest.fixture
++def prepared(tmp_path):
++    model = _model(tmp_path, {"torch_dtype": "bfloat16"})
++    artifact = tmp_path / "apertus8b-tp2"
++    artifact.mkdir()
++    (artifact / "config.json").write_text("{}")
++    (artifact / "tokenizer.json").write_text("{}")
++    for r in range(2):
++        (artifact / f"model-rank-{r}-part-0.safetensors").write_bytes(b"weights" * (r + 1))
++    Manifest(format="sharded_state", source=str(model), **RESOLVED).write(artifact)
++    return model, artifact
++
++
++@pytest.fixture
++def isolated(tmp_path, monkeypatch):
++    monkeypatch.setattr("servekit.launch.DEFAULT_ROOT", tmp_path / "shm")
++    monkeypatch.setattr("servekit.launch.DEFAULT_CACHE_ROOT", tmp_path / "cache-root")
++    monkeypatch.setattr("servekit.launch._installed_vllm_version", lambda: "0.33.0")
++    return tmp_path
++
++
++def copy_stage(delay=0.0):
++    def _stage(src, dest, slices=64, file_pattern="*"):
++        time.sleep(delay)
++        dest.mkdir(parents=True, exist_ok=True)
++        n = 0
++        for f in sorted(src.glob(file_pattern)):
++            if f.is_file():
++                (dest / f.name).write_bytes(f.read_bytes())
++                n += f.stat().st_size
++        return StageResult(dest=dest, wall_s=max(delay, 0.01), gbps=1.0, bytes=n)
++    return _stage
++
++
++def _launch(tmp_path, model, artifact, *args, overlap=False):
++    return main([
++        "launch", "--servekit-artifact-path", str(artifact), "--out", str(tmp_path / "run.json"),
++        *(["--overlap"] if overlap else []),
++        "--", "vllm", "serve", str(model), "--tensor-parallel-size", "2", *args,
++    ])
++
++
++def test_vllm_serves_the_staged_copy_under_its_own_name(isolated, prepared, monkeypatch):
++    model, artifact = prepared
++    seen = {}
++
++    def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        dest = isolated / "shm" / artifact.name
++        seen.update(command=command, env=env or {}, files=sorted(p.name for p in dest.iterdir()))
++        report = ProfileReport(command="", started_at=time.time(), ready_at=time.time() + 1, success=True,
++                               framework="vllm")
++        on_ready(report)
++        return report
++
++    monkeypatch.setattr("servekit.launch.stage", copy_stage())
++    monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
++
++    assert _launch(isolated, model, artifact) == 0
++    dest = isolated / "shm" / artifact.name
++    assert seen["command"] == [
++        "vllm", "serve", str(dest), "--tensor-parallel-size", "2",
++        "--served-model-name", str(model), "--load-format", "sharded_state",
++    ]
++    assert "config.json" in seen["files"] and "model-rank-1-part-0.safetensors" in seen["files"]
++    assert seen["env"][_vllm_plugin.ENV_FLAG] == "1"
++    caches = isolated / "cache-root" / artifact.name
++    assert seen["env"]["VLLM_CACHE_ROOT"] == str(caches / "vllm")
++    assert {k: seen["env"][k] for k in vllm_cache.CACHES} == vllm_cache.env_for(caches)
++    assert "VLLM_PLUGINS" not in seen["env"], "VLLM_PLUGINS is part of vLLM's compile cache key"
++    assert not dest.exists(), "the staged copy was not freed at ready"
++
++
++def test_a_guarded_model_runs_untouched_on_vllms_own_loader(isolated, monkeypatch, capsys):
++    model = _model(isolated, {"kv_lora_rank": 512}, "dsv3")
++    launched = {}
++
++    def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        launched.update(command=command, env=env)
++        return ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="vllm")
++
++    monkeypatch.setattr("servekit.launch.prepare", lambda *a, **k: pytest.fail("must not preshard"))
++    monkeypatch.setattr("servekit.launch.stage", lambda *a, **k: pytest.fail("must not stage"))
++    monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
++
++    assert _launch(isolated, model, isolated / "dsv3-tp2") == 0
++    assert launched["command"] == ["vllm", "serve", str(model), "--tensor-parallel-size", "2"]
++    assert launched["env"] is None
++    assert "MLA" in capsys.readouterr().out
++
++
++def test_ray_placed_ranks_run_on_vllms_own_loader(isolated, prepared, monkeypatch, capsys):
++    model, artifact = prepared
++    launched = {}
++    monkeypatch.setattr("servekit.launch.stage", lambda *a, **k: pytest.fail("must not stage"))
++    monkeypatch.setattr("servekit.launch.run_profile", lambda command, **k: launched.setdefault("c", command)
++                        and ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="vllm"))
++    assert _launch(isolated, model, artifact, "--distributed-executor-backend", "ray") == 0
++    assert launched["c"][2] == str(model)
++    assert "Ray decides" in capsys.readouterr().out
++
++
++def test_without_the_plugin_overlap_becomes_a_serial_stage(isolated, prepared, monkeypatch, capsys):
++    model, artifact = prepared
++    monkeypatch.setattr("servekit.launch._vllm_plugin.plugin_problem", lambda env=None: "not installed")
++    monkeypatch.setattr("servekit.launch.stage", copy_stage())
++    order = []
++    monkeypatch.setattr("servekit.launch.run_profile", lambda command, **k: order.append("engine")
++                        or ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="vllm"))
++    assert _launch(isolated, model, artifact, overlap=True) == 0
++    out = capsys.readouterr().out
++    assert "staging before launch instead of --overlap" in out
++    assert not Path(_shim.stage_marker(str(isolated / "shm" / artifact.name))).exists()
++
++
++def test_vllm_overlap_never_shows_the_engine_a_partial_file(isolated, prepared, monkeypatch):
++    """The shards appear under their real names only once the whole stage is done."""
++    model, artifact = prepared
++    dest = isolated / "shm" / artifact.name
++    snapshots = []
++
++    def watching_stage(src, stage_dest, slices=64, file_pattern="*"):
++        assert stage_dest != dest, "an overlapped vLLM stage must not write where the engine looks"
++        result = copy_stage(0.2)(src, stage_dest, slices, file_pattern)
++        snapshots.append(sorted(p.name for p in dest.glob("model-*")))
++        return result
++
++    def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        marker = Path(_shim.stage_marker(str(dest)))
++        snapshots.append(("marker", marker.read_text()))
++        _shim.wait_for_stage(str(dest), timeout_s=10, poll_s=0.01)
++        snapshots.append(sorted(p.name for p in dest.glob("model-*")))
++        report = ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="vllm")
++        on_ready(report)
++        return report
++
++    monkeypatch.setattr("servekit.launch.stage", watching_stage)
++    monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
++
++    assert _launch(isolated, model, artifact, overlap=True) == 0
++    assert snapshots[0] == ("marker", _shim.STAGE_PENDING)
++    assert snapshots[1] == [], "the shards were visible before the stage finished"
++    assert snapshots[2] == ["model-rank-0-part-0.safetensors", "model-rank-1-part-0.safetensors"]
++    assert not dest.exists()
++
++
++def test_a_vllm_worker_node_frees_only_after_every_local_rank_loaded(isolated, monkeypatch, capsys):
++    model = _model(isolated, {})
++    artifact = isolated / "apertus8b-tp4"
++    artifact.mkdir()
++    (artifact / "config.json").write_text("{}")
++    for r in range(4):
++        (artifact / f"model-rank-{r}-part-0.safetensors").write_bytes(b"w")
++    Manifest(format="sharded_state", source=str(model), **{**RESOLVED, "tp_size": 4}).write(artifact)
++    dest = isolated / "shm" / artifact.name
++    patterns, timeline = [], []
++
++    def fake_stage(src, stage_dest, slices=64, file_pattern="*"):
++        patterns.append(file_pattern)
++        return copy_stage()(src, stage_dest, slices, file_pattern)
++
++    def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        assert head is False
++        _vllm_plugin.record_loaded(str(dest), "pp0-tp2", {"load_s": 1.5})   # local rank 0 of node 1
++        on_ready(ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="vllm"))
++        time.sleep(0.8)
++        timeline.append(("after ready", dest.exists()))
++        _vllm_plugin.record_loaded(str(dest), "pp0-tp3", {"load_s": 2.5})
++        deadline = time.monotonic() + 5
++        while dest.exists() and time.monotonic() < deadline:
++            time.sleep(0.05)
++        timeline.append(("after last rank", dest.exists()))
++        return ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="vllm")
++
++    monkeypatch.setattr("servekit.launch.stage", fake_stage)
++    monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
++
++    rc = main(["launch", "--servekit-artifact-path", str(artifact), "--out", str(isolated / "run.json"),
++               "--", "vllm", "serve", str(model), "-tp", "4", "--nnodes", "2", "--node-rank", "1",
++               "--master-addr", "nid1", "--headless"])
++
++    assert rc == 0
++    assert patterns == ["model-rank-[2-3]-part-*.safetensors"]
++    assert timeline == [("after ready", True), ("after last rank", False)]
++    assert "max 2.50 s (pp0-tp3) over 2 of 2" in capsys.readouterr().out
++    assert (isolated / "run.node1.json").exists()
++
++
++# --- the plugin, against a stand-in vLLM -----------------------------------------------
++
++FAKE_LOADER = '''
++import logging
++logger = logging.getLogger(__name__)
++class ShardedStateLoader:
++    def __init__(self, load_config=None):
++        self.load_config = load_config
++    def load_weights(self, model, model_config):
++        model.loaded_from = model_config.model
++        for msg, args in getattr(model, "warnings", []):
++            logger.warning(msg, *args)
++'''
++FAKE_REGISTRY = '''
++_LOAD_FORMAT_TO_MODEL_LOADER = {}
++def register_model_loader(name):
++    def wrap(cls):
++        _LOAD_FORMAT_TO_MODEL_LOADER[name] = cls
++        return cls
++    return wrap
++'''
++FAKE_DISTRIBUTED = '''
++class _G:
++    rank_in_group = 0
++def get_pp_group():
++    return _G()
++def get_tensor_model_parallel_rank():
++    return 1
++'''
++
++
++@pytest.fixture
++def fake_vllm(tmp_path, monkeypatch):
++    root = tmp_path / "site"
++    pkg = root / "vllm"
++    (pkg / "model_executor" / "model_loader").mkdir(parents=True)
++    (pkg / "distributed").mkdir()
++    (pkg / "__init__.py").write_text("")
++    (pkg / "model_executor" / "__init__.py").write_text("")
++    (pkg / "model_executor" / "model_loader" / "__init__.py").write_text(FAKE_REGISTRY)
++    (pkg / "model_executor" / "model_loader" / "sharded_state_loader.py").write_text(FAKE_LOADER)
++    (pkg / "distributed" / "__init__.py").write_text(FAKE_DISTRIBUTED)
++    monkeypatch.syspath_prepend(str(root))
++    for name in [m for m in sys.modules if m == "vllm" or m.startswith("vllm.")]:
++        monkeypatch.delitem(sys.modules, name)
++    yield
++    for name in [m for m in sys.modules if m == "vllm" or m.startswith("vllm.")]:
++        sys.modules.pop(name, None)
++
++
++class _Model:
++    def __init__(self, warnings=()):
++        self.warnings = list(warnings)
++
++
++class _Config:
++    def __init__(self, model):
++        self.model = model
++        self.model_weights = ""
++
++
++def _registered():
++    from vllm.model_executor.model_loader import _LOAD_FORMAT_TO_MODEL_LOADER
++
++    return _LOAD_FORMAT_TO_MODEL_LOADER
++
++
++def test_the_plugin_does_nothing_unless_servekit_launched_the_engine(fake_vllm, monkeypatch):
++    monkeypatch.delenv(_vllm_plugin.ENV_FLAG, raising=False)
++    _vllm_plugin.register()
++    assert _registered() == {}
++
++
++def test_the_plugin_keeps_the_name_sharded_state(fake_vllm, monkeypatch):
++    monkeypatch.setenv(_vllm_plugin.ENV_FLAG, "1")
++    _vllm_plugin.register()
++    cls = _registered()["sharded_state"]
++    from vllm.model_executor.model_loader.sharded_state_loader import ShardedStateLoader
++
++    assert issubclass(cls, ShardedStateLoader)
++
++
++def test_a_load_waits_for_the_stage_then_records_its_rank(fake_vllm, monkeypatch, tmp_path):
++    monkeypatch.setenv(_vllm_plugin.ENV_FLAG, "1")
++    _vllm_plugin.register()
++    dest = str(tmp_path / "shm" / "m")
++    os.makedirs(dest)
++    _shim.publish_stage(dest, _shim.STAGE_PENDING)
++    threading.Timer(0.3, lambda: _shim.publish_stage(dest, _shim.STAGE_OK)).start()
++
++    model = _Model()
++    t0 = time.monotonic()
++    _registered()["sharded_state"]().load_weights(model, _Config(dest))
++
++    assert time.monotonic() - t0 >= 0.25, "the load did not wait for the stage"
++    assert model.loaded_from == dest
++    record = _vllm_plugin.read_loaded(dest)["pp0-tp1"]
++    assert record["tp_rank"] == 1 and record["barrier_wait_s"] >= 0.25 and "load_s" in record
++
++
++def test_a_failed_stage_fails_the_load(fake_vllm, monkeypatch, tmp_path):
++    monkeypatch.setenv(_vllm_plugin.ENV_FLAG, "1")
++    _vllm_plugin.register()
++    dest = str(tmp_path / "m")
++    _shim.publish_stage(dest, "staged 3 of 4 files")
++    with pytest.raises(RuntimeError, match="staged 3 of 4 files"):
++        _registered()["sharded_state"]().load_weights(_Model(), _Config(dest))
++
++
++@pytest.mark.parametrize("warning", [
++    ("loading tensor of shape %s into parameter '%s' of shape %s", ("(2048, 4096)", "w", "(4096, 4096)")),
++    ("Attempted to load weight %s with dtype %s into parameter with dtype %s", ("w", "float16", "bfloat16")),
++])
++def test_a_narrowing_or_casting_load_is_refused(fake_vllm, monkeypatch, tmp_path, warning):
++    """vLLM only warns here; a TP-mismatched checkpoint would serve wrong weights."""
++    monkeypatch.setenv(_vllm_plugin.ENV_FLAG, "1")
++    _vllm_plugin.register()
++    with pytest.raises(ValueError, match="refusing to serve"):
++        _registered()["sharded_state"]().load_weights(_Model([warning]), _Config(str(tmp_path / "m")))
++
++
++def test_strictness_can_be_turned_off(fake_vllm, monkeypatch, tmp_path):
++    monkeypatch.setenv(_vllm_plugin.ENV_FLAG, "1")
++    monkeypatch.setenv(_vllm_plugin.STRICT_ENV, "0")
++    _vllm_plugin.register()
++    warning = ("loading tensor of shape %s into parameter '%s' of shape %s", ("a", "b", "c"))
++    _registered()["sharded_state"]().load_weights(_Model([warning]), _Config(str(tmp_path / "m")))
++
++
++def test_other_warnings_are_not_refusals(fake_vllm, monkeypatch, tmp_path):
++    monkeypatch.setenv(_vllm_plugin.ENV_FLAG, "1")
++    _vllm_plugin.register()
++    _registered()["sharded_state"]().load_weights(_Model([("unrelated %s", ("x",))]), _Config(str(tmp_path / "m")))
++
++
++def test_the_plugin_is_installed_and_honours_vllms_allowlist():
++    assert _vllm_plugin.plugin_problem({}) is None
++    assert _vllm_plugin.plugin_problem({"VLLM_PLUGINS": "lora_resolver,servekit"}) is None
++    assert "VLLM_PLUGINS" in _vllm_plugin.plugin_problem({"VLLM_PLUGINS": "lora_resolver"})
++
++
++def test_load_records_round_trip_and_clear(tmp_path):
++    dest = str(tmp_path / "m")
++    _vllm_plugin.record_loaded(dest, "pp0-tp0", {"load_s": 1.0})
++    with pytest.raises(TimeoutError, match="pp0-tp1"):
++        _vllm_plugin.wait_for_loaded(dest, ["pp0-tp0", "pp0-tp1"], timeout_s=0.1, poll_s=0.01)
++    _vllm_plugin.record_loaded(dest, "pp0-tp1", {"load_s": 2.0})
++    assert set(_vllm_plugin.wait_for_loaded(dest, ["pp0-tp0", "pp0-tp1"], timeout_s=1)) == {"pp0-tp0", "pp0-tp1"}
++    _vllm_plugin.clear_loaded(dest)
++    assert _vllm_plugin.read_loaded(dest) == {}
++
++
++def test_servekit_does_not_import_vllm():
++    assert "vllm" not in sys.modules or not hasattr(sys.modules["vllm"], "__version__")
++
++
++# --- compile caches ------------------------------------------------------------------------
++
++def test_write_back_adds_what_is_missing_and_never_overwrites(tmp_path):
++    node, kept = tmp_path / "node", tmp_path / "kept"
++    (node / "vllm" / "torch_compile_cache" / "abc" / "rank_0_0").mkdir(parents=True)
++    (node / "vllm" / "torch_compile_cache" / "abc" / "rank_0_0" / "graph.bin").write_bytes(b"new")
++    (node / "triton" / "k.cubin").parent.mkdir(parents=True)
++    (node / "triton" / "k.cubin").write_bytes(b"new")
++    (kept / "triton").mkdir(parents=True)
++    (kept / "triton" / "k.cubin").write_bytes(b"old")
++
++    assert vllm_cache.write_back(node, kept) == 1
++    assert (kept / "vllm" / "torch_compile_cache" / "abc" / "rank_0_0" / "graph.bin").read_bytes() == b"new"
++    assert (kept / "triton" / "k.cubin").read_bytes() == b"old"
++    assert not list(kept.rglob("*.tmp"))
++    assert vllm_cache.write_back(node, kept) == 0
++
++
++def test_the_first_launch_keeps_what_vllm_compiled(isolated, prepared, monkeypatch):
++    model, artifact = prepared
++
++    def compiling_engine(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        compiled = Path(env["VLLM_CACHE_ROOT"]) / "torch_compile_cache" / "h" / "rank_0_0" / "x.bin"
++        compiled.parent.mkdir(parents=True)
++        compiled.write_bytes(b"artifact")
++        report = ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="vllm")
++        on_ready(report)
++        return report
++
++    monkeypatch.setattr("servekit.launch.stage", copy_stage())
++    monkeypatch.setattr("servekit.launch.run_profile", compiling_engine)
++    assert _launch(isolated, model, artifact) == 0
++    kept = artifact / jit_cache.CACHE_DIR_NAME / "vllm" / "torch_compile_cache" / "h" / "rank_0_0" / "x.bin"
++    assert kept.read_bytes() == b"artifact"
++
++
++# --- end to end: a mock `vllm serve` behind the real run_profile --------------------------
++
++MOCK_ENGINE = r'''
++import glob, hashlib, json, os, signal, sys, threading, time
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from servekit import _shim, _vllm_plugin
++
++argv = sys.argv[1:]
++assert argv[0] == "serve", argv
++model = argv[1]
++def opt(name, default=None):
++    return argv[argv.index(name) + 1] if name in argv else default
++tp = int(opt("--tensor-parallel-size", "1"))
++facts = {"model": model, "served": opt("--served-model-name"), "load_format": opt("--load-format"),
++         "flag": os.environ.get(_vllm_plugin.ENV_FLAG), "cache_root": os.environ.get("VLLM_CACHE_ROOT"),
++         "marker_at_start": None}
++marker = _shim.stage_marker(model)
++if os.path.exists(marker):
++    facts["marker_at_start"] = open(marker).read()
++print(f"(APIServer pid={os.getpid()}) INFO non-default args: {{'model': '{model}'}}", flush=True)
++expected = json.loads(os.environ["MOCK_EXPECT"])
++
++def worker(rank):
++    # What servekit's loader does around vLLM's: barrier, read, record.
++    _shim.wait_for_stage(model, timeout_s=30, poll_s=0.01)
++    t0 = time.monotonic()
++    for path in glob.glob(os.path.join(model, f"model-rank-{rank}-part-*.safetensors")):
++        digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
++        if digest != expected[os.path.basename(path)]:
++            print(f"(Worker_TP{rank} pid={os.getpid()}) ERROR read a partial {path}", flush=True)
++            os._exit(3)
++    _vllm_plugin.record_loaded(model, _vllm_plugin.rank_key(0, rank), {"load_s": time.monotonic() - t0})
++
++threads = [threading.Thread(target=worker, args=(r,)) for r in range(tp)]
++[t.start() for t in threads]
++[t.join() for t in threads]
++print(f"(Worker_TP0 pid={os.getpid()}) INFO Model loading took 1.00 GiB memory and 0.500000 seconds", flush=True)
++json.dump(facts, open(os.environ["MOCK_FACTS"], "w"))
++print(f"(APIServer pid={os.getpid()}) INFO:     Application startup complete.", flush=True)
++time.sleep(float(os.environ.get("MOCK_SERVE_S", "0.5")))
++'''
++
++
++def test_end_to_end_overlap_through_a_mock_vllm(isolated, prepared, monkeypatch):
++    model, artifact = prepared
++    for r, nbytes in enumerate((3 * 2**20 + 1, 2**20)):
++        (artifact / f"model-rank-{r}-part-0.safetensors").write_bytes(os.urandom(nbytes))
++    expected = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in artifact.glob("model-*")}
++    bin_dir = isolated / "bin"
++    bin_dir.mkdir()
++    engine = isolated / "mock_engine.py"
++    engine.write_text(MOCK_ENGINE)
++    launcher = bin_dir / "vllm"
++    launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{engine}" "$@"\n')
++    launcher.chmod(launcher.stat().st_mode | stat.S_IEXEC)
++    facts = isolated / "facts.json"
++    monkeypatch.setenv("MOCK_EXPECT", json.dumps(expected))
++    monkeypatch.setenv("MOCK_FACTS", str(facts))
++
++    def slow_partial_writer(src, stage_dest, slices=64, file_pattern="*"):
++        """Writes each shard in two halves with a pause between, like a stage in flight."""
++        stage_dest.mkdir(parents=True, exist_ok=True)
++        n = 0
++        for f in sorted(src.glob(file_pattern)):
++            data = f.read_bytes()
++            with open(stage_dest / f.name, "wb") as out:
++                out.write(data[: len(data) // 2])
++                out.flush()
++                time.sleep(0.3)
++                out.write(data[len(data) // 2:])
++            n += len(data)
++        return StageResult(dest=stage_dest, wall_s=0.6, gbps=1.0, bytes=n)
++
++    monkeypatch.setattr("servekit.launch.stage", slow_partial_writer)
++    rc = main([
++        "launch", "--servekit-artifact-path", str(artifact), "--out", str(isolated / "run.json"),
++        "--overlap", "--timeout", "60",
++        "--", str(launcher), "serve", str(model), "--tensor-parallel-size", "2",
++    ])
++
++    assert rc == 0
++    seen = json.loads(facts.read_text())
++    dest = isolated / "shm" / artifact.name
++    assert seen["model"] == str(dest) and seen["served"] == str(model)
++    assert seen["load_format"] == "sharded_state" and seen["flag"] == "1"
++    assert seen["marker_at_start"] == _shim.STAGE_PENDING, "the engine did not start before the stage ended"
++    assert seen["cache_root"].startswith(str(isolated / "cache-root"))
++    report = json.loads((isolated / "run.json").read_text())
++    assert report["success"] and report["framework"] == "vllm"
++    assert not dest.exists() and _vllm_plugin.read_loaded(str(dest)) == {}
++    assert not Path(_shim.stage_marker(str(dest))).exists()
+-- 
+2.50.1 (Apple Git-155)
+

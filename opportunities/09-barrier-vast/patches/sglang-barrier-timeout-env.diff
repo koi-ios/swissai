@@ -1,0 +1,58 @@
+diff -ru a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+--- a/python/sglang/srt/environ.py	2026-11-12 01:32:57
++++ b/python/sglang/srt/environ.py	2026-11-12 01:32:57
+@@ -297,6 +297,10 @@
+     #        group at offset (r * k), improving multi-rank I/O concurrency while
+     #        keeping access relatively ordered.
+     SGLANG_SORT_WEIGHT_FILES = EnvInt(0)
++    # Seconds rank 0 waits for each lagging TP rank in the post-load
++    # monitored_barrier (dist_barrier_after_load). Unset: the module default
++    # (480 s). Cold multi-node loads from network storage can need more.
++    SGLANG_UNBALANCED_MODEL_LOADING_TIMEOUT_S = EnvInt(480)
+     SGLANG_DISABLED_MODEL_ARCHS = EnvTuple(tuple())
+     # Shard the Qwen4-Exp PLE n-gram embedding within each attention-TP group
+     # instead of gathering DP tokens for a global-TP lookup.
+diff -ru a/python/sglang/srt/model_executor/model_runner_components/load_model_utils.py b/python/sglang/srt/model_executor/model_runner_components/load_model_utils.py
+--- a/python/sglang/srt/model_executor/model_runner_components/load_model_utils.py	2026-11-12 01:32:57
++++ b/python/sglang/srt/model_executor/model_runner_components/load_model_utils.py	2026-11-12 01:32:57
+@@ -23,6 +23,7 @@
+ )
+ from sglang.srt.distributed import get_tp_group
+ from sglang.srt.distributed.parallel_state import monkey_patch_vllm_parallel_state
++from sglang.srt.environ import envs
+ from sglang.srt.model_loader.loader import get_model_loader
+ from sglang.srt.model_loader.remote_instance_weight_loader_utils import (
+     RemoteInstanceWeightLoaderBackend,
+@@ -51,6 +52,13 @@
+ UNBALANCED_MODEL_LOADING_TIMEOUT_S = 480  # leave more time for post data processing
+ 
+ 
++def unbalanced_model_loading_timeout_s() -> int:
++    """SGLANG_UNBALANCED_MODEL_LOADING_TIMEOUT_S if set, else the module default."""
++    if envs.SGLANG_UNBALANCED_MODEL_LOADING_TIMEOUT_S.is_set():
++        return envs.SGLANG_UNBALANCED_MODEL_LOADING_TIMEOUT_S.get()
++    return UNBALANCED_MODEL_LOADING_TIMEOUT_S
++
++
+ def maybe_precompile_model_kernels_after_loading(model, device: str) -> None:
+     precompile = getattr(model, "precompile_kernels_after_loading", None)
+     if precompile is None:
+@@ -376,13 +384,16 @@
+             dist.barrier(group=get_tp_group().cpu_group)
+     else:
+         # Handle the case where some ranks do not finish loading.
++        timeout_s = unbalanced_model_loading_timeout_s()
+         try:
+             dist.monitored_barrier(
+                 group=get_tp_group().cpu_group,
+-                timeout=datetime.timedelta(seconds=UNBALANCED_MODEL_LOADING_TIMEOUT_S),
++                timeout=datetime.timedelta(seconds=timeout_s),
+                 wait_all_ranks=True,
+             )
+         except RuntimeError:
+             raise ValueError(
+-                f"TP rank {tp_rank} could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node."
++                f"TP rank {tp_rank} could finish the model loading, but there are other ranks that didn't finish loading "
++                f"(rank 0 waits up to {timeout_s} s per lagging rank). It is likely due to unexpected failures (e.g., OOM) or a slow node. "
++                f"If loading is only slow (e.g. cold reads from network storage), raise SGLANG_UNBALANCED_MODEL_LOADING_TIMEOUT_S."
+             ) from None

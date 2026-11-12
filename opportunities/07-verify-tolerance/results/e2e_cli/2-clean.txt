@@ -1,0 +1,30 @@
+[SERVEKIT] waiting up to 300s for http://127.0.0.1:18102 to serve
+[SERVEKIT] checking 16 prompts from http://127.0.0.1:18102 against results/e2e_cli/gold.json
+
+[SERVEKIT] Verify of http://127.0.0.1:18102 (exact mode)
+----------------------------------------
+prompt                n_tok   max|dlp|    max z       dnll    greedy
+capital_of_france         4          0        0         -0        ok
+fibonacci_code           16          0        0         -0        ok
+arithmetic               26          0        0         -0        ok
+primes                   22          0        0         -0        ok
+thermodynamics           13          0        0         -0        ok
+french                   21          0        0         -0        ok
+german                   22          0        0         -0        ok
+unicode                  31          0        0         -0        ok
+json_schema              21          0        0         -0         -
+sql                      28          0        0         -0         -
+repetition               12          0        0         -0         -
+rare_tokens              28          0        0         -0         -
+dialogue                 20          0        0         -0         -
+chess                    47          0        0         -0         -
+numbers                  61          0        0         -0         -
+long_prose              769          0        0         -0         -
+
+max |delta token_logprob|: 0   bitwise equal: True
+calibration: 8 perturbed runs, scale 0.132, deterministic True, batch-invariant False
+weight checksums: equal
+PASS
+
+result written to results/e2e_cli/2-clean.json
+exit 0

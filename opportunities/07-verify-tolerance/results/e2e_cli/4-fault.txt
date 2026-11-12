@@ -1,0 +1,2 @@
+model.layers.4.mlp.down_proj.weight: zeroed [1152:1536) of dim 1; 393216 elements changed, relative change 0.356
+wrote /private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/fd44cfd8-d7e7-472d-991c-6bcf097dc0b8/scratchpad/e2e_cli_work2/zeroed (servekit-fault.json records the ground truth)

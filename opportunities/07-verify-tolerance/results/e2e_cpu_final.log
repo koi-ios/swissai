@@ -1,0 +1,25 @@
+[study] qwen3-0.6b on cpu: 8 server starts, 30 captures, ~26 min (estimate)
+[study] qwen3-0.6b-cpu:reference:0   
+[study] qwen3-0.6b-cpu:repeat:0   
+[study] qwen3-0.6b-cpu:request:1   
+[study] qwen3-0.6b-cpu:request:2   
+[study] qwen3-0.6b-cpu:request:3   
+[study] qwen3-0.6b-cpu:request:4   
+[study] qwen3-0.6b-cpu:request:101   
+[study] qwen3-0.6b-cpu:request:102   
+[study] qwen3-0.6b-cpu:request:103   
+[study] qwen3-0.6b-cpu:restart:1   
+[study] qwen3-0.6b-cpu:restart-load:100   
+[study] qwen3-0.6b-cpu:fault:5000 zero_slice 1/8 of a tensor 
+[study] qwen3-0.6b-cpu:fault-load:500000 zero_slice 1/8 of a tensor 
+[study] qwen3-0.6b-cpu:fault:5001 zero_slice 1/128 of a tensor 
+[study] qwen3-0.6b-cpu:fault-load:500100 zero_slice 1/128 of a tensor 
+[study] qwen3-0.6b-cpu:fault:5002 zero_vocab_shard 1/8 of the vocab 
+[study] qwen3-0.6b-cpu:fault-load:500200 zero_vocab_shard 1/8 of the vocab 
+[study] qwen3-0.6b-cpu:fault:5003 dup_slice tp=2 
+[study] qwen3-0.6b-cpu:fault-load:500300 dup_slice tp=2 
+[study] qwen3-0.6b-cpu:fault:5004 permute_shards tp=2 
+[study] qwen3-0.6b-cpu:fault-load:500400 permute_shards tp=2 
+[study] qwen3-0.6b-cpu:fault:5005 transpose square projection 
+[study] qwen3-0.6b-cpu:fault-load:500500 transpose square projection 
+exit 0

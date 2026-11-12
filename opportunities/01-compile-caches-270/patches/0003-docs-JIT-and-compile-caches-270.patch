@@ -1,0 +1,122 @@
+From 9c122ebc01a9dfcf889e6c7f4d52a203b784113f Mon Sep 17 00:00:00 2001
+From: cache-audit <noreply@example.invalid>
+Date: Thu, 12 Nov 2026 06:59:14 +0100
+Subject: [PATCH 3/4] docs: JIT and compile caches (#270)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/jit-cache.md | 89 +++++++++++++++++++++++++++++++++++++++++++++++
+ mkdocs.yml        |  1 +
+ 2 files changed, 90 insertions(+)
+ create mode 100644 docs/jit-cache.md
+
+diff --git a/docs/jit-cache.md b/docs/jit-cache.md
+new file mode 100644
+index 0000000..1d54fb9
+--- /dev/null
++++ b/docs/jit-cache.md
+@@ -0,0 +1,89 @@
++# JIT and compile caches
++
++Large models on `vllm_base` and `sglang_base` spend minutes to tens of minutes compiling kernels at
++startup (TileLang, DeepGEMM, Triton, Inductor, FlashInfer, SGLang's own JIT kernels). sml keeps those
++caches on capstor, one directory per image and GPU architecture, so only the first launch of an image
++pays (#270).
++
++## What happens in a job
++
++1. **Key.** On the batch host, master.sh derives the image key.
++    - If the images CI wrote `<image>.sqsh.digest` (e.g. `sha256:...`), that is the key.
++    - Otherwise the key is `sqsh-<hash>` of the file size and the 96-byte squashfs superblock. That costs one
++      small read, and it changes on every rebuild even though images are updated in place.
++2. **GPU arch.** master.sh reads `compute_cap` from `nvidia-smi` (`sm90` on GH200).
++3. **Shared directory.** The job's cache directory is
++   `/capstor/store/cscs/swissai/infra01/sml/shared-caches/<key>/<arch>/`.
++4. **Seed.** Every node copies that directory into `/tmp/sml-jit-cache` before the engine starts. The env
++   file's `{jit_cache}` resolves to that path.
++5. **Promote.** Once the replica answers `/health`, and every 30 minutes after that, each node publishes
++   the entries it compiled back to the shared directory.
++
++The overlay path is fixed on purpose. Triton's group files and the ninja build trees of FlashInfer and
++tvm-ffi store absolute paths, so an entry is only reused at the path it was written at.
++
++## Why promotion is safe with concurrent jobs
++
++- New entries are copied into `<shared>/.staging/<host>-<pid>-<rand>/`, made group-readable, and then:
++  - a directory is `rename`d into place;
++  - a file is `link`ed into place.
++- Both operations fail if the target already exists. So the first writer wins, nothing is overwritten,
++  and a reader never sees a half-written entry.
++- No cross-node locks are needed. This matters because Lustre can be mounted `localflock` or `noflock`.
++- Files with an mtime younger than 60 s are deferred to the next round, in case a build is still writing
++  them in place.
++- Some files are never published:
++  - lock files (a stale `torch_extensions` lock blocks every later load forever);
++  - the libraries' temp files;
++  - node-specific state such as the GPU P2P check JSONs.
++
++## Modes
++
++```bash
++sml advanced ... --jit-cache overlay   # default
++sml advanced ... --jit-cache shared    # point the caches at capstor directly (no copy; needs flock on capstor)
++sml advanced ... --jit-cache off       # per-job caches only (today's behaviour)
++sml advanced ... --jit-cache-root DIR  # another root, e.g. on iopsstor
++```
++
++Users without write access to the root still seed and get warm starts; only promotion needs write
++access.
++
++## One-time setup (infra01 admin)
++
++```bash
++ROOT=/capstor/store/cscs/swissai/infra01/sml/shared-caches
++mkdir -p "$ROOT" && chgrp infra01 "$ROOT" && chmod 2775 "$ROOT"
++setfacl -d -m g::rwx "$ROOT"   # if ACLs are enabled on capstor
++```
++
++## Which variables
++
++The env TOMLs list them in `[env]`. Each points into `{jit_cache}`:
++
++- **vllm_base:** `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR`, `DG_JIT_CACHE_DIR`, `TILELANG_CACHE_DIR`,
++  `FLASHINFER_WORKSPACE_BASE`, `TVM_FFI_CACHE_DIR`, `CUTE_DSL_CACHE_DIR`, `CUDA_CACHE_PATH`.
++- **sglang_base:** `SGLANG_CACHE_DIR`, `SGLANG_JIT_CACHE_DIR` (it does not follow `SGLANG_CACHE_DIR`),
++  `TRITON_CACHE_DIR`, `TILELANG_CACHE_DIR`, `TVM_FFI_CACHE_DIR`, `CUTE_DSL_CACHE_DIR`.
++
++These lists were produced and checked with `cache-audit`. It runs a launch cold in a fresh HOME, records
++every file written, and fails CI when a new image writes a cache that no variable redirects. Rerun it
++when an image changes its engine version.
++
++vLLM keys its torch.compile cache by checkpoint path, so a new checkpoint recompiles its graphs. Its
++Triton, TileLang, DeepGEMM and FlashInfer kernels are shared across checkpoints of the same architecture.
++
++## Housekeeping
++
++```bash
++python3 src/swiss_ai_model_launch/assets/sml_jit_cache.py du --root "$ROOT"
++python3 src/swiss_ai_model_launch/assets/sml_jit_cache.py gc --root "$ROOT" --max-bytes 500e9 --max-age-days 30 --dry-run
++```
++
++`gc` evicts the oldest `<key>/<arch>` directories:
++- age is measured from `.meta/last_used`, which every seed touches;
++- it first removes directories unused for more than `--max-age-days`;
++- it then removes the least recently used ones until the total fits `--max-bytes`.
++
++An eviction is a rename into `.trash`, so a job that is seeding at that moment just starts cold. To drop
++a bad entry, delete its directory under `<key>/<arch>/<component>/`.
+diff --git a/mkdocs.yml b/mkdocs.yml
+index a541077..ea37670 100644
+--- a/mkdocs.yml
++++ b/mkdocs.yml
+@@ -22,6 +22,7 @@ nav:
+       - Advanced (sml advanced): usage-advanced.md
+       - Porting a Raw Command: porting-commands.md
+       - Running on KISTI: kisti.md
++      - JIT and Compile Caches: jit-cache.md
+   - Performance:
+       - Sizing a Model: sizing.md
+       - Benchmarking: benchmarking.md
+-- 
+2.50.1 (Apple Git-155)
+

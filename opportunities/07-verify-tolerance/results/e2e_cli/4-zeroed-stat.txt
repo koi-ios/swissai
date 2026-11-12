@@ -1,0 +1,42 @@
+[SERVEKIT] checking 16 prompts from http://127.0.0.1:18104 against results/e2e_cli/gold.json
+
+[SERVEKIT] Verify of http://127.0.0.1:18104 (statistical mode)
+----------------------------------------
+prompt                n_tok   max|dlp|    max z       dnll    greedy
+capital_of_france         4     0.3643     2.81    -0.0966        ok
+fibonacci_code           16     0.3212     3.21      -0.04    tie@18
+arithmetic               26     0.4683     3.59   +0.00149        ok
+primes                   22      1.491 1.17e+04     +0.146    tie@23
+thermodynamics           13      1.356     12.6     +0.135    tie@13
+french                   21     0.5121     19.6    +0.0943     tie@4
+german                   22     0.4064     49.5   +0.00574     tie@6
+unicode                  31      1.681     27.5     +0.086     tie@1
+json_schema              21      2.271     17.2      +0.17         -
+sql                      28      1.027     8.11    +0.0241         -
+repetition               12     0.5256        4    +0.0942         -
+rare_tokens              28      20.27 3.34e+03      +1.03         -
+dialogue                 20     0.5932      4.5    +0.0352         -
+chess                    47     0.8852     11.6      +0.02         -
+numbers                  61     0.6905     5.27    -0.0483         -
+long_prose              769      2.961     26.9   +0.00428         -
+
+max_z   1.166e+04   threshold 8.555   calibration [4.46, 6.58]
+rms_z       2.048   threshold 0.7751   calibration [0.626, 0.716]
+shift      0.1572   threshold 0.07877   calibration [-0.0506, 0.0337]
+top-1 flips at clear winners: 5/871; greedy divergences: 0 unexplained, 6 at near-ties
+calibration: 8 perturbed runs, scale 0.132, deterministic True, batch-invariant False
+  noise model: scale 0.132 x (1 - p), 8 perturbed calibration runs, margin_tau 1.39, alpha 0.01
+  6 greedy divergence(s) at near-ties (margin <= 1.39), explained by noise
+FAIL
+! max_z 1.17e+04 > calibrated threshold 8.55 (worst: primes[17] '5', delta -0.9073 from -0.000589)
+! rms_z 2.05 > calibrated threshold 0.775
+! shift 0.157 > calibrated threshold 0.0788
+! 5 top-1 flips at positions whose reference margin exceeds 1.39
+! primes[6]: top-1 ' in' replaced ':', which led by 3.000
+! primes[9]: top-1 ',' replaced ':', which led by 1.500
+! primes[11]: top-1 '1' replaced '2', which led by 5.000
+! primes[17]: top-1 '4' replaced '5', which led by 7.625
+! rare_tokens[5]: top-1 'al' replaced 'icro', which led by 4.500
+
+result written to results/e2e_cli/4-zeroed-stat.json
+exit 1

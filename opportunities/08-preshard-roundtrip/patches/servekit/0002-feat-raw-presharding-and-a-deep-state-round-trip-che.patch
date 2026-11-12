@@ -1,0 +1,2865 @@
+From ffab7347723d76d8f6680ec73ebde08fb664fe7e Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:35:16 +0100
+Subject: [PATCH 2/2] feat: raw presharding and a deep-state round-trip check
+
+sharded_state saves `state_dict()` after process_weights_after_loading, MLA
+absorption and lazily created aliases have run, and reloads it into a model
+whose post-processing already ran on placeholders. Anything a model keeps
+outside state_dict, or creates lazily, is lost silently or breaks the load:
+sglang#34448 (MXFP4 experts parked on the quant method), sglang#35702 / #19
+(attn_mha.kv_b_proj registered on first forward), and GemmaRMSNorm's
+non-persistent gemma_weight, derived inside its weight loader.
+
+Raw presharding (`--preshard-format raw`) stores instead, per rank, exactly
+the bytes of the original checkpoint that the ordinary load read on that rank,
+found by wrapping every tensor the weights iterator yields in a tensor
+subclass that records each read as a strided byte box. Serving replays those
+bytes through the ordinary load, so every weight loader, post-processing hook
+and alias runs as in a default load. Each read is checked against what was
+stored (SERVEKIT_RAW_VERIFY, on by default) and the parallel layout is checked
+against the one recorded, so a mismatch refuses to serve instead of serving
+garbage. Writing is incremental: a tensor's bytes are copied out as soon as
+nothing references it, so peak memory is about one 5 GB part.
+
+`servekit.deepstate` fingerprints every tensor a loaded model holds,
+including those on quant-method objects, plain attributes and non-persistent
+buffers; `SERVEKIT_DEEPSTATE_DIR` dumps them after any load and
+`servekit deepstate REF CAND` compares two dumps. It is the generic version of
+the quant_guard denylist: a state_dict-only comparison passes on the MXFP4
+case, this one does not.
+
+Also: quant_guard now refuses gpt-oss MXFP4 with no --moe-runner-backend for
+sharded_state, because sglang resolves auto to triton_kernel below SM100
+(arg_groups/model_overrides/gpt_oss.py:106-125 in v0.5.20), and never refuses
+a raw preshard.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/servekit/_prepare/save_sharded_state.py |  27 +-
+ src/servekit/_shim/__init__.py              |   5 +
+ src/servekit/cli.py                         |  59 ++-
+ src/servekit/deepstate.py                   | 321 ++++++++++++++++
+ src/servekit/launch.py                      |  24 +-
+ src/servekit/prepare.py                     |  23 +-
+ src/servekit/quant_guard.py                 |  30 +-
+ src/servekit/rawshard/__init__.py           |   5 +
+ src/servekit/rawshard/footprint.py          | 400 ++++++++++++++++++++
+ src/servekit/rawshard/sglang_hooks.py       | 282 ++++++++++++++
+ src/servekit/rawshard/store.py              | 326 ++++++++++++++++
+ src/servekit/topology.py                    |   6 +
+ tests/_mini_tp.py                           | 361 ++++++++++++++++++
+ tests/test_deepstate.py                     |  94 +++++
+ tests/test_raw_integration.py               | 156 ++++++++
+ tests/test_rawshard.py                      | 198 ++++++++++
+ tests/test_rawshard_sglang_hooks.py         | 151 ++++++++
+ 17 files changed, 2445 insertions(+), 23 deletions(-)
+ create mode 100644 src/servekit/deepstate.py
+ create mode 100644 src/servekit/rawshard/__init__.py
+ create mode 100644 src/servekit/rawshard/footprint.py
+ create mode 100644 src/servekit/rawshard/sglang_hooks.py
+ create mode 100644 src/servekit/rawshard/store.py
+ create mode 100644 tests/_mini_tp.py
+ create mode 100644 tests/test_deepstate.py
+ create mode 100644 tests/test_raw_integration.py
+ create mode 100644 tests/test_rawshard.py
+ create mode 100644 tests/test_rawshard_sglang_hooks.py
+
+diff --git a/src/servekit/_prepare/save_sharded_state.py b/src/servekit/_prepare/save_sharded_state.py
+index 5d8ee6e..e78414f 100644
+--- a/src/servekit/_prepare/save_sharded_state.py
++++ b/src/servekit/_prepare/save_sharded_state.py
+@@ -41,6 +41,12 @@ parser.add_argument(
+     help="max size (in bytes) of each safetensors file",
+ )
+ parser.add_argument("--servekit-resolved-out", type=str, default=None)
++parser.add_argument(
++    "--servekit-format",
++    choices=("sharded_state", "raw"),
++    default="sharded_state",
++    help="raw: record the bytes the ordinary load reads (servekit.rawshard) instead of dumping state_dict()",
++)
+ 
+ 
+ def resolved(llm, engine_args) -> dict:
+@@ -87,12 +93,16 @@ def main(args):
+ 
+     # Before the Engine, so an unsupported checkpoint costs a second rather than
+     # a full load followed by a dump nobody can trust.
+-    unsupported = quant_guard.check_dir(
++    raw = args.servekit_format == "raw"
++    unsupported = [] if raw else quant_guard.check_dir(
+         Path(model_path),
+         quantization=engine_args.quantization,
+         moe_runner_backend=getattr(engine_args, "moe_runner_backend", None),
+         moe_a2a_backend=getattr(engine_args, "moe_a2a_backend", None),
+     )
++    if raw and not os.environ.get("SERVEKIT_RAW_RECORD_DIR"):
++        # prepare.py sets it; a hand-run without it would record nothing
++        os.environ["SERVEKIT_RAW_RECORD_DIR"] = args.output
+     if unsupported:
+         print(quant_guard.refusal(unsupported, model_path), file=sys.stderr)
+         raise SystemExit(2)
+@@ -115,12 +125,17 @@ def main(args):
+     # wrong shape surfaces as KeyError 'path' after a full model load.
+     from sglang.srt.managers.scheduler import Scheduler
+ 
+-    if "params" in inspect.signature(Scheduler.save_sharded_model).parameters:
+-        payload = {"params": payload}
+-    llm.collective_rpc("save_sharded_model", **payload)
++    if raw:
++        # Nothing to dump: every scheduler wrote its raw shard at the end of
++        # its own load, before the Engine constructor returned.
++        pass
++    else:
++        if "params" in inspect.signature(Scheduler.save_sharded_model).parameters:
++            payload = {"params": payload}
++        llm.collective_rpc("save_sharded_model", **payload)
+ 
+     pp_size = getattr(engine_args, "pp_size", 1)
+-    if pp_size > 1:
++    if pp_size > 1 and not raw:
+         # The rpc reply comes from pp0/tp0 before later stages have even received
+         # the request, so without this the copy below exits out from under them.
+         wait_for_writes(args.output, pp_size, engine_args.tp_size)
+@@ -141,7 +156,7 @@ def main(args):
+         with open(args.servekit_resolved_out, "w") as f:
+             json.dump(resolved(llm, engine_args), f)
+ 
+-    print(f"saved sharded checkpoint to {args.output}")
++    print(f"saved {'raw preshard' if raw else 'sharded checkpoint'} to {args.output}")
+ 
+     # The warmup `launch_server` runs and an Engine does not: FlashInfer JITs
+     # only on a served request. The checkpoint is already written, so failing
+diff --git a/src/servekit/_shim/__init__.py b/src/servekit/_shim/__init__.py
+index 6e93993..fbaf407 100644
+--- a/src/servekit/_shim/__init__.py
++++ b/src/servekit/_shim/__init__.py
+@@ -184,3 +184,8 @@ def install() -> None:
+     HookRegistry.register(SAVE_TARGET, _around_save_model, HookType.AROUND)
+     HookRegistry.register(LOAD_TARGET, _around_load_model, HookType.AROUND)
+     HookRegistry.register(RUN_TARGET, _around_run_load, HookType.AROUND)
++
++    # Raw presharding and the deep-state check; pass-throughs unless asked for.
++    from servekit.rawshard import sglang_hooks
++
++    sglang_hooks.install()
+diff --git a/src/servekit/cli.py b/src/servekit/cli.py
+index 1f73c5c..c73b419 100644
+--- a/src/servekit/cli.py
++++ b/src/servekit/cli.py
+@@ -16,7 +16,8 @@ from .verify import capture, compare, discover_model, load_prompt_set, render_ve
+ 
+ USAGE = """usage:
+   servekit launch --servekit-artifact-path PATH [--only-prepare] [--out PATH]
+-                  [--slices N] [--overlap] -- <command...>
++                  [--slices N] [--overlap] [--preshard-format {sharded_state,raw}] -- <command...>
++  servekit deepstate REFERENCE CANDIDATE [--again REFERENCE2] [--registered-only] [--out PATH]
+   servekit profile [--out PATH] [--timeout SECONDS] -- <command...>
+   servekit bench --url URL (--into PATH | --out PATH) [--wait-ready SECONDS] [...]
+   servekit verify --url URL (--record PATH | --reference PATH) [--wait-ready SECONDS] [...]
+@@ -142,6 +143,14 @@ def _launch(argv: List[str]) -> int:
+         action="store_true",
+         help="start the engine concurrently with the stage; sglang only",
+     )
++    parser.add_argument(
++        "--preshard-format",
++        choices=("sharded_state", "raw"),
++        default=None,
++        help="how to preshard when preparing: sharded_state dumps the post-processed state_dict; "
++        "raw stores the checkpoint bytes each rank reads and replays them through the engine's "
++        "own load (default: the artifact's format, else sharded_state)",
++    )
+     args = parser.parse_args(options)
+ 
+     try:
+@@ -153,6 +162,7 @@ def _launch(argv: List[str]) -> int:
+             timeout=args.timeout,
+             overlap=args.overlap,
+             only_prepare=args.only_prepare,
++            preshard_format=args.preshard_format,
+         )
+     except ValueError as e:
+         print(f"error: {e}", file=sys.stderr)
+@@ -333,6 +343,52 @@ def _verify(argv: List[str]) -> int:
+     return 0 if result.passed else 1
+ 
+ 
++def _deepstate(argv: List[str]) -> int:
++    """Compare deep-state dumps: the generic presharding round-trip check."""
++    parser = argparse.ArgumentParser(
++        prog="servekit deepstate",
++        description="Compare every tensor two loads of a model hold (servekit.deepstate dumps, "
++        "written when SERVEKIT_DEEPSTATE_DIR is set). Arguments are dump files or directories of them.",
++    )
++    parser.add_argument("reference", type=Path, help="dump(s) from the engine's default loader")
++    parser.add_argument("candidate", type=Path, help="dump(s) from the presharded load")
++    parser.add_argument("--again", type=Path, default=None,
++                        help="a second reference load; tensors that differ between the two are ignored")
++    parser.add_argument("--registered-only", action="store_true",
++                        help="compare only parameters and buffers, as a state_dict check would")
++    parser.add_argument("--out", type=Path, default=None, help="write the per-rank report as JSON")
++    args = parser.parse_args(argv)
++
++    from . import deepstate
++
++    def files(path: Path) -> dict:
++        if path.is_dir():
++            return {p.name: p for p in sorted(path.glob("deepstate-*.json"))}
++        return {"single": path}
++
++    ref, cand = files(args.reference), files(args.candidate)
++    again = files(args.again) if args.again else {}
++    if not ref or set(ref) != set(cand):
++        print(f"error: the dumps cover different ranks: {sorted(ref)} vs {sorted(cand)}", file=sys.stderr)
++        return 2
++    ok, out = True, {}
++    for name in sorted(ref):
++        report = deepstate.compare(
++            deepstate.load(str(ref[name])),
++            deepstate.load(str(cand[name])),
++            reference_again=deepstate.load(str(again[name])) if name in again else None,
++            only_kinds=("param", "buffer") if args.registered_only else None,
++        )
++        print(f"[{name}] {report.summary()}")
++        ok = ok and report.ok
++        out[name] = {"ok": report.ok, "missing": report.missing, "extra": report.extra,
++                     "differ": report.differ, "unstable": report.unstable,
++                     "alias_changes": report.alias_changes}
++    if args.out:
++        args.out.write_text(json.dumps(out, indent=2))
++    return 0 if ok else 1
++
++
+ def main(argv: Optional[List[str]] = None) -> int:
+     argv = sys.argv[1:] if argv is None else argv
+     commands = {
+@@ -340,6 +396,7 @@ def main(argv: Optional[List[str]] = None) -> int:
+         "profile": _profile,
+         "bench": _bench,
+         "verify": _verify,
++        "deepstate": _deepstate,
+     }
+     if not argv or argv[0] not in commands:
+         print(USAGE, file=sys.stderr)
+diff --git a/src/servekit/deepstate.py b/src/servekit/deepstate.py
+new file mode 100644
+index 0000000..0b23c6d
+--- /dev/null
++++ b/src/servekit/deepstate.py
+@@ -0,0 +1,321 @@
++"""Every tensor a loaded model holds, wherever it hides, as comparable fingerprints.
++
++`state_dict()` is not the model. Engines keep inference-critical tensors where
++it cannot see them: on quantization-method objects (SGLang's MXFP4 triton path
++parks the swizzled experts on `quant_method.w13_weight_triton_tensor`), in
++non-persistent buffers (`GemmaRMSNorm.gemma_weight`), in plain attributes
++(MLA's `w_kc`/`w_vc`), and inside dataclasses such as triton_kernels'
++`PrecisionConfig`. A checkpoint format that round-trips `state_dict()` can
++therefore pass a state_dict comparison and still serve garbage.
++
++`collect` walks the module tree *and* the plain-object graph hanging off every
++module, and `fingerprint` reduces each distinct tensor to (dtype, shape, a
++content digest computed on its own device). Two loads of the same checkpoint
++that should be equivalent -- the engine's default loader and a presharded
++round trip -- must agree on every entry. `compare` says where they do not.
++
++Uninitialized memory is the one source of false alarms: a workspace allocated
++with torch.empty differs between any two loads. `deterministic_empty()` makes
++those allocations deterministic (torch fills them with NaN / max-int) for the
++duration of a load, and `compare` also accepts a third run of the reference
++loader to subtract whatever still varies.
++"""
++from __future__ import annotations
++
++import contextlib
++import dataclasses
++import json
++import os
++import types
++from typing import Any, Dict, Iterable, List, Optional, Tuple
++
++import torch
++
++# Values never worth walking into: they hold no model tensors, or hold the
++# whole runtime (process groups, streams, configs of other processes).
++_SKIP_TYPES: Tuple[type, ...] = (str, bytes, int, float, bool, complex, type(None), type, range,
++                                 types.ModuleType, torch.dtype, torch.device)
++_SKIP_NAMES = {"__class__", "__dict__", "__weakref__", "_forward_hooks", "_forward_pre_hooks",
++               "_backward_hooks", "_backward_pre_hooks", "_state_dict_hooks", "_state_dict_pre_hooks",
++               "_load_state_dict_pre_hooks", "_load_state_dict_post_hooks", "_forward_hooks_with_kwargs",
++               "_forward_pre_hooks_with_kwargs", "_forward_hooks_always_called", "_non_persistent_buffers_set"}
++_CHUNK_WORDS = 1 << 26
++
++
++@dataclasses.dataclass
++class Entry:
++    path: str
++    kind: str  # "param" | "buffer" | "nonpersistent_buffer" | "hidden"
++    dtype: str
++    shape: List[int]
++    device: str
++    digest: str
++    aliases: List[str] = dataclasses.field(default_factory=list)
++
++
++def _identity(t: torch.Tensor) -> Tuple:
++    try:
++        ptr = t.untyped_storage().data_ptr()
++    except (RuntimeError, NotImplementedError):
++        ptr = id(t)
++    return (str(t.device), ptr, t.storage_offset(), tuple(t.shape), tuple(t.stride()), t.dtype)
++
++
++def _is_tensor(x: Any) -> bool:
++    return isinstance(x, torch.Tensor) and not x.is_meta
++
++
++def _children(obj: Any) -> Iterable[Tuple[str, Any]]:
++    """(attribute path segment, value) for the parts of `obj` that may hold tensors."""
++    if isinstance(obj, dict):
++        for k, v in obj.items():
++            if isinstance(k, (str, int)):
++                yield f"[{k!r}]", v
++        return
++    if isinstance(obj, (list, tuple)):
++        for i, v in enumerate(obj):
++            yield f"[{i}]", v
++        return
++    d = getattr(obj, "__dict__", None)
++    if isinstance(d, dict):
++        for k, v in d.items():
++            if k not in _SKIP_NAMES:
++                yield f".{k}", v
++    for slot in getattr(type(obj), "__slots__", ()) or ():
++        if isinstance(slot, str) and slot not in _SKIP_NAMES and hasattr(obj, slot):
++            try:
++                yield f".{slot}", getattr(obj, slot)
++            except Exception:  # noqa: BLE001 - a slot may be unset or raise
++                continue
++
++
++def collect(model: torch.nn.Module, max_depth: int = 6, max_objects: int = 2_000_000) -> Dict[str, Tuple[str, torch.Tensor, List[str]]]:
++    """path -> (kind, tensor, alias paths) for every distinct tensor `model` holds.
++
++    Registered parameters and buffers come first, under their state_dict names,
++    so an alias between a registered and a hidden name is reported under the
++    registered one.
++    """
++    found: Dict[Tuple, str] = {}
++    out: Dict[str, Tuple[str, torch.Tensor, List[str]]] = {}
++
++    def add(path: str, kind: str, t: torch.Tensor) -> None:
++        key = _identity(t)
++        if key in found:
++            out[found[key]][2].append(path)
++            return
++        found[key] = path
++        out[path] = (kind, t, [])
++
++    # remove_duplicate=False: a module registered under two names (MLA's lazily
++    # registered attn_mha.kv_b_proj) must show up under both, as an alias.
++    modules = list(model.named_modules(remove_duplicate=False))
++    module_ids = {id(m) for _, m in modules}
++    for name, mod in modules:
++        prefix = f"{name}." if name else ""
++        nonpersistent = getattr(mod, "_non_persistent_buffers_set", set())
++        for pname, p in mod._parameters.items():
++            if p is not None and _is_tensor(p):
++                add(prefix + pname, "param", p)
++        for bname, b in mod._buffers.items():
++            if b is not None and _is_tensor(b):
++                add(prefix + bname, "nonpersistent_buffer" if bname in nonpersistent else "buffer", b)
++
++    visited = set(module_ids)
++    budget = [max_objects]
++
++    def walk(path: str, obj: Any, depth: int) -> None:
++        if budget[0] <= 0 or depth > max_depth:
++            return
++        if _is_tensor(obj):
++            add(path, "hidden", obj)
++            return
++        if isinstance(obj, _SKIP_TYPES) or callable(obj) and not hasattr(obj, "__dict__"):
++            return
++        if id(obj) in visited:
++            return
++        visited.add(id(obj))
++        budget[0] -= 1
++        mod_name = type(obj).__module__ or ""
++        if mod_name.startswith(("torch.distributed", "torch.cuda", "threading", "multiprocessing", "logging", "zmq")):
++            return
++        for seg, child in _children(obj):
++            walk(path + seg, child, depth + 1)
++
++    walked = set()
++    for name, mod in modules:
++        if id(mod) in walked:
++            continue
++        walked.add(id(mod))
++        prefix = name if name else "<root>"
++        for k, v in vars(mod).items():
++            if k in ("_parameters", "_buffers", "_modules") or k in _SKIP_NAMES:
++                continue
++            if isinstance(v, torch.nn.Module) and id(v) in module_ids:
++                continue  # a registered module, walked under its own name
++            walk(f"{prefix}.{k}", v, 1)
++    return out
++
++
++def digest(t: torch.Tensor) -> str:
++    """A content digest of `t`'s bytes, computed on t's device. Not cryptographic."""
++    if t.numel() == 0:
++        return "empty"
++    try:
++        b = t.detach().contiguous().reshape(-1).view(torch.uint8)
++    except RuntimeError:
++        b = t.detach().to(torch.float64).contiguous().reshape(-1).view(torch.uint8)
++    pad = (-b.numel()) % 4
++    if pad:
++        b = torch.cat([b, torch.zeros(pad, dtype=torch.uint8, device=b.device)])
++    words = b.view(torch.int32)
++    s1 = torch.zeros((), dtype=torch.int64, device=b.device)
++    s2 = torch.zeros((), dtype=torch.int64, device=b.device)
++    for start in range(0, words.numel(), _CHUNK_WORDS):
++        w = words[start:start + _CHUNK_WORDS].to(torch.int64) & 0xFFFFFFFF
++        idx = torch.arange(start, start + w.numel(), dtype=torch.int64, device=b.device)
++        mult = (idx * 2654435761 + 97) % 2147483647 + 1
++        s1 += (w * mult).sum()
++        s2 += w.sum()
++    return f"{int(s1.item()) & 0xFFFFFFFFFFFFFFFF:016x}{int(s2.item()) & 0xFFFFFFFFFFFFFFFF:016x}"
++
++
++def fingerprint(model: torch.nn.Module) -> Dict[str, Entry]:
++    entries = {}
++    for path, (kind, t, aliases) in collect(model).items():
++        entries[path] = Entry(
++            path=path,
++            kind=kind,
++            dtype=str(t.dtype).replace("torch.", ""),
++            shape=list(t.shape),
++            device=str(t.device),
++            digest=digest(t),
++            aliases=sorted(aliases),
++        )
++    return entries
++
++
++def dump(model: torch.nn.Module, path: str, **meta: Any) -> Dict[str, Entry]:
++    entries = fingerprint(model)
++    tmp = path + ".tmp"
++    with open(tmp, "w") as f:
++        json.dump({"meta": meta, "entries": [dataclasses.asdict(e) for e in entries.values()]}, f)
++    os.replace(tmp, path)
++    return entries
++
++
++def load(path: str) -> Dict[str, Entry]:
++    with open(path) as f:
++        data = json.load(f)
++    return {e["path"]: Entry(**e) for e in data["entries"]}
++
++
++@dataclasses.dataclass
++class Report:
++    missing: List[str]  # in the reference, not in the candidate
++    extra: List[str]  # in the candidate, not in the reference
++    differ: List[str]  # in both, different dtype/shape/content
++    unstable: List[str]  # differ, but also differ between two reference loads
++    kinds: Dict[str, str]
++    alias_changes: List[str]
++
++    @property
++    def ok(self) -> bool:
++        return not (self.missing or self.extra or self.differ or self.alias_changes)
++
++    def by_kind(self, paths: List[str]) -> Dict[str, int]:
++        counts: Dict[str, int] = {}
++        for p in paths:
++            counts[self.kinds.get(p, "?")] = counts.get(self.kinds.get(p, "?"), 0) + 1
++        return counts
++
++    def summary(self, limit: int = 8) -> str:
++        if self.ok:
++            note = f" ({len(self.unstable)} tensors vary between reference loads and were ignored)" if self.unstable else ""
++            return f"round trip exact: every tensor the model holds matches the reference{note}"
++        lines = ["round trip NOT exact:"]
++        for label, paths in (("missing", self.missing), ("extra", self.extra), ("differ", self.differ),
++                             ("alias structure changed", self.alias_changes)):
++            if paths:
++                lines.append(f"  {label}: {len(paths)} {self.by_kind(paths)}")
++                lines.extend(f"    {p}" for p in paths[:limit])
++                if len(paths) > limit:
++                    lines.append(f"    ... {len(paths) - limit} more")
++        return "\n".join(lines)
++
++
++def _registered_names(entries: Dict[str, Entry]) -> Dict[str, str]:
++    """registered name -> the canonical path it is stored under (itself, or an alias)."""
++    names = {}
++    for e in entries.values():
++        if e.kind != "hidden":
++            names[e.path] = e.path
++        for a in e.aliases:
++            names.setdefault(a, e.path)
++    return names
++
++
++def compare(reference: Dict[str, Entry], candidate: Dict[str, Entry],
++            reference_again: Optional[Dict[str, Entry]] = None,
++            only_kinds: Optional[Iterable[str]] = None) -> Report:
++    """Where `candidate` holds different tensors than `reference`.
++
++    `reference_again`, a second load with the reference loader, marks tensors
++    that differ even between two reference loads (scratch buffers, RNG state);
++    those are reported as unstable instead of as differences.
++    `only_kinds` restricts the comparison, e.g. to ("param", "buffer") to see
++    what a state_dict-only check would have caught.
++    """
++    kinds = {p: e.kind for p, e in {**candidate, **reference}.items()}
++    keep = set(only_kinds) if only_kinds is not None else None
++
++    def wanted(e: Entry) -> bool:
++        return keep is None or e.kind in keep
++
++    unstable = set()
++    if reference_again is not None:
++        for p, e in reference.items():
++            o = reference_again.get(p)
++            if o is None or (o.dtype, o.shape, o.digest) != (e.dtype, e.shape, e.digest):
++                unstable.add(p)
++
++    missing = sorted(p for p, e in reference.items() if wanted(e) and p not in candidate and p not in unstable)
++    extra = sorted(p for p, e in candidate.items() if wanted(e) and p not in reference)
++    differ = sorted(
++        p for p, e in reference.items()
++        if wanted(e) and p in candidate and p not in unstable
++        and (candidate[p].dtype, candidate[p].shape, candidate[p].digest) != (e.dtype, e.shape, e.digest)
++    )
++    # A registered name that the reference holds as its own tensor but the
++    # candidate only as an alias of another (or the reverse) is how lazily
++    # created aliases show up.
++    ref_names, cand_names = _registered_names(reference), _registered_names(candidate)
++    alias_changes = sorted(
++        n for n in set(ref_names) & set(cand_names)
++        if (ref_names[n] == n) != (cand_names[n] == n)
++        and (keep is None or kinds.get(n, "param") in keep)
++    )
++    return Report(missing, extra, differ, sorted(unstable), kinds, alias_changes)
++
++
++@contextlib.contextmanager
++def deterministic_empty():
++    """Make torch.empty & co. fill memory deterministically inside the block.
++
++    Torch fills uninitialized memory with NaN (floats) or the max value (ints)
++    while deterministic algorithms are on; warn_only keeps ops without a
++    deterministic kernel running. Restores both settings on exit.
++    """
++    was_on = torch.are_deterministic_algorithms_enabled()
++    was_warn = torch.is_deterministic_algorithms_warn_only_enabled()
++    fill = getattr(torch.utils, "deterministic", None)
++    was_fill = getattr(fill, "fill_uninitialized_memory", None) if fill is not None else None
++    torch.use_deterministic_algorithms(True, warn_only=True)
++    if fill is not None:
++        fill.fill_uninitialized_memory = True
++    try:
++        yield
++    finally:
++        torch.use_deterministic_algorithms(was_on, warn_only=was_warn)
++        if fill is not None and was_fill is not None:
++            fill.fill_uninitialized_memory = was_fill
+diff --git a/src/servekit/launch.py b/src/servekit/launch.py
+index aa87aa5..0378ff8 100644
+--- a/src/servekit/launch.py
++++ b/src/servekit/launch.py
+@@ -37,7 +37,9 @@ from .engine_args import check_manifest, find_model_path, replace_model_path
+ from .prepare import prepare
+ from .profile import Phase, ProfileReport, detect_framework, render_table, run_profile, save_json
+ from .stage import DEFAULT_SLICES, stage
+-from .topology import SHARDED_FORMAT, Topology, read_topology, shard_glob, wants_sharded_state
++from .topology import SHARDED_FORMAT, Topology, raw_glob, read_topology, shard_glob, wants_sharded_state
++
++RAW_FORMAT = "raw"
+ 
+ DEFAULT_ROOT = Path("/dev/shm/servekit")
+ DEFAULT_CACHE_ROOT = jit_cache.NODE_LOCAL_ROOT
+@@ -112,7 +114,7 @@ def _writable(path: Path) -> bool:
+     return probe.is_dir() and os.access(probe, os.W_OK | os.X_OK)
+ 
+ 
+-def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact: Path) -> int:
++def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact: Path, fmt: str = SHARDED_FORMAT) -> int:
+     print(f"[SERVEKIT] no prepared checkpoint in {artifact}; preparing one now", flush=True)
+     return prepare(
+         model,
+@@ -123,6 +125,7 @@ def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact:
+         nnodes=topo.nnodes,
+         node_rank=topo.node_rank,
+         dist_init_addr=topo.dist_init_addr,
++        fmt=fmt,
+     )
+ 
+ 
+@@ -149,6 +152,7 @@ def launch(
+     timeout: float = 1800.0,
+     overlap: bool = False,
+     only_prepare: bool = False,
++    preshard_format: Optional[str] = None,
+ ) -> int:
+     # Backports go on disk before anything imports sglang; a misfit is a log line, not a refusal.
+     apply_all()
+@@ -177,6 +181,8 @@ def launch(
+     artifact = Path(artifact)
+     prepared = manifest_mod.read(artifact)
+     problems = check_manifest(command, spec, prepared) if prepared is not None else []
++    if prepared is not None and preshard_format is not None and prepared.format != preshard_format:
++        problems.append(f"format: the artifact is {prepared.format}, --preshard-format asks for {preshard_format}")
+ 
+     unwritable = False
+     if prepared is None or (only_prepare and problems):
+@@ -187,7 +193,7 @@ def launch(
+                 print("error: --only-prepare had nowhere to write", file=sys.stderr)
+                 return 1
+         else:
+-            rc = _prepare_artifact(command, topo, src_path, artifact)
++            rc = _prepare_artifact(command, topo, src_path, artifact, preshard_format or SHARDED_FORMAT)
+             if rc != 0:
+                 return rc
+             # A worker returns from prepare before the head has written the
+@@ -196,6 +202,8 @@ def launch(
+             prepared = manifest_mod.read(artifact)
+             problems = check_manifest(command, spec, prepared) if prepared is not None else []
+ 
++    raw = prepared is not None and prepared.format == RAW_FORMAT
++
+     if only_prepare:
+         return 0
+ 
+@@ -215,7 +223,7 @@ def launch(
+     # is one whose serve-time flags reach a path the dump did not. Either way it
+     # looks like a healthy server answering from dead weights.
+     if not plain:
+-        unsupported = quant_guard.check_command(src_path, command)
++        unsupported = quant_guard.check_command(src_path, command, RAW_FORMAT if raw else SHARDED_FORMAT)
+         if unsupported:
+             print(quant_guard.refusal(unsupported, src), file=sys.stderr)
+             return 2
+@@ -225,14 +233,16 @@ def launch(
+         engine_command = list(command)
+     else:
+         engine_command = replace_model_path(command, spec, str(dest))
+-        if not wants_sharded_state(command):
++        # A raw preshard loads through the ordinary loader: servekit's SGLang
++        # plugin finds its index in the model directory and replays it.
++        if not raw and not wants_sharded_state(command):
+             engine_command += ["--load-format", SHARDED_FORMAT]
+     t0 = time.time()
+ 
+     # A presharded checkpoint gives each rank its own files, so a node stages
+     # only its own ranks' -- two nodes pull disjoint halves off Lustre at once
+     # instead of the whole checkpoint twice.
+-    sliced = topo.is_multinode and not plain and wants_sharded_state(engine_command)
++    sliced = topo.is_multinode and not plain and (raw or wants_sharded_state(engine_command))
+     # The engine reads config.json and the tokenizer within seconds of starting,
+     # so with --overlap those cannot be left to a stage still running underneath
+     # it: the stager truncates every destination to full size first, so an early
+@@ -240,7 +250,7 @@ def launch(
+     # the shards, as experiments/clariden-loading-exp does.
+     split = overlap and any(src_path.glob("*.safetensors"))
+     if sliced:
+-        pattern = shard_glob(topo)
++        pattern = raw_glob(topo) if raw else shard_glob(topo)
+     elif split:
+         pattern = "*.safetensors"
+     else:
+diff --git a/src/servekit/prepare.py b/src/servekit/prepare.py
+index 2a8d8a6..31bac4e 100644
+--- a/src/servekit/prepare.py
++++ b/src/servekit/prepare.py
+@@ -18,8 +18,11 @@ from .manifest import Manifest
+ SAVE_SCRIPT = Path(__file__).parent / "_prepare" / "save_sharded_state.py"
+ 
+ FORMAT = "sharded_state"
++RAW_FORMAT = "raw"
++FORMATS = (FORMAT, RAW_FORMAT)
+ 
+ TP_PATTERN = "model-rank-{rank}-part-{part}.safetensors"
++RAW_INDEX = "servekit-raw-rank-{rank}.json"
+ 
+ PLUGIN_FLOOR = "0.5.11"
+ 
+@@ -46,7 +49,10 @@ def _plugins_available() -> bool:
+     return (root / "srt" / "plugins" / "hook_registry.py").is_file()
+ 
+ 
+-def _missing_shards(out: Path, tp_size: int, pp_size: int = 1) -> List[str]:
++def _missing_shards(out: Path, tp_size: int, pp_size: int = 1, fmt: str = FORMAT) -> List[str]:
++    if fmt == RAW_FORMAT:
++        names = [RAW_INDEX.format(rank=r) for r in range(tp_size * pp_size)]
++        return [name for name in names if not (out / name).is_file()]
+     pattern = PP_PATTERN if pp_size > 1 else TP_PATTERN
+     names = [
+         pattern.format(pp_rank=pp, rank=tp, part=0)
+@@ -67,7 +73,11 @@ def prepare(
+     dist_init_addr: Optional[str] = None,
+     pp: int = 1,
+     cache_root: Path = jit_cache.NODE_LOCAL_ROOT,
++    fmt: str = FORMAT,
+ ) -> int:
++    if fmt not in FORMATS:
++        print(f"error: unknown preshard format {fmt!r}; choose one of {', '.join(FORMATS)}", file=sys.stderr)
++        return 2
+     if not model.is_dir():
+         print(f"error: model path {model} is not a directory", file=sys.stderr)
+         return 2
+@@ -86,6 +96,10 @@ def prepare(
+     # ninja build dirs, so a cache compiled elsewhere rebuilds and buys nothing.
+     cache_build = jit_cache.node_local(cache_root, out.name)
+     env = {**os.environ, **jit_cache.create(cache_build)}
++    if fmt == RAW_FORMAT:
++        # Read by servekit.rawshard.sglang_hooks inside every scheduler: the
++        # ordinary load records what it reads and writes it here.
++        env["SERVEKIT_RAW_RECORD_DIR"] = str(out)
+ 
+     dist_args: List[str] = []
+     if nnodes > 1:
+@@ -105,11 +119,12 @@ def prepare(
+             "--tensor-parallel-size", str(tp),
+             "--pipeline-parallel-size", str(pp),
+             "--servekit-resolved-out", str(resolved_path),
++            "--servekit-format", fmt,
+             *dist_args,
+             *engine_args,
+         ]
+         where = f" (node {node_rank} of {nnodes})" if nnodes > 1 else ""
+-        print(f"[SERVEKIT] preparing {model} -> {out} (tp={tp}, pp={pp}){where}", flush=True)
++        print(f"[SERVEKIT] preparing {model} -> {out} (tp={tp}, pp={pp}, {fmt}){where}", flush=True)
+         rc = subprocess.call(command, env=env)
+         if node_rank != 0:
+             # A worker only ends when the job tears its task down, so its exit
+@@ -124,7 +139,7 @@ def prepare(
+             return 1
+         resolved = json.loads(resolved_path.read_text())
+ 
+-    missing = _missing_shards(out, tp, pp)
++    missing = _missing_shards(out, tp, pp, fmt)
+     if missing:
+         print(f"error: {out} is missing shards: {', '.join(missing)}", file=sys.stderr)
+         return 1
+@@ -140,7 +155,7 @@ def prepare(
+         n = sum(1 for p in cached.rglob("*") if p.is_file())
+         print(f"[SERVEKIT] kept {n} JIT cache files in {cached}", flush=True)
+ 
+-    manifest = Manifest(format=FORMAT, source=str(model), **resolved)
++    manifest = Manifest(format=fmt, source=str(model), **resolved)
+     path = manifest.write(out)
+     print(f"[SERVEKIT] prepared {tp * pp} ranks in {out}; manifest written to {path}", flush=True)
+     print(
+diff --git a/src/servekit/quant_guard.py b/src/servekit/quant_guard.py
+index 2d4cdb1..c30f8a0 100644
+--- a/src/servekit/quant_guard.py
++++ b/src/servekit/quant_guard.py
+@@ -44,6 +44,10 @@ class Setup:
+     def is_deepseek(self) -> bool:
+         return any("deepseek" in a.lower() for a in self.architectures)
+ 
++    @property
++    def is_gpt_oss(self) -> bool:
++        return any(a.startswith("GptOss") for a in self.architectures)
++
+     @property
+     def act_order(self) -> bool:
+         """Act-order GPTQ, spelled two ways depending on the checkpoint format."""
+@@ -58,8 +62,13 @@ class Setup:
+ # (what servekit will not preshard, what makes it so). Kept as short names: the
+ # rationale is one hook away, in the module docstring and issue #14.
+ RULES = [
+-    ("mxfp4 with --moe-runner-backend triton_kernel",
+-     lambda s: s.quant_method == "mxfp4" and s.moe_runner_backend == "triton_kernel"),
++    # SGLang picks triton_kernel itself for gpt-oss when the flag is left at
++    # auto on anything below SM100 (arg_groups/model_overrides/gpt_oss.py:106-125
++    # in v0.5.20; server_args.py in v0.5.10-0.5.17), so a GH200 launch with no
++    # flag lands on the same path as the explicit one.
++    ("mxfp4 on the triton_kernel MoE backend (explicit, or SGLang's own default for gpt-oss below SM100)",
++     lambda s: s.quant_method == "mxfp4" and (
++         s.moe_runner_backend == "triton_kernel" or (s.moe_runner_backend == "auto" and s.is_gpt_oss))),
+     ("NVFP4 on DeepSeek (SwiGLU-fused shared experts)",
+      lambda s: "NVFP4" in s.quant_algo and s.is_deepseek),
+     ("GGUF",
+@@ -101,8 +110,18 @@ def check_dir(model_dir: Path, **engine) -> List[str]:
+     ))
+ 
+ 
+-def check_command(model_dir: Path, command: Sequence[str]) -> List[str]:
+-    """`check_dir` for an engine command line, for the launch side."""
++RAW_FORMAT = "raw"
++
++
++def check_command(model_dir: Path, command: Sequence[str], preshard_format: str = "sharded_state") -> List[str]:
++    """`check_dir` for an engine command line, for the launch side.
++
++    A raw preshard is never refused: it replays checkpoint bytes through the
++    engine's own load, so post-processing runs on real weights and nothing it
++    moves off the module can be lost.
++    """
++    if preshard_format == RAW_FORMAT:
++        return []
+ 
+     def flag(name: str, default: Optional[str] = None) -> Optional[str]:
+         found = _find_flag(list(command), [name])
+@@ -121,5 +140,6 @@ def refusal(unsupported: Sequence[str], model_dir) -> str:
+     return (
+         f"[SERVEKIT] error: servekit does not support {', '.join(unsupported)} as a presharded checkpoint: "
+         f"these weights do not survive the sharded_state round-trip, and the loss is silent "
+-        f"({model_dir})"
++        f"({model_dir}). Prepare it as a raw preshard instead (servekit launch --preshard-format raw), "
++        f"which replays the checkpoint through the engine's own load"
+     )
+diff --git a/src/servekit/rawshard/__init__.py b/src/servekit/rawshard/__init__.py
+new file mode 100644
+index 0000000..e50a290
+--- /dev/null
++++ b/src/servekit/rawshard/__init__.py
+@@ -0,0 +1,5 @@
++"""Raw presharding: store the checkpoint bytes each rank reads, replay them through the engine's own load.
++
++`footprint` finds which bytes a load reads, `store` writes and replays them,
++`sglang_hooks` wires both into SGLang through servekit's plugin.
++"""
+diff --git a/src/servekit/rawshard/footprint.py b/src/servekit/rawshard/footprint.py
+new file mode 100644
+index 0000000..bbc314c
+--- /dev/null
++++ b/src/servekit/rawshard/footprint.py
+@@ -0,0 +1,400 @@
++"""Which bytes of each checkpoint tensor one rank's load actually reads.
++
++Raw presharding stores, per rank, exactly the bytes of the original checkpoint
++that the engine's ordinary load read on that rank, and feeds them back through
++the ordinary load later. Every weight loader, post-processing hook and lazily
++created alias then runs as in a default load, because it *is* a default load,
++just from fewer bytes.
++
++The footprint of a load is found by wrapping every checkpoint tensor the
++weights iterator yields in `FootprintTensor`, a wrapper subclass that sees
++every aten op applied to it or to a view of it:
++
++* a view op (narrow, slice, select, view, t, split, chunk, as_strided, ...)
++  returns another wrapper over the same base, and reads nothing;
++* any other op reads every byte of every wrapped input it is given. The view's
++  (storage offset, sizes, strides) relative to the base tell exactly which bytes
++  those are; they are kept as a strided byte box.
++
++Over-approximating is always safe: a box that covers bytes the loader never
++looks at only costs disk. Methods that leave the dispatcher (numpy, tolist,
++data_ptr, untyped_storage) are overridden to record the whole tensor.
++
++Nothing here imports an engine: the same recorder serves SGLang and, later, vLLM.
++"""
++from __future__ import annotations
++
++import math
++import threading
++import weakref
++from dataclasses import dataclass, field
++from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
++
++import torch
++from torch.utils._pytree import tree_flatten, tree_map
++
++# A box with more contiguous runs than this is recorded as its bounding interval.
++# Bounds the cost of verification; an over-approximation is still a correct one.
++MAX_RUNS = 1 << 20
++
++
++@dataclass(frozen=True)
++class Box:
++    """A strided set of bytes of one base tensor: {offset + sum(i_k * strides[k])}.
++
++    Canonical: no size-1 dims, strides strictly decreasing, adjacent dims merged
++    wherever they are contiguous, innermost stride 1 (a byte). Two reads of the
++    same bytes therefore produce equal boxes, which is what makes the common
++    verification case a set lookup.
++    """
++
++    offset: int
++    sizes: Tuple[int, ...]
++    strides: Tuple[int, ...]
++
++    @property
++    def nbytes(self) -> int:
++        return math.prod(self.sizes) if self.sizes else 0
++
++    @property
++    def n_runs(self) -> int:
++        return math.prod(self.sizes[:-1]) if len(self.sizes) > 1 else 1
++
++    @property
++    def end(self) -> int:
++        """One past the last byte the box touches."""
++        return self.offset + sum((s - 1) * t for s, t in zip(self.sizes, self.strides)) + 1
++
++    def to_json(self) -> list:
++        return [self.offset, list(self.sizes), list(self.strides)]
++
++    @classmethod
++    def from_json(cls, data: Sequence) -> "Box":
++        offset, sizes, strides = data
++        return cls(int(offset), tuple(int(s) for s in sizes), tuple(int(t) for t in strides))
++
++    def runs(self) -> Tuple["torch.Tensor", int]:
++        """(start offsets of every contiguous run, run length). int64, sorted."""
++        if not self.sizes:
++            return torch.empty(0, dtype=torch.int64), 0
++        inner = self.sizes[-1]
++        starts = torch.tensor([self.offset], dtype=torch.int64)
++        for size, stride in zip(self.sizes[:-1], self.strides[:-1]):
++            steps = torch.arange(size, dtype=torch.int64) * stride
++            starts = (starts[:, None] + steps[None, :]).reshape(-1)
++        return torch.sort(starts).values, inner
++
++
++def canonical_box(offset: int, sizes: Sequence[int], strides: Sequence[int]) -> Optional[Box]:
++    """The canonical box for a byte view, or None if it holds no bytes.
++
++    `sizes` and `strides` are in bytes and must include the innermost byte dim.
++    Negative strides do not occur for torch views; zero strides (expand) are
++    dropped, since they re-read the same bytes.
++    """
++    if any(s == 0 for s in sizes):
++        return None
++    dims = [(t, s) for s, t in zip(sizes, strides) if s != 1 and t != 0]
++    dims.sort(key=lambda d: -d[0])
++    merged: List[List[int]] = []
++    for stride, size in dims:
++        if merged:
++            outer_stride, outer_size = merged[-1]
++            if outer_stride == stride * size:
++                # the outer dim steps over exactly one inner dim: one longer run
++                merged[-1] = [stride, outer_size * size]
++                continue
++        merged.append([stride, size])
++    if not merged or merged[-1][0] != 1:
++        # every element of the view is a single byte apart from the next only
++        # through the byte dim; one with no byte dim left means a 1-byte view
++        merged.append([1, 1])
++    box = Box(int(offset), tuple(int(s) for _, s in merged), tuple(int(t) for t, _ in merged))
++    if box.n_runs > MAX_RUNS:
++        return Box(box.offset, (box.end - box.offset,), (1,))
++    return box
++
++
++def full_box(nbytes: int) -> Optional[Box]:
++    return Box(0, (nbytes,), (1,)) if nbytes > 0 else None
++
++
++def view_box(view: torch.Tensor, base: torch.Tensor) -> Optional[Box]:
++    """The bytes of `base` that reading `view` touches. Both share one storage."""
++    elem = view.element_size()
++    offset = view.storage_offset() * elem - base.storage_offset() * base.element_size()
++    sizes = list(view.size()) + [elem]
++    strides = [st * elem for st in view.stride()] + [1]
++    box = canonical_box(offset, sizes, strides)
++    if box is not None and (box.offset < 0 or box.end > base_nbytes(base)):
++        # a view reaching outside its base would be an engine bug, not ours;
++        # still record something that cannot under-cover what was read
++        return full_box(base_nbytes(base))
++    return box
++
++
++def base_nbytes(t: torch.Tensor) -> int:
++    return t.numel() * t.element_size()
++
++
++class Footprint:
++    """The bytes one rank read of one checkpoint tensor, plus what it was."""
++
++    __slots__ = ("name", "shape", "dtype", "nbytes", "boxes", "full", "order", "live")
++
++    def __init__(self, name: str, shape: Tuple[int, ...], dtype: torch.dtype, order: int):
++        self.name = name
++        self.shape = shape
++        self.dtype = dtype
++        self.nbytes = math.prod(shape) * _element_size(dtype)
++        self.boxes: Dict[Box, None] = {}  # insertion-ordered set
++        self.full = False
++        self.order = order
++        # every wrapper and view of this tensor still alive; empty means no
++        # further read can happen, so its bytes can be copied out
++        self.live: "weakref.WeakSet" = weakref.WeakSet()
++
++    def add(self, box: Optional[Box]) -> None:
++        if box is None or self.full:
++            return
++        if box.offset == 0 and box.nbytes == self.nbytes and box.strides == (1,):
++            self.full = True
++            self.boxes = {box: None}
++            return
++        self.boxes[box] = None
++
++    @property
++    def stored_bytes(self) -> int:
++        return sum(b.nbytes for b in self.boxes)
++
++
++class Recorder:
++    """Collects footprints for every tensor wrapped through it, in yield order."""
++
++    def __init__(self) -> None:
++        self._lock = threading.Lock()
++        self.footprints: List[Footprint] = []
++        self.escapes: List[str] = []
++
++    def wrap(self, name: str, tensor: torch.Tensor) -> torch.Tensor:
++        fp = Footprint(name, tuple(tensor.shape), tensor.dtype, len(self.footprints))
++        with self._lock:
++            self.footprints.append(fp)
++        if not tensor.is_contiguous() or tensor.numel() == 0:
++            # Nothing to slice: a non-contiguous base is stored whole.
++            fp.add(full_box(fp.nbytes))
++            return tensor
++        return FootprintTensor(tensor, tensor, fp, self)
++
++    def record(self, fp: Footprint, box: Optional[Box]) -> None:
++        with self._lock:
++            fp.add(box)
++
++    def wrap_iterator(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Iterator[Tuple[str, torch.Tensor]]:
++        for name, tensor in weights:
++            yield name, self.wrap(name, tensor)
++
++
++class Checker(Recorder):
++    """Like Recorder, but every read must fall inside the boxes stored for it."""
++
++    def __init__(self) -> None:
++        super().__init__()
++        self.allowed: Dict[int, Tuple[Footprint, "_Coverage"]] = {}
++        self.violations: List[str] = []
++
++    def wrap_stored(self, fp: Footprint, tensor: torch.Tensor) -> torch.Tensor:
++        if fp.full:
++            return tensor  # every byte is real: nothing to check
++        self.allowed[id(fp)] = (fp, _Coverage(list(fp.boxes)))
++        return FootprintTensor(tensor, tensor, fp, self)
++
++    def record(self, fp: Footprint, box: Optional[Box]) -> None:
++        if box is None:
++            return
++        _, coverage = self.allowed[id(fp)]
++        if not coverage.contains(box):
++            with self._lock:
++                self.violations.append(
++                    f"{fp.name}: read bytes [{box.offset}, {box.end}) in a {box.sizes}/{box.strides} "
++                    f"box that the raw preshard did not store"
++                )
++
++
++class _Coverage:
++    """Union of stored boxes, for containment checks."""
++
++    def __init__(self, boxes: List[Box]) -> None:
++        self.exact = set(boxes)
++        self._intervals: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
++        self._boxes = boxes
++
++    def _merged(self) -> Tuple[torch.Tensor, torch.Tensor]:
++        if self._intervals is None:
++            starts, ends = [], []
++            for b in self._boxes:
++                s, n = b.runs()
++                starts.append(s)
++                ends.append(s + n)
++            s = torch.cat(starts)
++            e = torch.cat(ends)
++            order = torch.argsort(s)
++            s, e = s[order], e[order]
++            # merge overlapping or touching intervals
++            ms, me = [], []
++            for a, b in zip(s.tolist(), e.tolist()):
++                if ms and a <= me[-1]:
++                    me[-1] = max(me[-1], b)
++                else:
++                    ms.append(a)
++                    me.append(b)
++            self._intervals = (torch.tensor(ms, dtype=torch.int64), torch.tensor(me, dtype=torch.int64))
++        return self._intervals
++
++    def contains(self, box: Box) -> bool:
++        if box in self.exact:
++            return True
++        ms, me = self._merged()
++        starts, length = box.runs()
++        idx = torch.searchsorted(ms, starts, right=True) - 1
++        if bool((idx < 0).any()):
++            return False
++        return bool((starts + length <= me[idx]).all())
++
++
++def _view_op(func) -> bool:
++    try:
++        return bool(func.is_view)
++    except AttributeError:  # older torch: read the schema
++        return any(r.alias_info is not None for r in func._schema.returns) and not func._schema.is_mutable
++
++
++class FootprintTensor(torch.Tensor):
++    """A checkpoint tensor (or a view of one) whose reads are recorded.
++
++    `_inner` is the real tensor, a view into `_base`'s storage. Engines see an
++    ordinary tensor: shape, dtype, device, strides and contiguity are the inner
++    tensor's own.
++    """
++
++    __torch_function__ = torch._C._disabled_torch_function_impl
++
++    @staticmethod
++    def __new__(cls, inner: torch.Tensor, base: torch.Tensor, fp: Footprint, owner: Recorder):
++        out = torch.Tensor._make_wrapper_subclass(
++            cls,
++            inner.size(),
++            strides=inner.stride(),
++            storage_offset=inner.storage_offset(),
++            dtype=inner.dtype,
++            device=inner.device,
++            requires_grad=False,
++        )
++        out._fp_inner = inner
++        out._fp_base = base
++        out._fp_footprint = fp
++        out._fp_owner = owner
++        fp.live.add(out)
++        return out
++
++    def __repr__(self) -> str:  # printing would read the whole tensor
++        return f"FootprintTensor({self._fp_footprint.name}, shape={tuple(self.shape)}, dtype={self.dtype})"
++
++    def _record_all(self) -> None:
++        self._fp_owner.record(self._fp_footprint, view_box(self._fp_inner, self._fp_base))
++
++    # Reads that never reach the dispatcher.
++    def numpy(self, *args, **kwargs):
++        self._record_all()
++        return self._fp_inner.numpy(*args, **kwargs)
++
++    def tolist(self):
++        self._record_all()
++        return self._fp_inner.tolist()
++
++    def data_ptr(self):
++        self._record_all()
++        return self._fp_inner.data_ptr()
++
++    def untyped_storage(self):
++        self._fp_owner.record(self._fp_footprint, full_box(self._fp_footprint.nbytes))
++        return self._fp_inner.untyped_storage()
++
++    def __array__(self, *args, **kwargs):
++        self._record_all()
++        return self._fp_inner.__array__(*args, **kwargs)
++
++    @classmethod
++    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
++        kwargs = kwargs or {}
++        wrapped = [x for x in tree_flatten((args, kwargs))[0] if isinstance(x, FootprintTensor)]
++
++        def unwrap(x):
++            return x._fp_inner if isinstance(x, FootprintTensor) else x
++
++        out = func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
++
++        if _view_op(func) and wrapped:
++            src = wrapped[0]
++
++            def rewrap(o):
++                if not isinstance(o, torch.Tensor):
++                    return o
++                if _shares_storage(o, src._fp_base):
++                    try:
++                        return FootprintTensor(o, src._fp_base, src._fp_footprint, src._fp_owner)
++                    except RuntimeError:
++                        # e.g. an inference tensor: the view escapes, so count it read
++                        src._fp_owner.record(src._fp_footprint, view_box(o, src._fp_base))
++                        return o
++                # a "view" that had to copy has read its whole input
++                src._fp_owner.record(src._fp_footprint, view_box(src._fp_inner, src._fp_base))
++                return o
++
++            return tree_map(rewrap, out)
++
++        for x in wrapped:
++            x._fp_owner.record(x._fp_footprint, view_box(x._fp_inner, x._fp_base))
++
++        # In-place and out= ops return one of their inputs; hand back its wrapper
++        # so identity (and recording) survives `w.mul_(s)` and friends.
++        by_id = {id(x._fp_inner): x for x in wrapped}
++        return tree_map(lambda o: by_id.get(id(o), o), out)
++
++
++def _element_size(dtype: torch.dtype) -> int:
++    return torch.empty((), dtype=dtype).element_size()
++
++
++def unwrap_module(module: "torch.nn.Module") -> int:
++    """Replace any FootprintTensor a load left inside `module` by its real tensor.
++
++    A loader that keeps the checkpoint tensor itself (`param.data = w`, a buffer
++    set to `w`) would otherwise leave a recording wrapper inside the served
++    model. Each one found is recorded as read in full: the model holds all of it.
++    Returns how many were found.
++    """
++    found = 0
++    for mod in module.modules():
++        for table in (mod._parameters, mod._buffers):
++            for key, value in list(table.items()):
++                if isinstance(value, FootprintTensor):
++                    value._fp_owner.record(value._fp_footprint, full_box(value._fp_footprint.nbytes))
++                    inner = value._fp_inner
++                    if isinstance(value, torch.nn.Parameter) or key in mod._parameters:
++                        inner = torch.nn.Parameter(inner, requires_grad=False)
++                    table[key] = inner
++                    found += 1
++        for key, value in list(vars(mod).items()):
++            if isinstance(value, FootprintTensor):
++                value._fp_owner.record(value._fp_footprint, full_box(value._fp_footprint.nbytes))
++                object.__setattr__(mod, key, value._fp_inner)
++                found += 1
++    return found
++
++
++def _shares_storage(a: torch.Tensor, b: torch.Tensor) -> bool:
++    try:
++        return a.untyped_storage().data_ptr() == b.untyped_storage().data_ptr()
++    except RuntimeError:
++        return False
+diff --git a/src/servekit/rawshard/sglang_hooks.py b/src/servekit/rawshard/sglang_hooks.py
+new file mode 100644
+index 0000000..8035bc2
+--- /dev/null
++++ b/src/servekit/rawshard/sglang_hooks.py
+@@ -0,0 +1,282 @@
++"""SGLang hooks for raw presharding and for the deep-state round-trip check.
++
++Installed from servekit's SGLang plugin (`servekit._shim.install`), so they run
++in every scheduler process. Each hook is a pass-through unless asked:
++
++* `SERVEKIT_RAW_RECORD_DIR=<dir>`: the ordinary load records, per rank, which
++  checkpoint bytes it reads, and writes them to <dir> (`servekit prepare`).
++* the model directory holds `servekit-raw-rank-*.json`: the ordinary load pulls
++  its weights from that raw preshard instead of the checkpoint (`servekit
++  launch`). Every reader, post-processing hook and lazy alias then runs exactly
++  as in a default load. With `SERVEKIT_RAW_VERIFY=1` (the default) every read
++  is checked against what was stored, and the load fails if one falls outside.
++* `SERVEKIT_DEEPSTATE_DIR=<dir>`: after the model loads, every tensor it holds
++  -- parameters, buffers, and the hidden ones on quantization objects -- is
++  fingerprinted to <dir>/deepstate-<target|draft>-rank-<r>.json, whatever the
++  load format. Comparing two such dumps is the generic round-trip check.
++
++Hook targets exist from SGLang 0.5.11 (plugin framework) and are checked
++against v0.5.20: loader.py:577 (_get_weights_iterator), :964 (load_model),
++:855 (commit_model_weights, the opt-in startup-overlap path) and
++model_runner.py ModelRunner.load_model.
++
++No SGLang or torch import at module scope: servekit's own process imports the
++plugin package and must not pay for either.
++"""
++from __future__ import annotations
++
++import contextlib
++import json
++import logging
++import os
++from typing import Any, Dict, List, Optional
++
++logger = logging.getLogger("servekit.rawshard")
++
++ENV_RECORD = "SERVEKIT_RAW_RECORD_DIR"
++ENV_VERIFY = "SERVEKIT_RAW_VERIFY"
++ENV_DEEPSTATE = "SERVEKIT_DEEPSTATE_DIR"
++ENV_DEEPSTATE_DETERMINISTIC = "SERVEKIT_DEEPSTATE_DETERMINISTIC"
++
++ITER_TARGET = "sglang.srt.model_loader.loader.DefaultModelLoader._get_weights_iterator"
++LOAD_TARGET = "sglang.srt.model_loader.loader.DefaultModelLoader.load_model"
++COMMIT_TARGET = "sglang.srt.model_loader.loader.DefaultModelLoader.commit_model_weights"
++RUNNER_TARGET = "sglang.srt.model_executor.model_runner.ModelRunner.load_model"
++
++# Names on SGLang's ParallelContext that decide which slice of each checkpoint
++# tensor a rank reads. Mirrors PreshardedModelLoader._collect_shard_config
++# (loader.py:1930) plus the ranks themselves. Unknown names are skipped, so the
++# list can only grow stricter on newer SGLang.
++_PARALLEL_NAMES = (
++    "tp_rank", "tp_size", "pp_rank", "pp_size",
++    "attn_tp_rank", "attn_tp_size", "attn_dp_rank", "attn_dp_size", "attn_cp_rank", "attn_cp_size",
++    "moe_ep_rank", "moe_ep_size", "moe_tp_rank", "moe_tp_size", "moe_dp_size",
++    "moe_dense_tp_size", "enable_dp_lm_head", "dp_size", "ep_size",
++)
++
++
++class _Process:
++    """Per-process state; one load at a time per process (target, then draft)."""
++
++    def __init__(self) -> None:
++        self.session = None  # RecordSession
++        self.indexes: Dict[str, Any] = {}  # directory -> RawIndex
++        self.used: List[Any] = []  # indexes replayed by the load in progress
++        self.counters: Dict[str, int] = {}
++        self.signature: Optional[Dict[str, Any]] = None
++
++
++_STATE = _Process()
++
++
++def world_rank() -> int:
++    try:
++        import torch.distributed as dist
++
++        if dist.is_available() and dist.is_initialized():
++            return dist.get_rank()
++    except Exception:  # noqa: BLE001 - outside a process group this is rank 0
++        pass
++    return 0
++
++
++def parallel_signature(model_config: Any = None) -> Dict[str, Any]:
++    """Everything that decides which checkpoint bytes this rank reads."""
++    sig: Dict[str, Any] = {"world_rank": world_rank()}
++    try:
++        import torch.distributed as dist
++
++        sig["world_size"] = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
++    except Exception:  # noqa: BLE001
++        sig["world_size"] = 1
++    try:
++        from sglang.srt.runtime_context import get_parallel
++
++        parallel = get_parallel()
++        for name in _PARALLEL_NAMES:
++            try:
++                value = getattr(parallel, name)
++            except Exception:  # noqa: BLE001 - absent on this version, or not published
++                continue
++            if isinstance(value, (int, bool, str)) or value is None:
++                sig[name] = value
++    except Exception:  # noqa: BLE001 - pre-0.5.14 SGLang
++        pass
++    try:
++        from sglang.srt.layers.moe.utils import get_moe_a2a_backend, get_moe_runner_backend
++
++        sig["moe_runner_backend"] = str(get_moe_runner_backend())
++        sig["moe_a2a_backend"] = str(get_moe_a2a_backend())
++    except Exception:  # noqa: BLE001
++        pass
++    if model_config is not None:
++        sig["dtype"] = str(getattr(model_config, "dtype", None))
++        sig["quantization"] = getattr(model_config, "quantization", None)
++        sig["is_draft_model"] = bool(getattr(model_config, "is_draft_model", False))
++    try:
++        import sglang
++
++        sig["sglang_version"] = getattr(sglang, "__version__", "unknown")
++    except Exception:  # noqa: BLE001
++        pass
++    return sig
++
++
++def _stream_kind(source: Any) -> Optional[str]:
++    """'target' / 'draft' for the model's own checkpoint, None for anything else.
++
++    Secondary sources (a separate vision tower, an adapter) keep loading from
++    where they live; only the primary checkpoint is presharded.
++    """
++    model_config = getattr(source, "model_config", None)
++    if model_config is None:
++        return None
++    here = os.path.normpath(str(getattr(source, "model_or_path", "")))
++    if here != os.path.normpath(str(getattr(model_config, "model_path", ""))):
++        return None
++    return "draft" if getattr(model_config, "is_draft_model", False) else "target"
++
++
++def _next_key(kind: str) -> str:
++    n = _STATE.counters.get(kind, 0)
++    _STATE.counters[kind] = n + 1
++    return f"{kind}/{n}"
++
++
++def verify_enabled() -> bool:
++    return os.environ.get(ENV_VERIFY, "1") not in ("0", "false", "no", "")
++
++
++def _open_index(directory: str, model_config: Any):
++    from .store import RawIndex
++
++    if directory not in _STATE.indexes:
++        index = RawIndex(directory, world_rank())
++        recorded = index.index.get("signature") or {}
++        current = parallel_signature(model_config)
++        diff = {
++            k: (recorded.get(k), current.get(k))
++            for k in sorted(set(recorded) | set(current))
++            if k not in ("is_draft_model",) and recorded.get(k) != current.get(k)
++        }
++        if diff:
++            lines = ", ".join(f"{k}: prepared {a!r}, now {b!r}" for k, (a, b) in diff.items())
++            raise RuntimeError(
++                f"[SERVEKIT] the raw preshard in {directory} was recorded under a different "
++                f"parallel layout or engine ({lines}); re-run servekit prepare for this command"
++            )
++        _STATE.indexes[directory] = index
++    return _STATE.indexes[directory]
++
++
++def around_weights_iterator(original, self, source, *args, **kwargs):
++    kind = _stream_kind(source)
++    if kind is None:
++        return original(self, source, *args, **kwargs)
++    from .store import has_raw_preshard
++
++    directory = str(source.model_or_path)
++    if has_raw_preshard(directory):
++        index = _open_index(directory, source.model_config)
++        if index not in _STATE.used:
++            _STATE.used.append(index)
++        key = _next_key(kind)
++        logger.info("[SERVEKIT] rank %d: replaying raw preshard stream %s from %s", world_rank(), key, directory)
++        return index.replay_key(key, verify=verify_enabled())
++    record_dir = os.environ.get(ENV_RECORD)
++    if record_dir:
++        from .store import RecordSession
++
++        if _STATE.session is None:
++            _STATE.session = RecordSession(record_dir, world_rank())
++            _STATE.signature = parallel_signature(source.model_config)
++        key = _next_key(kind)
++        return _STATE.session.stream(key, original(self, source, *args, **kwargs),
++                                     source=directory, prefix=getattr(source, "prefix", ""))
++    return original(self, source, *args, **kwargs)
++
++
++def after_load(model: Any) -> None:
++    """Close what the load opened: write the recording, judge the replay."""
++    if _STATE.session is not None and model is not None:
++        stats = _STATE.session.finish(model, signature=_STATE.signature)
++        logger.info(
++            "[SERVEKIT] rank %d: raw preshard recorded %.2f of %.2f GB read (%d full, %d sliced, %d unread tensors)",
++            world_rank(), stats["stored_bytes"] / 1e9, stats["checkpoint_bytes"] / 1e9,
++            stats["tensors_full"], stats["tensors_partial"], stats["tensors_unread"],
++        )
++    used, _STATE.used = _STATE.used, []
++    problems: List[str] = []
++    for index in used:
++        problems.extend(index.verdict(model))
++    if problems:
++        shown = "\n  ".join(problems[:20])
++        raise RuntimeError(
++            f"[SERVEKIT] raw preshard replay on rank {world_rank()} did not match its recording "
++            f"({len(problems)} problem(s)); refusing to serve:\n  {shown}"
++        )
++
++
++def around_load_model(original, self, *args, **kwargs):
++    model = original(self, *args, **kwargs)
++    after_load(model)
++    return model
++
++
++def around_commit_model_weights(original, self, *args, **kwargs):
++    result = original(self, *args, **kwargs)
++    after_load(kwargs.get("model"))
++    return result
++
++
++def around_runner_load(original, self, *args, **kwargs):
++    directory = os.environ.get(ENV_DEEPSTATE)
++    if not directory:
++        return original(self, *args, **kwargs)
++    ctx: Any = contextlib.nullcontext()
++    if os.environ.get(ENV_DEEPSTATE_DETERMINISTIC) == "1":
++        from servekit import deepstate
++
++        ctx = deepstate.deterministic_empty()
++    with ctx:
++        result = original(self, *args, **kwargs)
++    if getattr(self, "startup_weight_load", None) is not None:
++        # overlap mode: the real weights land later, in commit_model_weights
++        logger.warning("[SERVEKIT] deep-state dump skipped: startup_weight_load_mode=overlap")
++        return result
++    dump_deepstate(self.model, directory, draft=bool(getattr(self, "is_draft_worker", False)),
++                   load_format=str(getattr(getattr(self, "load_config", None), "load_format", "?")))
++    return result
++
++
++def dump_deepstate(model: Any, directory: str, draft: bool = False, **meta: Any) -> str:
++    from servekit import deepstate
++
++    os.makedirs(directory, exist_ok=True)
++    kind = "draft" if draft else "target"
++    path = os.path.join(directory, f"deepstate-{kind}-rank-{world_rank()}.json")
++    entries = deepstate.dump(model, path, rank=world_rank(), **meta)
++    logger.info("[SERVEKIT] rank %d: fingerprinted %d tensors to %s", world_rank(), len(entries), path)
++    return path
++
++
++def install() -> None:
++    from sglang.srt.plugins.hook_registry import HookRegistry, HookType
++
++    HookRegistry.register(ITER_TARGET, around_weights_iterator, HookType.AROUND)
++    HookRegistry.register(LOAD_TARGET, around_load_model, HookType.AROUND)
++    HookRegistry.register(COMMIT_TARGET, around_commit_model_weights, HookType.AROUND)
++    HookRegistry.register(RUNNER_TARGET, around_runner_load, HookType.AROUND)
++
++
++def describe(directory: str) -> Dict[str, Any]:
++    """Totals across every rank's index in a raw preshard directory."""
++    totals: Dict[str, Any] = {"ranks": 0, "stored_bytes": 0, "checkpoint_bytes": 0}
++    for name in sorted(os.listdir(directory)):
++        if name.startswith("servekit-raw-rank-") and name.endswith(".json"):
++            with open(os.path.join(directory, name)) as f:
++                stats = json.load(f)["stats"]
++            totals["ranks"] += 1
++            totals["stored_bytes"] += stats["stored_bytes"]
++            totals["checkpoint_bytes"] += stats["checkpoint_bytes"]
++    return totals
+diff --git a/src/servekit/rawshard/store.py b/src/servekit/rawshard/store.py
+new file mode 100644
+index 0000000..c369ac5
+--- /dev/null
++++ b/src/servekit/rawshard/store.py
+@@ -0,0 +1,326 @@
++"""The raw preshard on disk: per rank, the checkpoint bytes that rank reads.
++
++Layout of an artifact directory (next to config.json, tokenizer files, ...):
++
++    servekit-raw-rank-{rank}.json                 what to replay, in order
++    servekit-raw-rank-{rank}-part-{part}.safetensors   the bytes, as uint8 chunks
++
++`rank` is the torch.distributed world rank of the process that recorded it.
++Each JSON lists the weight streams that rank's load pulled (one per call of the
++engine's weights iterator), and for every tensor in yield order: its name,
++shape, dtype and the byte boxes stored for it. Replaying a stream yields the
++same names in the same order, each as a full-shape tensor whose stored boxes
++hold the original bytes. The rest of the tensor is never read by that rank --
++that is what recording established -- and is left unallocated: torch.empty
++on the CPU is backed by lazily committed pages.
++
++Writing is incremental. A tensor's boxes are copied out as soon as no wrapper
++of it is alive anymore, and parts are flushed at `max_part_bytes`, so peak
++memory is about one part rather than the rank's whole share of the model.
++"""
++from __future__ import annotations
++
++import json
++import math
++import os
++from dataclasses import dataclass, field
++from typing import Any, Dict, Iterator, List, Optional, Tuple
++
++import torch
++
++from .footprint import Box, Checker, Footprint, FootprintTensor, Recorder, unwrap_module
++
++FORMAT = "servekit-raw"
++VERSION = 1
++INDEX_PATTERN = "servekit-raw-rank-{rank}.json"
++PART_PATTERN = "servekit-raw-rank-{rank}-part-{part}.safetensors"
++DEFAULT_MAX_PART_BYTES = 5 * 1024**3
++
++_DTYPES = {
++    str(dt).replace("torch.", ""): dt
++    for dt in (
++        torch.float64, torch.float32, torch.float16, torch.bfloat16,
++        torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8, torch.bool,
++        torch.complex64, torch.complex128,
++    )
++}
++for _name in ("float8_e4m3fn", "float8_e5m2", "float8_e4m3fnuz", "float8_e5m2fnuz",
++              "float8_e8m0fnu", "float4_e2m1fn_x2", "uint16", "uint32", "uint64"):
++    if hasattr(torch, _name):
++        _DTYPES[_name] = getattr(torch, _name)
++
++
++def dtype_name(dtype: torch.dtype) -> str:
++    return str(dtype).replace("torch.", "")
++
++
++def dtype_from_name(name: str) -> torch.dtype:
++    try:
++        return _DTYPES[name]
++    except KeyError:
++        raise ValueError(f"raw preshard: unknown dtype {name!r}") from None
++
++
++def index_path(directory: str, rank: int) -> str:
++    return os.path.join(directory, INDEX_PATTERN.format(rank=rank))
++
++
++def has_raw_preshard(directory: str) -> bool:
++    try:
++        return any(n.startswith("servekit-raw-rank-") and n.endswith(".json") for n in os.listdir(directory))
++    except OSError:
++        return False
++
++
++def _as_bytes(t: torch.Tensor) -> torch.Tensor:
++    """A flat uint8 view of a contiguous tensor's own bytes."""
++    if t.dim() == 0:
++        t = t.reshape(1)
++    return t.reshape(-1).view(torch.uint8)
++
++
++def _extract(base: torch.Tensor, box: Box) -> torch.Tensor:
++    """The bytes of `box` as a fresh, contiguous, CPU uint8 tensor."""
++    flat = _as_bytes(base)
++    view = flat.as_strided(box.sizes, box.strides, flat.storage_offset() + box.offset)
++    return view.to("cpu").clone(memory_format=torch.contiguous_format).reshape(-1)
++
++
++# ---------------------------------------------------------------------- record
++
++
++@dataclass
++class _Stream:
++    index: int
++    key: str
++    meta: Dict[str, Any]
++    entries: List[Dict[str, Any]] = field(default_factory=list)
++
++
++class _PartWriter:
++    def __init__(self, directory: str, rank: int, max_part_bytes: int):
++        self.directory = directory
++        self.rank = rank
++        self.max_part_bytes = max_part_bytes
++        self.part = 0
++        self.pending: Dict[str, torch.Tensor] = {}
++        self.pending_bytes = 0
++        self.written_bytes = 0
++        self.files: List[str] = []
++
++    def add(self, key: str, chunk: torch.Tensor) -> int:
++        """Queue `chunk` under `key`; returns the part it will land in."""
++        n = chunk.numel()
++        if self.pending and self.pending_bytes + n > self.max_part_bytes:
++            self.flush()
++        self.pending[key] = chunk
++        self.pending_bytes += n
++        return self.part
++
++    def flush(self) -> None:
++        if not self.pending:
++            return
++        from safetensors.torch import save_file
++
++        name = PART_PATTERN.format(rank=self.rank, part=self.part)
++        save_file(self.pending, os.path.join(self.directory, name))
++        self.files.append(name)
++        self.written_bytes += self.pending_bytes
++        self.pending, self.pending_bytes = {}, 0
++        self.part += 1
++
++
++class RecordSession:
++    """One rank's recording: wrap the weights a load pulls, then write them out."""
++
++    def __init__(self, directory: str, rank: int, max_part_bytes: int = DEFAULT_MAX_PART_BYTES):
++        os.makedirs(directory, exist_ok=True)
++        self.directory = directory
++        self.rank = rank
++        self.recorder = Recorder()
++        self.streams: List[_Stream] = []
++        self._writer = _PartWriter(directory, rank, max_part_bytes)
++        # id(footprint) -> (stream, footprint, base tensor); dropped once written
++        self._pending: Dict[int, Tuple[_Stream, Footprint, torch.Tensor]] = {}
++        self.checkpoint_bytes = 0
++        self.stored_bytes = 0
++        self.n_full = 0
++        self.n_partial = 0
++        self.n_unread = 0
++
++    def stream(self, key: str, weights, **meta) -> Iterator[Tuple[str, torch.Tensor]]:
++        s = _Stream(index=len(self.streams), key=key, meta=meta)
++        self.streams.append(s)
++        return self._wrap(s, weights)
++
++    def _wrap(self, s: _Stream, weights) -> Iterator[Tuple[str, torch.Tensor]]:
++        for name, tensor in weights:
++            self._finalize_dead()
++            wrapped = self.recorder.wrap(name, tensor)
++            fp = self.recorder.footprints[-1]
++            self._pending[id(fp)] = (s, fp, tensor)
++            yield name, wrapped
++            del wrapped  # the generator frame must not keep the wrapper alive
++        self._finalize_dead()
++
++    def _finalize_dead(self) -> None:
++        for key in [k for k, (_, fp, _) in self._pending.items() if len(fp.live) == 0]:
++            self._finalize(key)
++
++    def _finalize(self, key: int) -> None:
++        s, fp, base = self._pending.pop(key)
++        boxes = []
++        for j, box in enumerate(fp.boxes):
++            chunk_key = f"{s.index}.{fp.order}.{j}"
++            part = self._writer.add(chunk_key, _extract(base, box))
++            boxes.append(box.to_json() + [part, chunk_key])
++        s.entries.append({
++            "name": fp.name,
++            "shape": list(fp.shape),
++            "dtype": dtype_name(fp.dtype),
++            "order": fp.order,
++            "full": fp.full,
++            "boxes": boxes,
++        })
++        self.checkpoint_bytes += fp.nbytes
++        self.stored_bytes += fp.stored_bytes
++        if fp.full:
++            self.n_full += 1
++        elif fp.boxes:
++            self.n_partial += 1
++        else:
++            self.n_unread += 1
++
++    def finish(self, model: Optional[torch.nn.Module] = None, **meta) -> Dict[str, Any]:
++        """After a load returned: write what it read, and (re)write the index.
++
++        Callable once per load in the process (the target model, then a draft
++        model); each call rewrites the index with every stream so far.
++        """
++        leaked = unwrap_module(model) if model is not None else 0
++        self._leaked = getattr(self, "_leaked", 0) + leaked
++        for key in list(self._pending):
++            self._finalize(key)
++        self._writer.flush()
++        for s in self.streams:
++            s.entries.sort(key=lambda e: e["order"])
++        index = {
++            "format": FORMAT,
++            "version": VERSION,
++            "rank": self.rank,
++            "files": self._writer.files,
++            "streams": [{"key": s.key, "meta": s.meta, "entries": s.entries} for s in self.streams],
++            "stats": {
++                "checkpoint_bytes": self.checkpoint_bytes,
++                "stored_bytes": self.stored_bytes,
++                "tensors_full": self.n_full,
++                "tensors_partial": self.n_partial,
++                "tensors_unread": self.n_unread,
++                "wrappers_left_in_model": self._leaked,
++                "escapes": list(self.recorder.escapes),
++            },
++            **meta,
++        }
++        tmp = index_path(self.directory, self.rank) + ".tmp"
++        with open(tmp, "w") as f:
++            json.dump(index, f)
++        os.replace(tmp, index_path(self.directory, self.rank))
++        return index["stats"]
++
++
++# ---------------------------------------------------------------------- replay
++
++
++class RawIndex:
++    """One rank's raw preshard, ready to replay through the ordinary load."""
++
++    def __init__(self, directory: str, rank: int):
++        path = index_path(directory, rank)
++        if not os.path.isfile(path):
++            raise FileNotFoundError(
++                f"no raw preshard for rank {rank} in {directory} ({os.path.basename(path)} missing); "
++                f"the artifact was prepared for a different world size"
++            )
++        with open(path) as f:
++            self.index = json.load(f)
++        if self.index.get("format") != FORMAT or self.index.get("version") != VERSION:
++            raise ValueError(f"{path} is not a servekit raw preshard v{VERSION}")
++        self.directory = directory
++        self.rank = rank
++        self._handles: Dict[int, Any] = {}
++        self.checker: Optional[Checker] = None
++        self.served: List[str] = []
++
++    @property
++    def streams(self) -> List[Dict[str, Any]]:
++        return self.index["streams"]
++
++    def _handle(self, part: int):
++        if part not in self._handles:
++            from safetensors import safe_open
++
++            name = PART_PATTERN.format(rank=self.rank, part=part)
++            self._handles[part] = safe_open(os.path.join(self.directory, name), framework="pt")
++        return self._handles[part]
++
++    def tensor(self, entry: Dict[str, Any]) -> torch.Tensor:
++        dtype = dtype_from_name(entry["dtype"])
++        shape = tuple(entry["shape"])
++        elem = torch.empty((), dtype=dtype).element_size()
++        nbytes = math.prod(shape) * elem
++        if entry["full"] and len(entry["boxes"]) == 1:
++            *_, part, key = entry["boxes"][0]
++            data = self._handle(part).get_tensor(key)
++            return data.view(dtype).reshape(shape)
++        flat = torch.empty(max(nbytes, 1), dtype=torch.uint8)
++        for offset, sizes, strides, part, key in entry["boxes"]:
++            data = self._handle(part).get_tensor(key)
++            flat.as_strided(tuple(sizes), tuple(strides), offset).copy_(data.view(tuple(sizes)))
++        return flat[:nbytes].view(dtype).reshape(shape)
++
++    def replay(self, stream: int, verify: bool = False) -> Iterator[Tuple[str, torch.Tensor]]:
++        if stream >= len(self.streams):
++            raise RuntimeError(
++                f"raw preshard for rank {self.rank} recorded {len(self.streams)} weight stream(s), "
++                f"but this load asks for stream {stream}: the engine is loading differently than "
++                f"when the artifact was prepared"
++            )
++        return self.replay_key(self.streams[stream]["key"], verify=verify)
++
++    def replay_key(self, key: str, verify: bool = False) -> Iterator[Tuple[str, torch.Tensor]]:
++        by_key = {s["key"]: s for s in self.streams}
++        if key not in by_key:
++            raise RuntimeError(
++                f"raw preshard for rank {self.rank} has no weight stream {key!r} (recorded: "
++                f"{sorted(by_key)}): the engine is loading differently than when it was prepared"
++            )
++        if verify and self.checker is None:
++            self.checker = Checker()
++        self.served.append(key)
++        return self._entries(by_key[key], verify)
++
++    def _entries(self, stream: Dict[str, Any], verify: bool) -> Iterator[Tuple[str, torch.Tensor]]:
++        for entry in stream["entries"]:
++            t = self.tensor(entry)
++            if verify:
++                fp = Footprint(entry["name"], tuple(entry["shape"]), t.dtype, entry["order"])
++                fp.full = entry["full"]
++                fp.boxes = {Box.from_json(b[:3]): None for b in entry["boxes"]}
++                t = self.checker.wrap_stored(fp, t)
++            yield entry["name"], t
++
++    def verdict(self, model: Optional[torch.nn.Module] = None) -> List[str]:
++        """Reads that fell outside what was stored (empty: the replay was exact)."""
++        problems: List[str] = []
++        if self.checker is not None:
++            if model is not None:
++                unwrap_module(model)
++            problems.extend(self.checker.violations)
++        kinds = {k.split("/")[0] for k in self.served}
++        unserved = [s["key"] for s in self.streams if s["key"].split("/")[0] in kinds and s["key"] not in self.served]
++        if unserved:
++            problems.append(f"the load never pulled recorded weight stream(s) {unserved}")
++        return problems
++
++    def close(self) -> None:
++        self._handles.clear()
+diff --git a/src/servekit/topology.py b/src/servekit/topology.py
+index fc8b999..680a655 100644
+--- a/src/servekit/topology.py
++++ b/src/servekit/topology.py
+@@ -140,6 +140,12 @@ def shard_glob(topo: Topology) -> str:
+     return f"model-pp-{stages}-rank-{_index_glob(0, tp - 1, 'tp ranks')}-part-*.safetensors"
+ 
+ 
++def raw_glob(topo: Topology) -> str:
++    """The raw-preshard parts this node's ranks read; their indexes are metadata."""
++    lo, hi = topo.local_rank_range
++    return f"servekit-raw-rank-{_index_glob(lo, hi, 'ranks')}-part-*.safetensors"
++
++
+ def wants_sharded_state(command: List[str]) -> bool:
+     """Whether the command loads a presharded checkpoint, i.e. one file set per rank."""
+     found = _find_flag(command, _LOAD_FORMAT_FLAGS)
+diff --git a/tests/_mini_tp.py b/tests/_mini_tp.py
+new file mode 100644
+index 0000000..c3f2a67
+--- /dev/null
++++ b/tests/_mini_tp.py
+@@ -0,0 +1,361 @@
++"""A small tensor-parallel model whose load path has SGLang's shapes, on CPU.
++
++One process plays one rank (`rank`, `world`). The weight loaders slice the
++full checkpoint tensors the way SGLang's layers do (column/row/QKV/merged
++column/vocab-parallel/fused-MoE, plus gpt-oss's fused expert blocks), and the
++model carries the three kinds of state a `state_dict()` round trip loses in
++SGLang 0.5.20:
++
++* `attn.attn_mha.kv_b_proj`: a submodule alias registered on first forward
++  (deepseek_v2.py:1920 and :2070-2071);
++* `experts.quant_method.w13_weight_triton_tensor`: post-processing moves the
++  expert weights onto the quant-method object and deletes them from the layer
++  (mxfp4.py:1015-1043);
++* `norm.gemma_weight`: a non-persistent buffer derived inside the weight
++  loader (layernorm.py:1076-1089).
++
++`post_load_weights` derives MLA-style absorbed weights (`w_kc`, `w_vc`) as
++plain attributes. Everything is deterministic given the checkpoint.
++"""
++from __future__ import annotations
++
++import dataclasses
++import os
++from typing import Dict, Iterable, Iterator, List, Optional, Tuple
++
++import torch
++from torch import nn
++
++H = 16  # hidden
++I = 16  # MoE intermediate per expert
++E = 4  # experts
++V = 37  # vocab, deliberately not divisible by the TP size
++KV_RANK = 8  # MLA latent dim
++HEADS = 4
++HEAD_DIM = 4
++
++
++def make_checkpoint(seed: int = 0) -> Dict[str, torch.Tensor]:
++    g = torch.Generator().manual_seed(seed)
++
++    def r(*shape, dtype=torch.bfloat16):
++        return torch.randn(*shape, generator=g).to(dtype)
++
++    ck = {
++        "embed_tokens.weight": r(V, H),
++        "norm.weight": r(H, dtype=torch.float32),
++        "attn.q_proj.weight": r(HEADS * HEAD_DIM, H),
++        "attn.k_proj.weight": r(HEADS * HEAD_DIM, H),
++        "attn.v_proj.weight": r(HEADS * HEAD_DIM, H),
++        "attn.o_proj.weight": r(H, HEADS * HEAD_DIM),
++        "attn.kv_b_proj.weight": r(HEADS * 2 * HEAD_DIM, KV_RANK),
++        "mlp.gate_proj.weight": r(4 * H, H),
++        "mlp.up_proj.weight": r(4 * H, H),
++        "mlp.down_proj.weight": r(H, 4 * H),
++        # gpt-oss style: one tensor for all experts, gate/up interleaved, uint8 "blocks"
++        "experts.gate_up_proj_blocks": torch.randint(0, 255, (E, 2 * I, H // 4, 4), generator=g, dtype=torch.uint8),
++        "experts.gate_up_proj_scales": torch.randint(110, 130, (E, 2 * I, H // 4), generator=g, dtype=torch.uint8),
++        "experts.down_proj_blocks": torch.randint(0, 255, (E, H, I // 4, 4), generator=g, dtype=torch.uint8),
++        "experts.down_proj_scales": torch.randint(110, 130, (E, H, I // 4), generator=g, dtype=torch.uint8),
++        "router.weight": r(E, H),
++        "k_scale": torch.tensor(0.5, dtype=torch.float32),
++        "lm_head.weight": r(V, H),
++        "unused.rotary_emb.inv_freq": r(H // 2, dtype=torch.float32),
++    }
++    return ck
++
++
++def save_checkpoint(ck: Dict[str, torch.Tensor], directory: str, files: int = 3) -> List[str]:
++    from safetensors.torch import save_file
++
++    os.makedirs(directory, exist_ok=True)
++    names = sorted(ck)
++    paths = []
++    for i in range(files):
++        part = {n: ck[n].contiguous() for n in names[i::files]}
++        path = os.path.join(directory, f"model-{i:05d}-of-{files:05d}.safetensors")
++        save_file(part, path)
++        paths.append(path)
++    return paths
++
++
++def iterate_checkpoint(paths: List[str]) -> Iterator[Tuple[str, torch.Tensor]]:
++    """What SGLang's safetensors_weights_iterator yields: (name, CPU tensor)."""
++    from safetensors import safe_open
++
++    for path in paths:
++        with safe_open(path, framework="pt") as f:
++            for name in f.keys():  # noqa: SIM118
++                yield name, f.get_tensor(name)
++
++
++# ------------------------------------------------------------------ layers
++
++
++class Rank:
++    def __init__(self, rank: int, world: int):
++        self.rank, self.world = rank, world
++
++
++def _param(*shape, dtype=torch.bfloat16) -> nn.Parameter:
++    return nn.Parameter(torch.empty(*shape, dtype=dtype), requires_grad=False)
++
++
++class ColumnParallel(nn.Module):
++    def __init__(self, tp: Rank, n_in: int, n_out: int):
++        super().__init__()
++        self.tp = tp
++        self.weight = _param(n_out // tp.world, n_in)
++        self.weight.weight_loader = self.weight_loader
++
++    def weight_loader(self, param, w, shard_offset: int = 0, shard_size: Optional[int] = None):
++        # linear.py ColumnParallelLinear: narrow the output dim by tp_rank
++        size = param.shape[0] if shard_size is None else shard_size
++        w = w.narrow(0, self.tp.rank * size, size)
++        param.data.narrow(0, shard_offset, size).copy_(w)
++
++
++class QKVParallel(ColumnParallel):
++    SHARDS = {"q": 0, "k": 1, "v": 2}
++
++    def __init__(self, tp: Rank, n_in: int, n_per: int):
++        super().__init__(tp, n_in, 3 * n_per)
++        self.per = n_per // tp.world
++
++    def load_shard(self, shard: str, w):
++        self.weight_loader(self.weight, w, self.SHARDS[shard] * self.per, self.per)
++
++
++class RowParallel(nn.Module):
++    def __init__(self, tp: Rank, n_in: int, n_out: int):
++        super().__init__()
++        self.tp = tp
++        self.weight = _param(n_out, n_in // tp.world)
++        self.weight.weight_loader = self.weight_loader
++
++    def weight_loader(self, param, w):
++        # linear.py RowParallelLinear: narrow the input dim (a strided read)
++        size = param.shape[1]
++        param.data.copy_(w.narrow(1, self.tp.rank * size, size))
++
++
++class VocabParallelEmbedding(nn.Module):
++    def __init__(self, tp: Rank, vocab: int, hidden: int):
++        super().__init__()
++        self.tp = tp
++        self.per = -(-vocab // tp.world)  # padded
++        self.vocab = vocab
++        self.weight = _param(self.per, hidden)
++        self.weight.weight_loader = self.weight_loader
++
++    def weight_loader(self, param, w):
++        start = self.tp.rank * self.per
++        end = min(start + self.per, self.vocab)
++        param.data.zero_()
++        if end > start:
++            param.data[: end - start].copy_(w[start:end])
++
++
++class GemmaNorm(nn.Module):
++    """layernorm.py:1068-1089 GemmaRMSNorm: gemma_weight = weight + 1, in the loader."""
++
++    def __init__(self, hidden: int):
++        super().__init__()
++        self.weight = nn.Parameter(torch.zeros(hidden), requires_grad=False)
++        self.register_buffer("gemma_weight", torch.ones_like(self.weight), persistent=False)
++        self.weight.weight_loader = self._weight_loader
++
++    def _weight_loader(self, param, w):
++        assert param.size() == w.size()
++        param.data.copy_(w)
++        torch.add(param.data, 1.0, out=self.gemma_weight)
++
++    def forward(self, x):
++        x = x.float()
++        x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + 1e-6)
++        return x * self.gemma_weight  # the fused path reads the derived buffer
++
++
++class RadixAttentionStub(nn.Module):
++    pass
++
++
++class MLAttention(nn.Module):
++    def __init__(self, tp: Rank):
++        super().__init__()
++        self.tp = tp
++        self.qkv = QKVParallel(tp, H, HEADS * HEAD_DIM)
++        self.o_proj = RowParallel(tp, HEADS * HEAD_DIM, H)
++        self.kv_b_proj = ColumnParallel(tp, KV_RANK, HEADS * 2 * HEAD_DIM)
++        self.attn_mha = RadixAttentionStub()
++        self.attn_mha.kv_b_proj = None  # deepseek_v2.py:1920
++        self.w_kc = None  # deepseek_v2.py:1922-1923
++        self.w_vc = None
++        self.k_scale = 1.0
++
++    def post_load_weights(self):
++        # deepseek_v2 post_load_weights: absorb kv_b_proj into w_kc / w_vc
++        w = self.kv_b_proj.weight.unflatten(0, (-1, 2 * HEAD_DIM))
++        w_kc, w_vc = w.split([HEAD_DIM, HEAD_DIM], dim=1)
++        self.w_kc = w_kc.transpose(1, 2).contiguous()
++        self.w_vc = w_vc.contiguous()
++
++    def forward(self, x):
++        if self.attn_mha.kv_b_proj is None and hasattr(self, "kv_b_proj"):  # deepseek_v2.py:2070
++            self.attn_mha.kv_b_proj = self.kv_b_proj
++        q = (x @ self.qkv.weight.t().float())[..., : self.qkv.per]
++        k = torch.einsum("nr,hrd->nhd", x[..., :KV_RANK], self.w_kc.float()).flatten(1)
++        heads = (q + k) * self.k_scale
++        return heads @ self.o_proj.weight.t().float()
++
++
++@dataclasses.dataclass
++class StorageStub:  # triton_kernels.tensor.Storage
++    data: torch.Tensor
++
++
++@dataclasses.dataclass
++class TritonTensorStub:  # triton_kernels.tensor.Tensor
++    storage: StorageStub
++
++
++@dataclasses.dataclass
++class PrecisionConfigStub:  # triton_kernels.matmul.PrecisionConfig
++    b_mx_scale: TritonTensorStub
++
++
++class Mxfp4TritonStub:
++    """The shape of mxfp4.py:1015-1043: swizzle, park on self, delete from layer."""
++
++    def __init__(self):
++        self.w13_weight_triton_tensor = None
++        self.w13_precision_config = None
++
++    def process_weights_after_loading(self, layer):
++        swizzled = layer.w13_weight.data.flip(-1).contiguous()  # stand-in for _swizzle_mxfp4
++        scale = layer.w13_weight_scale.data.flip(-1).contiguous()
++        self.w13_precision_config = PrecisionConfigStub(TritonTensorStub(StorageStub(scale)))
++        self.w13_weight_triton_tensor = TritonTensorStub(StorageStub(swizzled))
++        del layer.w13_weight
++
++
++class FusedMoE(nn.Module):
++    def __init__(self, tp: Rank, ep: bool = False, triton: bool = True):
++        super().__init__()
++        self.tp = tp
++        self.ep = ep
++        tp_world = 1 if ep else tp.world
++        self.local = list(range(E))[tp.rank :: tp.world] if ep else list(range(E))
++        n = len(self.local)
++        self.w13_weight = _param(n, 2 * I // tp_world, H, dtype=torch.uint8)
++        self.w13_weight_scale = _param(n, 2 * I // tp_world, H // 4, dtype=torch.uint8)
++        self.w2_weight = _param(n, H, I // tp_world, dtype=torch.uint8)
++        self.w2_weight_scale = _param(n, H, I // 4 // tp_world, dtype=torch.uint8)
++        self.quant_method = Mxfp4TritonStub() if triton else None
++
++    def load_fused(self, name: str, w: torch.Tensor):
++        # gpt_oss.py-style: flatten blocks, slice this rank's rows of the
++        # interleaved gate/up dim, then copy per local expert
++        tp_world = 1 if self.ep else self.tp.world
++        r = 0 if self.ep else self.tp.rank
++        if name.endswith("gate_up_proj_blocks"):
++            w = w.view(E, 2 * I, -1)
++            per = 2 * I // tp_world
++            w = w[:, r * per : (r + 1) * per, ...]
++            for j, e in enumerate(self.local):
++                self.w13_weight.data[j].copy_(w[e])
++        elif name.endswith("gate_up_proj_scales"):
++            per = 2 * I // tp_world
++            for j, e in enumerate(self.local):
++                self.w13_weight_scale.data[j].copy_(w[e, r * per : (r + 1) * per])
++        elif name.endswith("down_proj_blocks"):
++            w = w.view(E, H, -1)
++            per = w.shape[-1] // tp_world
++            for j, e in enumerate(self.local):
++                self.w2_weight.data[j].copy_(w[e, :, r * per : (r + 1) * per])
++        elif name.endswith("down_proj_scales"):
++            per = w.shape[-1] // tp_world
++            for j, e in enumerate(self.local):
++                self.w2_weight_scale.data[j].copy_(w[e, :, r * per : (r + 1) * per])
++
++
++class MiniModel(nn.Module):
++    def __init__(self, rank: int = 0, world: int = 1, ep: bool = False, triton: bool = True):
++        super().__init__()
++        tp = Rank(rank, world)
++        self.tp = tp
++        self.embed_tokens = VocabParallelEmbedding(tp, V, H)
++        self.norm = GemmaNorm(H)
++        self.attn = MLAttention(tp)
++        self.gate_up = ColumnParallel(tp, H, 2 * 4 * H)
++        self.down = RowParallel(tp, 4 * H, H)
++        self.experts = FusedMoE(tp, ep=ep, triton=triton)
++        self.router = nn.Linear(H, E, bias=False, dtype=torch.bfloat16)
++        self.router.weight.requires_grad_(False)
++        self.lm_head = VocabParallelEmbedding(tp, V, H)
++        self.workspace = None
++        self._stash: Dict[str, torch.Tensor] = {}
++
++    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> None:
++        stacked = {"q_proj": "q", "k_proj": "k", "v_proj": "v"}
++        for name, w in weights:
++            if "rotary_emb.inv_freq" in name:
++                continue  # skipped by name, never read
++            if name.startswith("attn.") and any(k in name for k in stacked):
++                shard = stacked[name.split(".")[1]]
++                self.attn.qkv.load_shard(shard, w)
++            elif name == "attn.o_proj.weight":
++                self.attn.o_proj.weight_loader(self.attn.o_proj.weight, w)
++            elif name == "attn.kv_b_proj.weight":
++                self.attn.kv_b_proj.weight_loader(self.attn.kv_b_proj.weight, w)
++            elif name in ("mlp.gate_proj.weight", "mlp.up_proj.weight"):
++                # merged column: stash the first, load both when the pair is complete
++                self._stash[name] = w
++                if len(self._stash) == 2:
++                    per = self.gate_up.weight.shape[0] // 2
++                    self.gate_up.weight_loader(self.gate_up.weight, self._stash.pop("mlp.gate_proj.weight"), 0, per)
++                    self.gate_up.weight_loader(self.gate_up.weight, self._stash.pop("mlp.up_proj.weight"), per, per)
++            elif name == "mlp.down_proj.weight":
++                self.down.weight_loader(self.down.weight, w)
++            elif name.startswith("experts."):
++                self.experts.load_fused(name, w)
++            elif name == "embed_tokens.weight":
++                self.embed_tokens.weight_loader(self.embed_tokens.weight, w)
++            elif name == "lm_head.weight":
++                self.lm_head.weight_loader(self.lm_head.weight, w)
++            elif name == "norm.weight":
++                self.norm.weight.weight_loader(self.norm.weight, w)
++            elif name == "router.weight":
++                self.router.weight.data.copy_(w.view(torch.int16).view(torch.bfloat16))  # a dtype view
++            elif name == "k_scale":
++                self.attn.k_scale = float(w.item())  # a scalar read
++            else:
++                raise KeyError(name)
++
++    def post_load_weights(self):
++        self.attn.post_load_weights()
++
++    def process_weights_after_loading(self):
++        qm = self.experts.quant_method
++        if qm is not None:
++            qm.process_weights_after_loading(self.experts)
++        self.workspace = torch.empty(64)  # scratch: never initialized
++
++    def forward(self, ids: torch.Tensor) -> torch.Tensor:
++        x = self.embed_tokens.weight[ids.clamp(max=self.embed_tokens.weight.shape[0] - 1)].float()
++        x = self.norm(x)
++        x = x + self.attn(x)
++        x = x @ self.gate_up.weight.t().float()
++        x = x[..., : self.down.weight.shape[1]] @ self.down.weight.t().float()
++        qm = self.experts.quant_method
++        experts = qm.w13_weight_triton_tensor.storage.data if qm is not None else self.experts.w13_weight
++        x = x + experts.float().mean() / 255.0
++        return x @ self.lm_head.weight.t().float()
++
++
++def default_load(model: MiniModel, weights: Iterable[Tuple[str, torch.Tensor]]) -> MiniModel:
++    """SGLang's DefaultModelLoader order: load_weights (incl. post_load), then post-process."""
++    model.load_weights(weights)
++    model.post_load_weights()
++    model.process_weights_after_loading()
++    return model
+diff --git a/tests/test_deepstate.py b/tests/test_deepstate.py
+new file mode 100644
+index 0000000..c83aa00
+--- /dev/null
++++ b/tests/test_deepstate.py
+@@ -0,0 +1,94 @@
++"""The generic round-trip checker: every tensor a model holds, not just state_dict()."""
++import os
++import sys
++
++import pytest
++
++torch = pytest.importorskip("torch")
++pytest.importorskip("safetensors")
++
++sys.path.insert(0, os.path.dirname(__file__))
++
++from _mini_tp import MiniModel, default_load, iterate_checkpoint, make_checkpoint, save_checkpoint  # noqa: E402
++
++from servekit import deepstate  # noqa: E402
++
++
++@pytest.fixture(scope="module")
++def checkpoint(tmp_path_factory):
++    return save_checkpoint(make_checkpoint(), str(tmp_path_factory.mktemp("ckpt")))
++
++
++def _state_dict_round_trip(reference: MiniModel, rank: int, world: int) -> MiniModel:
++    """What a post-processed-state_dict format does on reload (sharded_state's shape):
++    post-process the fresh placeholders, then copy the saved state_dict into them."""
++    saved = {k: v.clone() for k, v in reference.state_dict().items()}
++    fresh = MiniModel(rank, world)
++    fresh.process_weights_after_loading()  # on placeholders, before any data
++    target = fresh.state_dict()
++    for k, v in saved.items():
++        target[k].copy_(v)
++    assert set(target) == set(saved)  # the key check passes: nothing is "missing"
++    fresh.post_load_weights()
++    return fresh
++
++
++def test_a_state_dict_check_passes_where_the_model_is_broken(checkpoint):
++    with deepstate.deterministic_empty():
++        reference = default_load(MiniModel(0, 2), iterate_checkpoint(checkpoint))
++        reloaded = _state_dict_round_trip(reference, 0, 2)
++    ref, got = deepstate.fingerprint(reference), deepstate.fingerprint(reloaded)
++
++    registered_only = deepstate.compare(ref, got, only_kinds=("param", "buffer"))
++    assert registered_only.ok, registered_only.summary()
++
++    full = deepstate.compare(ref, got)
++    assert not full.ok
++    assert "experts.quant_method.w13_weight_triton_tensor.storage.data" in full.differ
++    assert "experts.quant_method.w13_precision_config.b_mx_scale.storage.data" in full.differ
++    assert "norm.gemma_weight" in full.differ
++    assert full.kinds["norm.gemma_weight"] == "nonpersistent_buffer"
++    ids = torch.tensor([1, 2, 3])
++    assert not torch.equal(reference(ids), reloaded(ids))
++
++
++def test_uninitialized_scratch_is_unstable_rather_than_different(checkpoint):
++    loads = [default_load(MiniModel(0, 1), iterate_checkpoint(checkpoint)) for _ in range(3)]
++    for m in loads:  # make the scratch visibly different between loads
++        m.workspace.copy_(torch.randn(64))
++    a, b, c = (deepstate.fingerprint(m) for m in loads)
++    plain = deepstate.compare(a, b)
++    assert plain.differ == ["<root>.workspace"]
++    tolerant = deepstate.compare(a, b, reference_again=c)
++    assert tolerant.ok and tolerant.unstable == ["<root>.workspace"]
++
++
++def test_deterministic_empty_makes_scratch_comparable(checkpoint):
++    with deepstate.deterministic_empty():
++        a = deepstate.fingerprint(default_load(MiniModel(0, 1), iterate_checkpoint(checkpoint)))
++        b = deepstate.fingerprint(default_load(MiniModel(0, 1), iterate_checkpoint(checkpoint)))
++    assert deepstate.compare(a, b).ok
++    assert not torch.are_deterministic_algorithms_enabled()
++
++
++def test_aliases_are_reported_once_under_the_registered_name(checkpoint):
++    m = default_load(MiniModel(0, 1), iterate_checkpoint(checkpoint))
++    m(torch.tensor([1]))  # first forward registers attn.attn_mha.kv_b_proj
++    entries = deepstate.fingerprint(m)
++    assert "attn.kv_b_proj.weight" in entries
++    assert "attn.attn_mha.kv_b_proj.weight" in entries["attn.kv_b_proj.weight"].aliases
++
++
++def test_a_single_flipped_bit_changes_the_digest():
++    t = torch.randn(1000).to(torch.bfloat16)
++    u = t.clone()
++    u.view(torch.int16)[517] ^= 1
++    assert deepstate.digest(t) != deepstate.digest(u)
++    assert deepstate.digest(t) == deepstate.digest(t.clone())
++
++
++def test_dump_and_load(tmp_path, checkpoint):
++    m = default_load(MiniModel(0, 1), iterate_checkpoint(checkpoint))
++    path = str(tmp_path / "fp.json")
++    written = deepstate.dump(m, path, loader="default")
++    assert deepstate.load(path) == written
+diff --git a/tests/test_raw_integration.py b/tests/test_raw_integration.py
+new file mode 100644
+index 0000000..0883459
+--- /dev/null
++++ b/tests/test_raw_integration.py
+@@ -0,0 +1,156 @@
++"""The raw preshard format through servekit's own surface: guard, prepare, launch, CLI."""
++import json
++import os
++import sys
++
++import pytest
++
++from servekit.cli import main
++from servekit.manifest import Manifest
++from servekit.prepare import _missing_shards, prepare
++from servekit.profile import ProfileReport
++from servekit.quant_guard import Setup, check, check_command
++from servekit.stage import StageResult
++from servekit.topology import Topology, raw_glob
++
++GPT_OSS = {"architectures": ["GptOssForCausalLM"], "quantization_config": {"quant_method": "mxfp4"}}
++
++
++def _model(tmp_path, config, name="gpt-oss-20b"):
++    src = tmp_path / name
++    src.mkdir()
++    (src / "config.json").write_text(json.dumps(config))
++    return src
++
++
++# --- the guard ---------------------------------------------------------------
++
++def test_gpt_oss_with_no_backend_flag_is_the_triton_kernel_path():
++    # SGLang 0.5.20 resolves auto to triton_kernel for gpt-oss below SM100
++    # (arg_groups/model_overrides/gpt_oss.py:106-125), so this is #34448 too.
++    assert check(Setup(quant_method="mxfp4", architectures=("GptOssForCausalLM",)))
++    assert check(Setup(quant_method="mxfp4", architectures=("GptOssForCausalLM",), moe_runner_backend="marlin")) == []
++
++
++def test_a_bare_gpt_oss_launch_is_refused_for_sharded_state_but_not_for_raw(tmp_path):
++    src = _model(tmp_path, GPT_OSS)
++    command = ["python", "-m", "sglang.launch_server", "--model-path", str(src)]
++    assert check_command(src, command)
++    assert check_command(src, command, "raw") == []
++
++
++# --- prepare -----------------------------------------------------------------
++
++FAKE_RAW_SHARDER = '''
++import json, os, sys
++args = sys.argv[1:]
++def arg(name):
++    return args[args.index(name) + 1]
++out, tp = arg("--output"), int(arg("--tensor-parallel-size"))
++assert arg("--servekit-format") == "raw"
++assert os.environ["SERVEKIT_RAW_RECORD_DIR"] == out
++for r in range(tp):
++    open(os.path.join(out, f"servekit-raw-rank-{r}.json"), "w").write("{}")
++    open(os.path.join(out, f"servekit-raw-rank-{r}-part-0.safetensors"), "wb").write(b"bytes")
++resolved = {"engine": "sglang", "engine_version": "0.5.20", "tp_size": tp, "pp_size": 1,
++            "dp_size": 1, "dtype": "bfloat16", "quantization": "mxfp4"}
++json.dump(resolved, open(arg("--servekit-resolved-out"), "w"))
++'''
++
++
++def test_prepare_raw_records_through_the_hooks_and_writes_a_raw_manifest(tmp_path, monkeypatch):
++    script = tmp_path / "fake.py"
++    script.write_text(FAKE_RAW_SHARDER)
++    monkeypatch.setattr("servekit.prepare.SAVE_SCRIPT", script)
++    src = _model(tmp_path, GPT_OSS)
++    out = tmp_path / "artifact"
++    assert prepare(src, out, tp=2, fmt="raw", cache_root=tmp_path / "cache") == 0
++    manifest = json.loads((out / "servekit.json").read_text())
++    assert manifest["format"] == "raw" and manifest["tp_size"] == 2
++
++
++def test_a_missing_raw_rank_is_caught(tmp_path):
++    (tmp_path / "servekit-raw-rank-0.json").write_text("{}")
++    assert _missing_shards(tmp_path, 2, 1, "raw") == ["servekit-raw-rank-1.json"]
++
++
++def test_an_unknown_format_is_refused(tmp_path):
++    assert prepare(tmp_path, tmp_path / "out", tp=1, fmt="pickle") == 2
++
++
++# --- launch ------------------------------------------------------------------
++
++@pytest.fixture
++def fake_engine(monkeypatch, tmp_path):
++    seen = {}
++
++    def fake_stage(src, dest, slices=64, file_pattern="*"):
++        seen["pattern"] = file_pattern
++        return StageResult(dest=dest, wall_s=0.1, gbps=1.0, bytes=1)
++
++    def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        seen["command"] = command
++        return ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="sglang")
++
++    monkeypatch.setattr("servekit.launch.stage", fake_stage)
++    monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
++    monkeypatch.setattr("servekit.launch.apply_all", lambda: None)
++    monkeypatch.setattr("servekit.launch.DEFAULT_ROOT", tmp_path / "shm")
++    monkeypatch.setattr("servekit.launch.DEFAULT_CACHE_ROOT", tmp_path / "cache-root")
++    return seen
++
++
++def _raw_artifact(tmp_path, src):
++    art = tmp_path / "gpt-oss-raw"
++    art.mkdir()
++    (art / "config.json").write_text(json.dumps(GPT_OSS))
++    (art / "servekit-raw-rank-0.json").write_text("{}")
++    (art / "servekit-raw-rank-0-part-0.safetensors").write_bytes(b"bytes")
++    Manifest(format="raw", engine="sglang", engine_version="0.5.20", tp_size=1, pp_size=1, dp_size=1,
++             dtype="bfloat16", quantization="mxfp4", source=str(src)).write(art)
++    return art
++
++
++def test_a_raw_artifact_serves_on_the_ordinary_loader_and_is_not_refused(tmp_path, fake_engine):
++    src = _model(tmp_path, GPT_OSS)
++    art = _raw_artifact(tmp_path, src)
++    rc = main(["launch", "--servekit-artifact-path", str(art), "--out", str(tmp_path / "r.json"),
++               "--", "python", "-m", "sglang.launch_server", "--model-path", str(src)])
++    assert rc == 0
++    assert fake_engine["command"] == ["python", "-m", "sglang.launch_server", "--model-path", str(tmp_path / "shm" / art.name)]
++
++
++def test_asking_for_another_format_than_the_artifacts_falls_back(tmp_path, fake_engine, capsys):
++    src = _model(tmp_path, GPT_OSS)
++    art = _raw_artifact(tmp_path, src)
++    rc = main(["launch", "--servekit-artifact-path", str(art), "--out", str(tmp_path / "r.json"),
++               "--preshard-format", "sharded_state",
++               "--", "python", "-m", "sglang.launch_server", "--model-path", str(src)])
++    assert rc == 0
++    assert "format: the artifact is raw" in capsys.readouterr().out
++    assert fake_engine["command"][-1] == str(src)  # served from the source, untouched
++
++
++def test_a_node_stages_only_its_own_raw_ranks():
++    topo = Topology(nnodes=2, node_rank=1, tp_size=8, pp_size=1, dist_init_addr="h:1")
++    assert raw_glob(topo) == "servekit-raw-rank-[4-7]-part-*.safetensors"
++
++
++# --- the deepstate command ---------------------------------------------------
++
++def _dump(path, digest):
++    entry = {"path": "w", "kind": "param", "dtype": "bfloat16", "shape": [2], "device": "cpu",
++             "digest": digest, "aliases": []}
++    path.write_text(json.dumps({"meta": {}, "entries": [entry]}))
++
++
++def test_the_deepstate_command_exits_on_a_difference(tmp_path, capsys):
++    for d in ("ref", "same", "other"):
++        (tmp_path / d).mkdir()
++    _dump(tmp_path / "ref" / "deepstate-target-rank-0.json", "aa")
++    _dump(tmp_path / "same" / "deepstate-target-rank-0.json", "aa")
++    _dump(tmp_path / "other" / "deepstate-target-rank-0.json", "bb")
++    assert main(["deepstate", str(tmp_path / "ref"), str(tmp_path / "same")]) == 0
++    assert main(["deepstate", str(tmp_path / "ref"), str(tmp_path / "other"), "--out", str(tmp_path / "r.json")]) == 1
++    assert "differ: 1" in capsys.readouterr().out
++    assert json.loads((tmp_path / "r.json").read_text())["deepstate-target-rank-0.json"]["differ"] == ["w"]
+diff --git a/tests/test_rawshard.py b/tests/test_rawshard.py
+new file mode 100644
+index 0000000..8c3542d
+--- /dev/null
++++ b/tests/test_rawshard.py
+@@ -0,0 +1,198 @@
++"""Raw presharding: record one ordinary load per rank, replay it through the ordinary load."""
++import os
++import sys
++from concurrent.futures import ThreadPoolExecutor
++
++import pytest
++
++torch = pytest.importorskip("torch")
++pytest.importorskip("safetensors")
++
++sys.path.insert(0, os.path.dirname(__file__))
++
++from _mini_tp import MiniModel, default_load, iterate_checkpoint, make_checkpoint, save_checkpoint  # noqa: E402
++
++from servekit import deepstate  # noqa: E402
++from servekit.rawshard.footprint import Box, Recorder, canonical_box  # noqa: E402
++from servekit.rawshard.store import RawIndex, RecordSession  # noqa: E402
++
++
++@pytest.fixture(scope="module")
++def checkpoint(tmp_path_factory):
++    d = tmp_path_factory.mktemp("ckpt")
++    return save_checkpoint(make_checkpoint(), str(d))
++
++
++def _plain(paths, rank, world, **kw):
++    with deterministic():
++        return default_load(MiniModel(rank, world, **kw), iterate_checkpoint(paths))
++
++
++def deterministic():
++    return deepstate.deterministic_empty()
++
++
++def _record(paths, out, rank, world, max_part_bytes=1 << 30, **kw):
++    session = RecordSession(str(out), rank, max_part_bytes=max_part_bytes)
++    with deterministic():
++        model = MiniModel(rank, world, **kw)
++        default_load(model, session.stream("target/0", iterate_checkpoint(paths), source="ckpt"))
++    stats = session.finish(model)
++    return model, stats
++
++
++def _replay(out, rank, world, verify=False, **kw):
++    index = RawIndex(str(out), rank)
++    with deterministic():
++        model = default_load(MiniModel(rank, world, **kw), index.replay(0, verify=verify))
++    return model, index
++
++
++@pytest.mark.parametrize("world", [1, 2, 4])
++def test_replay_reproduces_every_tensor_of_the_default_load(checkpoint, tmp_path, world):
++    for rank in range(world):
++        reference = deepstate.fingerprint(_plain(checkpoint, rank, world))
++        recorded, _ = _record(checkpoint, tmp_path, rank, world)
++        replayed, index = _replay(tmp_path, rank, world, verify=True)
++
++        assert deepstate.compare(reference, deepstate.fingerprint(recorded)).ok, "recording perturbed the load"
++        report = deepstate.compare(reference, deepstate.fingerprint(replayed))
++        assert report.ok, report.summary()
++        assert index.verdict(replayed) == []
++        ids = torch.tensor([0, 5, 36])
++        assert torch.equal(recorded(ids), replayed(ids))
++
++
++def test_each_rank_stores_only_its_share(checkpoint, tmp_path):
++    world = 4
++    stats = [_record(checkpoint, tmp_path, r, world)[1] for r in range(world)]
++    total = stats[0]["checkpoint_bytes"]
++    stored = sum(s["stored_bytes"] for s in stats)
++    # sharded tensors are split four ways; norms, router, scalars are replicated
++    assert stored < 1.6 * total, (stored, total)
++
++    entries = {e["name"]: e for e in RawIndex(str(tmp_path), 2).streams[0]["entries"]}
++    o_proj = entries["attn.o_proj.weight"]
++    assert not o_proj["full"]
++    (offset, sizes, strides, _part, _key), = o_proj["boxes"]
++    # rank 2 of a row-parallel [16, 16] bf16 weight: columns 8..11 of every row
++    assert (offset, sizes, strides) == (2 * 4 * 2, [16, 8], [32, 1])
++    assert entries["unused.rotary_emb.inv_freq"]["boxes"] == []
++    assert entries["k_scale"]["full"] and entries["router.weight"]["full"]
++
++
++def test_expert_parallel_ranks_store_only_their_experts(checkpoint, tmp_path):
++    _, stats = _record(checkpoint, tmp_path, 1, 2, ep=True)
++    entries = {e["name"]: e for e in RawIndex(str(tmp_path), 1).streams[0]["entries"]}
++    blocks = entries["experts.gate_up_proj_blocks"]
++    assert len(blocks["boxes"]) == 2  # experts 1 and 3, one box each
++    replayed, index = _replay(tmp_path, 1, 2, verify=True, ep=True)
++    reference = deepstate.fingerprint(_plain(checkpoint, 1, 2, ep=True))
++    assert deepstate.compare(reference, deepstate.fingerprint(replayed)).ok
++    assert index.verdict(replayed) == []
++
++
++def test_replaying_another_ranks_preshard_is_caught(checkpoint, tmp_path):
++    _record(checkpoint, tmp_path, 0, 2)
++    index = RawIndex(str(tmp_path), 0)
++    with deterministic():
++        wrong = default_load(MiniModel(1, 2), index.replay(0, verify=True))
++    problems = index.verdict(wrong)
++    assert problems and any("attn.o_proj.weight" in p for p in problems), problems
++
++
++def test_small_parts_still_replay_exactly(checkpoint, tmp_path):
++    _, stats = _record(checkpoint, tmp_path, 1, 2, max_part_bytes=512)
++    index = RawIndex(str(tmp_path), 1)
++    assert len(index.index["files"]) > 3
++    replayed, _ = _replay(tmp_path, 1, 2)
++    reference = deepstate.fingerprint(_plain(checkpoint, 1, 2))
++    assert deepstate.compare(reference, deepstate.fingerprint(replayed)).ok
++
++
++def test_threaded_weight_loading_is_recorded(checkpoint, tmp_path):
++    class Threaded(MiniModel):
++        def load_weights(self, weights):
++            items = list(weights)  # materialize, then load from a pool
++            with ThreadPoolExecutor(4) as pool:
++                list(pool.map(lambda nw: MiniModel.load_weights(self, [nw]), [i for i in items if not i[0].startswith("mlp.")]))
++            MiniModel.load_weights(self, [i for i in items if i[0].startswith("mlp.")])
++
++    session = RecordSession(str(tmp_path), 0)
++    with deterministic():
++        model = default_load(Threaded(0, 2), session.stream("target/0", iterate_checkpoint(checkpoint)))
++    session.finish(model)
++    replayed, index = _replay(tmp_path, 0, 2, verify=True)
++    reference = deepstate.fingerprint(_plain(checkpoint, 0, 2))
++    assert deepstate.compare(reference, deepstate.fingerprint(replayed)).ok
++    assert index.verdict(replayed) == []
++
++
++def test_a_loader_that_keeps_the_checkpoint_tensor_is_unwrapped(tmp_path):
++    from servekit.rawshard.footprint import FootprintTensor
++
++    class Keeper(torch.nn.Module):
++        def __init__(self):
++            super().__init__()
++            self.register_buffer("kept", None)
++
++        def load_weights(self, weights):
++            for _, w in weights:
++                self.kept = w  # zero-copy: the model holds the checkpoint tensor
++
++    session = RecordSession(str(tmp_path), 0)
++    model = Keeper()
++    model.load_weights(session.stream("target/0", iter([("kept", torch.arange(6.0))])))
++    assert isinstance(model.kept, FootprintTensor)
++    stats = session.finish(model)
++    assert not isinstance(model.kept, FootprintTensor)
++    assert stats["wrappers_left_in_model"] == 1 and stats["tensors_full"] == 1
++
++
++def test_asking_for_a_stream_that_was_never_recorded_fails_loudly(checkpoint, tmp_path):
++    _record(checkpoint, tmp_path, 0, 1)
++    with pytest.raises(RuntimeError, match="stream 1"):
++        next(RawIndex(str(tmp_path), 0).replay(1))
++
++
++def test_a_missing_rank_names_the_world_size_problem(tmp_path):
++    with pytest.raises(FileNotFoundError, match="different world size"):
++        RawIndex(str(tmp_path), 3)
++
++
++# ------------------------------------------------------------- footprint units
++
++
++def _reads(fn, base):
++    rec = Recorder()
++    fn(rec.wrap("w", base))
++    return list(rec.footprints[0].boxes), rec.footprints[0].full
++
++
++def test_narrow_records_a_box_not_the_tensor():
++    boxes, full = _reads(lambda w: torch.zeros(4, 3).copy_(w.narrow(1, 3, 3)), torch.zeros(4, 6))
++    assert not full and boxes == [Box(12, (4, 12), (24, 1))]
++
++
++def test_dtype_views_scalars_and_cat_are_reads():
++    base = torch.arange(8, dtype=torch.float32)
++    assert _reads(lambda w: w.view(torch.int32).sum(), base)[1]
++    assert _reads(lambda w: w[3].item(), base)[0] == [Box(12, (4,), (1,))]
++    boxes, _ = _reads(lambda w: torch.cat([w[:2], w[6:]]), base)
++    assert boxes == [Box(0, (8,), (1,)), Box(24, (8,), (1,))]
++
++
++def test_methods_that_leave_the_dispatcher_count_as_full_reads():
++    for fn in (lambda w: w.numpy(), lambda w: w.tolist(), lambda w: w.data_ptr()):
++        assert _reads(fn, torch.arange(4.0))[1]
++
++
++def test_views_alone_read_nothing():
++    boxes, full = _reads(lambda w: (w.t(), w[1:], w.view(-1), w.chunk(2)), torch.zeros(2, 2))
++    assert boxes == [] and not full
++
++
++def test_canonical_boxes_merge_contiguous_dims():
++    assert canonical_box(0, [2, 3, 4], [12, 4, 1]) == Box(0, (24,), (1,))
++    assert canonical_box(8, [4, 1, 2], [16, 99, 1]) == Box(8, (4, 2), (16, 1))
++    assert canonical_box(0, [0, 4], [4, 1]) is None
+diff --git a/tests/test_rawshard_sglang_hooks.py b/tests/test_rawshard_sglang_hooks.py
+new file mode 100644
+index 0000000..94f46ed
+--- /dev/null
++++ b/tests/test_rawshard_sglang_hooks.py
+@@ -0,0 +1,151 @@
++"""The SGLang hooks, driven through a stand-in with DefaultModelLoader's signatures."""
++import json
++import os
++import shutil
++import sys
++from types import SimpleNamespace
++
++import pytest
++
++torch = pytest.importorskip("torch")
++pytest.importorskip("safetensors")
++
++sys.path.insert(0, os.path.dirname(__file__))
++
++from _mini_tp import MiniModel, default_load, iterate_checkpoint, make_checkpoint, save_checkpoint  # noqa: E402
++
++from servekit import deepstate  # noqa: E402
++from servekit.rawshard import sglang_hooks as hooks  # noqa: E402
++
++
++class FakeLoader:
++    """DefaultModelLoader's shape: load_model pulls _get_weights_iterator(source)."""
++
++    def __init__(self, rank=0, world=1):
++        self.rank, self.world = rank, world
++
++    def _get_weights_iterator(self, source, **kwargs):
++        files = sorted(
++            os.path.join(source.model_or_path, f)
++            for f in os.listdir(source.model_or_path)
++            if f.startswith("model-") and f.endswith(".safetensors")
++        )
++        return ((source.prefix + n, t) for n, t in iterate_checkpoint(files))
++
++    def load_model(self, *, model_config, device_config=None):
++        source = SimpleNamespace(model_or_path=model_config.model_path, prefix="", model_config=model_config)
++        with deepstate.deterministic_empty():
++            model = MiniModel(self.rank, self.world)
++            default_load(model, hooked_iterator(self, source))
++        return model
++
++
++def hooked_iterator(loader, source, **kwargs):
++    return hooks.around_weights_iterator(FakeLoader._get_weights_iterator, loader, source, **kwargs)
++
++
++def hooked_load(loader, model_config):
++    return hooks.around_load_model(FakeLoader.load_model, loader, model_config=model_config)
++
++
++def config(path, draft=False):
++    return SimpleNamespace(model_path=str(path), is_draft_model=draft, dtype="torch.bfloat16", quantization=None)
++
++
++@pytest.fixture
++def fresh_state(monkeypatch):
++    monkeypatch.setattr(hooks, "_STATE", hooks._Process())
++    monkeypatch.delenv(hooks.ENV_RECORD, raising=False)
++    monkeypatch.delenv(hooks.ENV_VERIFY, raising=False)
++    yield monkeypatch
++
++
++@pytest.fixture
++def checkpoint(tmp_path):
++    d = tmp_path / "ckpt"
++    save_checkpoint(make_checkpoint(), str(d))
++    (d / "config.json").write_text("{}")
++    return d
++
++
++def _prepare(checkpoint, artifact, monkeypatch, rank=0, world=1):
++    monkeypatch.setenv(hooks.ENV_RECORD, str(artifact))
++    reference = hooked_load(FakeLoader(rank, world), config(checkpoint))
++    monkeypatch.delenv(hooks.ENV_RECORD)
++    shutil.copy(checkpoint / "config.json", artifact / "config.json")
++    monkeypatch.setattr(hooks, "_STATE", hooks._Process())
++    return reference
++
++
++def test_prepare_then_serve_through_the_hooks(checkpoint, tmp_path, fresh_state):
++    artifact = tmp_path / "artifact"
++    reference = _prepare(checkpoint, artifact, fresh_state)
++    index = json.loads((artifact / "servekit-raw-rank-0.json").read_text())
++    assert index["signature"]["world_rank"] == 0 and index["signature"]["world_size"] == 1
++    assert [s["key"] for s in index["streams"]] == ["target/0"]
++
++    served = hooked_load(FakeLoader(), config(artifact))
++    report = deepstate.compare(deepstate.fingerprint(reference), deepstate.fingerprint(served))
++    assert report.ok, report.summary()
++
++
++def test_an_artifact_from_another_layout_is_refused(checkpoint, tmp_path, fresh_state):
++    artifact = tmp_path / "artifact"
++    _prepare(checkpoint, artifact, fresh_state)
++    path = artifact / "servekit-raw-rank-0.json"
++    index = json.loads(path.read_text())
++    index["signature"]["world_size"] = 4
++    path.write_text(json.dumps(index))
++    with pytest.raises(RuntimeError, match="world_size: prepared 4, now 1"):
++        hooked_load(FakeLoader(), config(artifact))
++
++
++def test_a_replay_that_reads_unstored_bytes_refuses_to_serve(checkpoint, tmp_path, fresh_state):
++    artifact = tmp_path / "artifact"
++    _prepare(checkpoint, artifact, fresh_state, rank=0, world=2)
++    # Same world rank as far as torch.distributed knows, but the model slices
++    # for tp_rank 1: exactly the drift the signature cannot see without SGLang.
++    with pytest.raises(RuntimeError, match="did not match its recording"):
++        hooked_load(FakeLoader(rank=1, world=2), config(artifact))
++
++
++def test_verification_can_be_switched_off(checkpoint, tmp_path, fresh_state):
++    artifact = tmp_path / "artifact"
++    _prepare(checkpoint, artifact, fresh_state, rank=0, world=2)
++    fresh_state.setenv(hooks.ENV_VERIFY, "0")
++    hooked_load(FakeLoader(rank=1, world=2), config(artifact))  # silently wrong: why it is on by default
++
++
++def test_other_sources_and_plain_loads_pass_through(checkpoint, fresh_state):
++    loader = FakeLoader()
++    secondary = SimpleNamespace(model_or_path=str(checkpoint), prefix="vision.", model_config=None)
++    names = [n for n, _ in hooked_iterator(loader, secondary)]
++    assert names and all(n.startswith("vision.") for n in names)
++    hooked_load(loader, config(checkpoint))  # no env, no index: an ordinary load
++    assert hooks._STATE.session is None
++
++
++def test_target_and_draft_streams_are_kept_apart(checkpoint, tmp_path, fresh_state):
++    artifact = tmp_path / "artifact"
++    fresh_state.setenv(hooks.ENV_RECORD, str(artifact))
++    hooked_load(FakeLoader(), config(checkpoint))
++    hooked_load(FakeLoader(), config(checkpoint, draft=True))
++    keys = [s["key"] for s in json.loads((artifact / "servekit-raw-rank-0.json").read_text())["streams"]]
++    assert keys == ["target/0", "draft/0"]
++
++
++def test_deepstate_dump_after_the_runner_loads(tmp_path, checkpoint, fresh_state):
++    fresh_state.setenv(hooks.ENV_DEEPSTATE, str(tmp_path / "ds"))
++
++    class Runner:
++        startup_weight_load = None
++        is_draft_worker = False
++        load_config = SimpleNamespace(load_format="auto")
++
++        def load_model(self):
++            self.model = FakeLoader().load_model(model_config=config(checkpoint))
++
++    runner = Runner()
++    hooks.around_runner_load(Runner.load_model, runner)
++    entries = deepstate.load(str(tmp_path / "ds" / "deepstate-target-rank-0.json"))
++    assert "experts.quant_method.w13_weight_triton_tensor.storage.data" in entries
+-- 
+2.50.1 (Apple Git-155)
+

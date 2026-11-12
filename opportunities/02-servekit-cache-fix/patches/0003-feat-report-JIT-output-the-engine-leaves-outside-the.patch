@@ -1,0 +1,923 @@
+From 19f01d55f93ffbe36d80e4dcf7538c3148e16a4e Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:42:47 +0100
+Subject: [PATCH 3/3] feat: report JIT output the engine leaves outside the
+ kept caches
+
+A fixed list of cache variables rots silently: when sglang 0.5.20 moved
+load_jit's cache, nothing failed, launches just got ~17 s slower at TP4.
+jit_audit snapshots the engine's default cache locations ($HOME's .cache,
+.triton, .nv and .tilelang, and the temp dir) before it starts and, once it
+is ready, reports every new file outside the kept caches, grouped by
+directory, with its size and the variable that moves it, or a note that
+servekit knows none:
+
+  [SERVEKIT] warning: the engine compiled into directories servekit does not keep:
+  [SERVEKIT]      6.0 kB in     3 files  ~/.cache/sglang/jit  (servekit set SGLANG_JIT_CACHE_DIR, and the engine wrote to its default anyway)
+
+In the temp dir, which also holds runtime scratch, only known caches and
+compiled code count; downloads (huggingface, pip, ...) never do. The launch
+report's jit_cache section adds the drift and what the run compiled into the
+node-local caches, so a partial hit shows. prepare and --only-prepare audit
+their warmup run too, after the engine has stopped.
+
+--jit-cache-strict turns drift into exit code 3. prepare still writes its
+manifest and caches; a launch stops its server by returning True from
+on_ready, which run_profile now honors by terminating the engine.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ README.md                 |   6 +-
+ src/servekit/cli.py       |  12 +-
+ src/servekit/jit_audit.py | 233 ++++++++++++++++++++++++++++++++++++++
+ src/servekit/jit_cache.py |  12 +-
+ src/servekit/launch.py    |  34 +++++-
+ src/servekit/prepare.py   |  45 ++++++--
+ src/servekit/profile.py   |  21 +++-
+ tests/conftest.py         |   6 +-
+ tests/test_jit_audit.py   | 205 +++++++++++++++++++++++++++++++++
+ tests/test_jit_cache.py   |   3 +-
+ 10 files changed, 543 insertions(+), 34 deletions(-)
+ create mode 100644 src/servekit/jit_audit.py
+ create mode 100644 tests/test_jit_audit.py
+
+diff --git a/README.md b/README.md
+index 7e82633..4bcefcd 100644
+--- a/README.md
++++ b/README.md
+@@ -68,8 +68,10 @@ another image built are named in the log with what differs, never staged.
+ 
+ After an image upgrade, `--only-prepare` on an already prepared artifact builds
+ the new key's caches without re-sharding, and drops all but the newest
+-`--jit-cache-keep` (default 3). A cache variable your environment already sets
+-(a shared per-image cache, say) is left alone.
++`--jit-cache-keep` (default 3). Once the server is ready, launch reports
++anything the engine compiled outside the kept caches, with its size, and
++`--jit-cache-strict` turns that into exit code 3. A cache variable your
++environment already sets (a shared per-image cache, say) is left alone.
+ 
+ `--overlap` starts the engine while the stage is still running, hiding it behind
+ engine startup; sglang only.
+diff --git a/src/servekit/cli.py b/src/servekit/cli.py
+index 2144075..bce4bcd 100644
+--- a/src/servekit/cli.py
++++ b/src/servekit/cli.py
+@@ -17,7 +17,7 @@ from .verify import capture, compare, discover_model, load_prompt_set, render_ve
+ 
+ USAGE = """usage:
+   servekit launch --servekit-artifact-path PATH [--only-prepare] [--out PATH]
+-                  [--slices N] [--overlap] [--jit-cache-keep N] -- <command...>
++                  [--slices N] [--overlap] [--jit-cache-strict] [--jit-cache-keep N] -- <command...>
+   servekit profile [--out PATH] [--timeout SECONDS] -- <command...>
+   servekit bench --url URL (--into PATH | --out PATH) [--wait-ready SECONDS] [...]
+   servekit verify --url URL (--record PATH | --reference PATH) [--wait-ready SECONDS] [...]
+@@ -31,7 +31,9 @@ back. An artifact that does not match the command is a warning, not a failure:
+ servekit names the mismatch and runs the command on the engine's own loader.
+ `--only-prepare` writes the artifact and stops, for an offline build step; on an
+ artifact that is already prepared, it builds the JIT caches this environment
+-(engine and kernel versions, GPU and CPU arch) is missing.
++(engine and kernel versions, GPU and CPU arch) is missing. Once the server is
++ready, launch reports compiled output that landed outside the persisted caches;
++`--jit-cache-strict` makes that a failure (exit 3).
+ `profile` is `launch` without any of that. `bench` loads any live server over
+ the OpenAI protocol, whether or not servekit launched it. `verify` checks that a
+ served model produces the same per-token logprobs it did before: `--record`
+@@ -145,6 +147,11 @@ def _launch(argv: List[str]) -> int:
+         action="store_true",
+         help="start the engine concurrently with the stage; sglang only",
+     )
++    parser.add_argument(
++        "--jit-cache-strict",
++        action="store_true",
++        help="fail (exit 3, stopping the server) if the engine compiles outside the persisted caches",
++    )
+     parser.add_argument(
+         "--jit-cache-keep",
+         type=int,
+@@ -164,6 +171,7 @@ def _launch(argv: List[str]) -> int:
+             timeout=args.timeout,
+             overlap=args.overlap,
+             only_prepare=args.only_prepare,
++            cache_strict=args.jit_cache_strict,
+             cache_keep=args.jit_cache_keep,
+         )
+     except ValueError as e:
+diff --git a/src/servekit/jit_audit.py b/src/servekit/jit_audit.py
+new file mode 100644
+index 0000000..833111f
+--- /dev/null
++++ b/src/servekit/jit_audit.py
+@@ -0,0 +1,233 @@
++"""What an engine compiled where servekit does not keep it.
++
++Snapshot the engine's default cache locations before it starts; once it is
++ready, anything new there is JIT output the next cold start pays for again.
++Each finding comes with its size and the variable that would have moved it, so
++a cache a new engine release adds is a log line on its first launch instead of
++a regression nobody sees. sglang 0.5.20's SGLANG_JIT_CACHE_DIR would have been
++one: `~/.cache/sglang/jit`, every launch.
++"""
++from __future__ import annotations
++
++import os
++import tempfile
++from dataclasses import asdict, dataclass
++from pathlib import Path
++from typing import Dict, List, Mapping, Optional, Sequence, Tuple
++
++from .jit_cache import CACHES, left_to_environment
++
++# Downloads and package managers, not compiled output.
++IGNORED = ("huggingface", "modelscope", "pip", "uv")
++
++# The temp dir is also full of runtime scratch (IPC endpoints, Prometheus
++# multiprocess files, profiler dumps), so there only a known cache, or a file
++# that is compiled code, counts. sglang 0.5.20 builds two extensions under it
++# that no variable moves: symm_allocator (--enable-symm-mem) and sgl_bump_arena.
++COMPILED = (".so", ".cubin", ".ptx", ".fatbin", ".o", ".hsaco")
++
++# A home or temp dir bigger than this is not audited past it, and says so.
++DEFAULT_LIMIT = 200_000
++
++
++def watched_roots(environ: Mapping[str, str]) -> List[Path]:
++    """Where an engine writes the caches nobody pointed elsewhere."""
++    home = Path(environ.get("HOME") or Path.home())
++    roots = [home / ".cache", home / ".triton", home / ".nv", home / ".tilelang", Path(tempfile.gettempdir())]
++    if environ.get("XDG_CACHE_HOME"):
++        roots.append(Path(environ["XDG_CACHE_HOME"]))
++    return list(dict.fromkeys(roots))
++
++
++@dataclass
++class Snapshot:
++    roots: Tuple[Path, ...]
++    skip: Tuple[Path, ...]
++    files: Dict[str, Tuple[int, int]]  # path -> (size, mtime_ns)
++    truncated: bool = False
++
++
++def _under(path: Path, parents: Sequence[Path]) -> bool:
++    return any(path == p or p in path.parents for p in parents)
++
++
++def _scan(roots: Sequence[Path], skip: Sequence[Path], limit: int) -> Tuple[Dict[str, Tuple[int, int]], bool]:
++    files: Dict[str, Tuple[int, int]] = {}
++    stack = [r for r in roots if not _under(r, skip)]
++    seen = set()
++    while stack:
++        directory = stack.pop()
++        try:
++            real = os.path.realpath(directory)
++            if real in seen:
++                continue
++            seen.add(real)
++            entries = list(os.scandir(directory))
++        except OSError:
++            continue
++        for entry in entries:
++            try:
++                if entry.is_dir(follow_symlinks=False):
++                    if not _under(Path(entry.path), skip):
++                        stack.append(Path(entry.path))
++                    continue
++                # Sockets, FIFOs and symlinks are not cache entries; empty files are locks.
++                if not entry.is_file(follow_symlinks=False):
++                    continue
++                st = entry.stat(follow_symlinks=False)
++            except OSError:
++                continue
++            if st.st_size:
++                files[entry.path] = (st.st_size, st.st_mtime_ns)
++                if len(files) >= limit:
++                    return files, True
++    return files, False
++
++
++def snapshot(roots: Sequence[Path], skip: Sequence[Path] = (), limit: int = DEFAULT_LIMIT) -> Snapshot:
++    roots, skip = tuple(Path(r) for r in roots), tuple(Path(s) for s in skip)
++    files, truncated = _scan(roots, skip, limit)
++    return Snapshot(roots, skip, files, truncated)
++
++
++def _changed(before: Snapshot, limit: int) -> Tuple[Dict[str, int], bool]:
++    after, truncated = _scan(before.roots, before.skip, limit)
++    new = {path: size for path, (size, mtime) in after.items() if before.files.get(path) != (size, mtime)}
++    return new, truncated or before.truncated
++
++
++@dataclass
++class Drift:
++    """New compiled output under one directory the engine was not pointed at."""
++
++    path: str
++    files: int
++    bytes: int
++    variable: Optional[str] = None  # the variable whose default this is, if one is known
++
++
++@dataclass
++class Audit:
++    watched: Snapshot
++    covered_root: Optional[Path]
++    covered: Optional[Snapshot]
++    scratch: Tuple[Path, ...] = ()
++
++
++@dataclass
++class Result:
++    # Outside every directory servekit persists: lost when the job ends.
++    drift: List[Drift]
++    # Inside the node-local caches but not staged into them: what this run compiled.
++    compiled: Dict[str, Dict[str, int]]
++    truncated: bool = False
++
++    def to_dict(self) -> dict:
++        return {"drift": [asdict(d) for d in self.drift], "compiled": self.compiled, "truncated": self.truncated}
++
++
++def start(
++    covered_root: Optional[Path],
++    skip: Sequence[Path] = (),
++    environ: Optional[Mapping[str, str]] = None,
++    limit: int = DEFAULT_LIMIT,
++) -> Audit:
++    """Snapshot the default cache locations and the node-local caches before the engine runs.
++
++    `skip` is servekit's own (the node-local caches, the staged weights, the
++    artifact). A cache variable the environment set is the environment's
++    business, so where it points is skipped too.
++    """
++    environ = os.environ if environ is None else environ
++    roots = watched_roots(environ)
++    theirs = [Path(v) for v in left_to_environment(environ).values() if v]
++    downloads = [root / name for root in roots for name in IGNORED]
++    watched = snapshot(roots, [*skip, *theirs, *downloads], limit)
++    covered = snapshot([covered_root], (), limit) if covered_root is not None else None
++    return Audit(watched, covered_root, covered, scratch=(Path(tempfile.gettempdir()),))
++
++
++def _expand(template: str, home: Path, tmp: Path, user: str) -> Path:
++    path = template.replace("<user>", user)
++    if path.startswith("~/"):
++        return home / path[2:]
++    if path.startswith("<tmp>/"):
++        return tmp / path[len("<tmp>/"):]
++    return Path(path)
++
++
++def _known_default(path: Path, home: Path, tmp: Path, user: str) -> Tuple[Optional[Path], Optional[str]]:
++    """The deepest cache default `path` is under, and the variable that moves it."""
++    hits = [
++        (_expand(t, home, tmp, user), cache.var)
++        for cache in CACHES
++        for t in cache.defaults
++        if _under(path, [_expand(t, home, tmp, user)])
++    ]
++    return max(hits, key=lambda hit: len(hit[0].parts)) if hits else (None, None)
++
++
++def finish(audit: Audit, environ: Optional[Mapping[str, str]] = None, limit: int = DEFAULT_LIMIT) -> Result:
++    environ = os.environ if environ is None else environ
++    home = Path(environ.get("HOME") or Path.home())
++    tmp = Path(tempfile.gettempdir())
++    user = environ.get("USER") or environ.get("LOGNAME") or "user"
++
++    new, truncated = _changed(audit.watched, limit)
++    groups: Dict[Path, Drift] = {}
++    for name, size in new.items():
++        path = Path(name)
++        root = next((r for r in audit.watched.roots if _under(path, [r])), None)
++        rel = path.relative_to(root).parts if root is not None else ()
++        if not rel:
++            continue
++        default, var = _known_default(path, home, tmp, user)
++        if root in audit.scratch and default is None and path.suffix not in COMPILED:
++            continue
++        # An unknown cache is named by its first two directories under the root.
++        group = default or root.joinpath(*rel[: min(2, len(rel) - 1) or 1])
++        shown = "~/" + group.relative_to(home).as_posix() if home in group.parents else str(group)
++        entry = groups.setdefault(group, Drift(shown, 0, 0, var))
++        entry.files += 1
++        entry.bytes += size
++
++    compiled: Dict[str, Dict[str, int]] = {}
++    if audit.covered is not None:
++        inside, more = _changed(audit.covered, limit)
++        truncated = truncated or more
++        for name, size in inside.items():
++            sub = Path(name).relative_to(audit.covered_root).parts[0]
++            slot = compiled.setdefault(sub, {"files": 0, "bytes": 0})
++            slot["files"] += 1
++            slot["bytes"] += size
++
++    drift = sorted(groups.values(), key=lambda d: (-d.bytes, d.path))
++    return Result(drift, dict(sorted(compiled.items())), truncated)
++
++
++def human(nbytes: int) -> str:
++    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
++        if nbytes >= scale:
++            return f"{nbytes / scale:.1f} {unit}"
++    return f"{nbytes} B"
++
++
++def report(result: Result, set_by_servekit: Mapping[str, str], log=None) -> None:
++    """Log what `finish` found: compiled output kept, and compiled output lost."""
++    log = log or (lambda line: print(line, flush=True))
++    if result.compiled:
++        kept = ", ".join(f"{sub} {human(v['bytes'])}" for sub, v in result.compiled.items())
++        log(f"[SERVEKIT] compiled during this run into the node-local caches: {kept}")
++    if result.truncated:
++        log(f"[SERVEKIT] warning: more than {DEFAULT_LIMIT} files under the default cache dirs; not all were audited")
++    if not result.drift:
++        return
++    log("[SERVEKIT] warning: the engine compiled into directories servekit does not keep:")
++    for d in result.drift:
++        if d.variable and d.variable in set_by_servekit:
++            why = f"servekit set {d.variable}, and the engine wrote to its default anyway"
++        elif d.variable:
++            why = f"{d.variable}'s default"
++        else:
++            why = "no variable servekit knows moves this: add it to servekit.jit_cache.CACHES"
++        log(f"[SERVEKIT]   {human(d.bytes):>9} in {d.files:>5} files  {d.path}  ({why})")
+diff --git a/src/servekit/jit_cache.py b/src/servekit/jit_cache.py
+index c8d4b26..59de57e 100644
+--- a/src/servekit/jit_cache.py
++++ b/src/servekit/jit_cache.py
+@@ -11,6 +11,7 @@ without a cache) stopped being kept. So:
+ - Caches are kept per validity key (engine and kernel-library versions, GPU
+   compute capability, CPU arch), not per checkpoint alone. Caches another image
+   built are never staged: the log names them and says what differs.
++- `jit_audit` reports compiled output that lands anywhere else.
+ """
+ from __future__ import annotations
+ 
+@@ -55,12 +56,13 @@ _STALE_TMP_S = 24 * 3600
+ class Cache:
+     var: str
+     subdir: str
+-    # Where the engine puts it when `var` is unset: "~" is $HOME, "<tmp>" the
+-    # temp dir, "<user>" the user name.
++    # Where the engine puts it when `var` is unset, to name it in the drift
++    # report: "~" is $HOME, "<tmp>" the temp dir, "<user>" the user name.
+     defaults: Tuple[str, ...]
+ 
+ 
+-# Read off sglang v0.5.16 and v0.5.20. A release that adds a cache belongs here.
++# Read off sglang v0.5.16 and v0.5.20. A release that adds a cache shows up in
++# the drift report, and belongs here.
+ CACHES: Tuple[Cache, ...] = (
+     # sglang 0.5.20 defaults Triton, Inductor, the CUDA PTX cache and FlashInfer
+     # under SGLANG_CACHE_DIR, but with setdefault, so the values here win.
+@@ -308,8 +310,8 @@ def stage(artifact: Path, cache_root: Path, key: CacheKey, environ: Optional[Map
+     artifact serves and concurrent jobs share nothing. With no namespace for
+     this key, an artifact from before keys is staged the way it always was (its
+     kernels' own hashes still decide what is reused). With neither, the engine
+-    JITs from cold into the same node-local directory, where a later
+-    --only-prepare can see it.
++    JITs from cold into the same node-local directory, where the audit and a
++    later --only-prepare can see it.
+     """
+     environ = os.environ if environ is None else environ
+     artifact = Path(artifact)
+diff --git a/src/servekit/launch.py b/src/servekit/launch.py
+index 1946300..93e633e 100644
+--- a/src/servekit/launch.py
++++ b/src/servekit/launch.py
+@@ -15,7 +15,8 @@ has not finished writing.
+ 
+ JIT caches are kept in the artifact per validity key (engine and kernel
+ versions, GPU arch, CPU arch); see jit_cache. A launch stages the ones that
+-match this environment and never writes the artifact's caches.
++match this environment, never writes the artifact's caches, and once the server
++is ready reports any compiled output that landed outside them.
+ `--only-prepare` on an artifact with no caches for this environment builds them
+ without re-sharding.
+ 
+@@ -36,12 +37,12 @@ from pathlib import Path
+ from typing import List, Optional
+ 
+ from . import _shim
+-from . import jit_cache
++from . import jit_audit, jit_cache
+ from . import manifest as manifest_mod
+ from . import quant_guard
+ from ._patches import apply_all
+ from .engine_args import check_manifest, find_model_path, replace_model_path
+-from .prepare import prepare, warm
++from .prepare import STRICT_FAILED, prepare, warm
+ from .profile import Phase, ProfileReport, detect_framework, render_table, run_profile, save_json
+ from .stage import DEFAULT_SLICES, stage
+ from .topology import SHARDED_FORMAT, Topology, read_topology, shard_glob, wants_sharded_state
+@@ -195,6 +196,7 @@ def launch(
+     timeout: float = 1800.0,
+     overlap: bool = False,
+     only_prepare: bool = False,
++    cache_strict: bool = False,
+     cache_keep: int = jit_cache.DEFAULT_KEEP,
+ ) -> int:
+     # Backports go on disk before anything imports sglang; a misfit is a log line, not a refusal.
+@@ -226,7 +228,7 @@ def launch(
+     problems = check_manifest(command, spec, prepared) if prepared is not None else []
+     # Once per run, so a prepare below and the stage after it agree on it.
+     key = jit_cache.validity_key(spec.name)
+-    caches = {"cache_root": cache_root, "key": key, "keep": cache_keep}
++    caches = {"cache_root": cache_root, "key": key, "keep": cache_keep, "strict": cache_strict}
+ 
+     unwritable = False
+     prepared_now = False
+@@ -351,6 +353,7 @@ def launch(
+     # than leaving its ~1700 `dd` processes running on the node.
+     thread: Optional[threading.Thread] = None
+     cache_env = None
++    audit: Optional[jit_audit.Audit] = None
+     if not plain:
+         if replicate_metadata:
+             n = _copy_metadata(src_path, dest)
+@@ -377,11 +380,13 @@ def launch(
+         staged_caches = jit_cache.stage(src_path, cache_root, key)
+         cache_env = staged_caches.env
+         _report_staged(staged_caches, key, src_path)
++        audit = jit_audit.start(staged_caches.root, skip=[cache_root, shm_root, src_path])
+ 
+     print(f"[SERVEKIT] launching: {' '.join(engine_command)}", flush=True)
+ 
+     emitted = {"done": False}
+     joined = {"done": False}
++    strict_failed = {"done": False}
+ 
+     def join_stage() -> None:
+         if joined["done"]:
+@@ -413,19 +418,34 @@ def launch(
+             out_path.write_text(json.dumps({**report.to_dict(), "jit_cache": jit}, indent=2))
+         print(f"\nreport written to {out_path}", flush=True)
+ 
+-    def on_ready(report: ProfileReport) -> None:
++    def audit_caches() -> Optional[dict]:
++        """What the engine compiled, and where, between the stage and ready."""
++        if audit is None:
++            return None
++        result = jit_audit.finish(audit)
++        jit_audit.report(result, cache_env or {})
++        return {"key": key.name, "source": staged_caches.source, "node_local": str(staged_caches.root),
++                **result.to_dict()}
++
++    def on_ready(report: ProfileReport) -> bool:
+         # On a worker this fires on its own readiness line, not the head's.
+         # Either way the free needs no cross-node barrier: a node stages only
+         # the shards its own ranks read.
+         emitted["done"] = True
+         join_stage()
+-        jit = None if plain else {"key": key.name, "source": staged_caches.source, "node_local": str(staged_caches.root)}
++        jit = audit_caches()
+         emit(report, jit)
+         if not plain:
+             freed = free(dest)
+             print(f"[SERVEKIT] freed {freed / 1e9:.1f} GB from {dest}", flush=True)
+             if overlap:
+                 _shim.clear_stage(str(dest))
++        if cache_strict and jit is not None and jit["drift"]:
++            print("error: --jit-cache-strict: JIT output escaped the persisted caches (see above); "
++                  "stopping the server", file=sys.stderr, flush=True)
++            strict_failed["done"] = True
++            return True
++        return False
+ 
+     report = run_profile(
+         engine_command,
+@@ -446,4 +466,6 @@ def launch(
+     if "error" in staged:
+         print(f"error: the stage failed: {staged['error']}", file=sys.stderr)
+         return 1
++    if strict_failed["done"]:
++        return STRICT_FAILED
+     return 0 if report.success else 1
+diff --git a/src/servekit/prepare.py b/src/servekit/prepare.py
+index 4aaef05..843c37f 100644
+--- a/src/servekit/prepare.py
++++ b/src/servekit/prepare.py
+@@ -12,7 +12,7 @@ import tempfile
+ from pathlib import Path
+ from typing import List, Optional, Sequence
+ 
+-from . import jit_cache
++from . import jit_audit, jit_cache
+ from ._shim import PP_PATTERN
+ from .manifest import Manifest
+ 
+@@ -24,6 +24,10 @@ TP_PATTERN = "model-rank-{rank}-part-{part}.safetensors"
+ 
+ PLUGIN_FLOOR = "0.5.11"
+ 
++# Exit code when the JIT audit found compiled output servekit does not persist
++# and the caller asked for that to fail the run (--jit-cache-strict).
++STRICT_FAILED = 3
++
+ NO_PLUGINS = (
+     "the installed sglang has no plugin framework, so servekit cannot keep "
+     "pipeline stages from overwriting each other's shards. It arrived in "
+@@ -76,6 +80,7 @@ def prepare(
+     cache_root: Path = jit_cache.NODE_LOCAL_ROOT,
+     key: Optional[jit_cache.CacheKey] = None,
+     keep: int = jit_cache.DEFAULT_KEEP,
++    strict: bool = False,
+ ) -> int:
+     if not model.is_dir():
+         print(f"error: model path {model} is not a directory", file=sys.stderr)
+@@ -96,6 +101,7 @@ def prepare(
+     # ninja build dirs, so a cache compiled elsewhere rebuilds and buys nothing.
+     cache_build = jit_cache.node_local(cache_root, out.name) / key.name
+     env = {**os.environ, **jit_cache.create(cache_build, os.environ)}
++    audit = jit_audit.start(cache_build, skip=[cache_root, out, model])
+ 
+     dist_args = _dist_args(nnodes, node_rank, dist_init_addr)
+ 
+@@ -139,7 +145,7 @@ def prepare(
+         print(f"error: stale weight index left in {out}: {', '.join(stale)}", file=sys.stderr)
+         return 1
+ 
+-    keep_caches(cache_build, out, key, keep)
++    drifted = keep_caches(cache_build, out, key, keep, audit, env)
+ 
+     manifest = Manifest(format=FORMAT, source=str(model), **resolved)
+     path = manifest.write(out)
+@@ -150,7 +156,7 @@ def prepare(
+         f"--tensor-parallel-size {tp} --pipeline-parallel-size {pp}",
+         flush=True,
+     )
+-    return 0
++    return _strict_rc(drifted, strict)
+ 
+ 
+ def warm(
+@@ -165,6 +171,7 @@ def warm(
+     cache_root: Path = jit_cache.NODE_LOCAL_ROOT,
+     key: Optional[jit_cache.CacheKey] = None,
+     keep: int = jit_cache.DEFAULT_KEEP,
++    strict: bool = False,
+ ) -> int:
+     """JIT this environment's caches for an already prepared artifact, and keep them in it.
+ 
+@@ -175,6 +182,7 @@ def warm(
+     key = key or jit_cache.validity_key("sglang")
+     cache_build = jit_cache.node_local(cache_root, artifact.name) / key.name
+     env = {**os.environ, **jit_cache.create(cache_build, os.environ)}
++    audit = jit_audit.start(cache_build, skip=[cache_root, artifact])
+ 
+     command = [
+         python or sys.executable,
+@@ -197,21 +205,38 @@ def warm(
+     if rc != 0:
+         print(f"error: the warmup run failed (rc={rc}); no caches kept", file=sys.stderr)
+         return 1
+-    keep_caches(cache_build, artifact, key, keep)
+-    return 0
+-
++    return _strict_rc(keep_caches(cache_build, artifact, key, keep, audit, env), strict)
+ 
+-def keep_caches(cache_build: Path, artifact: Path, key: jit_cache.CacheKey, keep: int) -> None:
+-    """Keep what the engine just compiled, under `key`.
+ 
+-    The engine has exited, so the copy cannot catch a file mid-write.
++def keep_caches(
++    cache_build: Path,
++    artifact: Path,
++    key: jit_cache.CacheKey,
++    keep: int,
++    audit: jit_audit.Audit,
++    env: dict,
++) -> bool:
++    """Keep what the engine just compiled under `key`; report what it compiled elsewhere.
++
++    The engine has exited, so the copy cannot catch a file mid-write. True if
++    the audit found compiled output outside the kept caches.
+     """
++    result = jit_audit.finish(audit, env)
++    jit_audit.report(result, jit_cache.env_for(cache_build, os.environ))
+     try:
+         namespace, n, pruned = jit_cache.persist(cache_build, artifact, key, keep=keep)
+     except (OSError, shutil.Error) as e:
+         # The checkpoint is fine; only the next cold start pays for this.
+         print(f"[SERVEKIT] warning: could not keep the JIT caches in {artifact}: {e}", flush=True)
+-        return
++        return bool(result.drift)
+     print(f"[SERVEKIT] kept {n} JIT cache files in {namespace}", flush=True)
+     if pruned:
+         print(f"[SERVEKIT] pruned the JIT caches of older environments: {', '.join(pruned)}", flush=True)
++    return bool(result.drift)
++
++
++def _strict_rc(drifted: bool, strict: bool) -> int:
++    if drifted and strict:
++        print("error: --jit-cache-strict: JIT output escaped the persisted caches (see above)", file=sys.stderr)
++        return STRICT_FAILED
++    return 0
+diff --git a/src/servekit/profile.py b/src/servekit/profile.py
+index 40eebe2..d57f0be 100644
+--- a/src/servekit/profile.py
++++ b/src/servekit/profile.py
+@@ -254,8 +254,9 @@ def _process_stream(
+         nonlocal pending_phase
+         pending_phase = None
+         record_gap(at - last_marker_time)
++        stop = False
+         if on_ready is not None:
+-            on_ready(
++            stop = on_ready(
+                 ProfileReport(
+                     command="",
+                     started_at=spawn_time,
+@@ -264,8 +265,8 @@ def _process_stream(
+                     framework=spec.name,
+                     phases=list(phases),
+                 )
+-            )
+-        return stop_at_ready
++            ) is True
++        return stop_at_ready or stop
+ 
+     for line in lines:
+         if echo:
+@@ -371,6 +372,9 @@ def run_profile(
+     `head=False` says this node is a worker, which never prints the ready line;
+     its own readiness line closes the report instead.
+ 
++    `on_ready` returning True stops the server there, for a caller that only
++    needed it to come up (or found it came up wrong).
++
+     stdout keeps draining for the process's whole life rather than detaching
+     once measured: we own the read end of the pipe, so exiting would SIGPIPE the
+     server on its next log line, and an unread pipe eventually fills and blocks
+@@ -394,6 +398,13 @@ def run_profile(
+         print(f"\n[SERVEKIT] got signal {signum}, terminating the server", flush=True)
+         proc.terminate()
+ 
++    stopped = {"asked": False}
++
++    def _on_ready(report: ProfileReport) -> bool:
++        if on_ready is not None and on_ready(report) is True:
++            stopped["asked"] = True
++        return stopped["asked"]
++
+     previous = {}
+     for sig in (signal.SIGTERM, signal.SIGINT):
+         previous[sig] = signal.signal(sig, _forward)
+@@ -403,10 +414,10 @@ def run_profile(
+             spawn_time,
+             ready_timeout,
+             spec=spec,
+-            on_ready=on_ready,
++            on_ready=_on_ready,
+             head=head,
+         )
+-        if not report.success:
++        if not report.success or stopped["asked"]:
+             proc.terminate()
+         proc.wait()
+     finally:
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 7ba1745..5de008c 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -1,8 +1,8 @@
+ """Keep each test off the machine it runs on: its home, its temp dir, its GPUs.
+ 
+-launch and prepare key the JIT caches by the node's GPUs, and the fake engines
+-here compile into $HOME. On a developer's machine those are real, and not
+-what CI has.
++launch and prepare audit $HOME's cache dirs and the temp dir for compiled
++output, and key the JIT caches by the node's GPUs. On a developer's machine
++those are real, large, and not what CI has.
+ """
+ import tempfile
+ 
+diff --git a/tests/test_jit_audit.py b/tests/test_jit_audit.py
+new file mode 100644
+index 0000000..1dd3c6f
+--- /dev/null
++++ b/tests/test_jit_audit.py
+@@ -0,0 +1,205 @@
++"""Tests for the JIT audit: compiled output a run leaves where servekit does not
++keep it is reported with its size, and with --jit-cache-strict stops the run."""
++import json
++import os
++import sys
++import tempfile
++import time
++from pathlib import Path
++
++import pytest
++
++from servekit import jit_audit, jit_cache
++from servekit.cli import main
++from servekit.manifest import Manifest
++from servekit.profile import ProfileReport, run_profile
++from servekit.stage import StageResult
++
++
++def _write(path: Path, nbytes: int) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_bytes(b"x" * nbytes)
++
++
++@pytest.fixture
++def artifact(tmp_path):
++    model = tmp_path / "Llama-3.1-70B-Instruct"
++    model.mkdir()
++    art = tmp_path / "llama70b-tp4"
++    art.mkdir()
++    (art / "config.json").write_text("{}")
++    (art / "model-rank-0-part-0.safetensors").write_bytes(b"weights")
++    Manifest(
++        format="sharded_state", engine="sglang", engine_version="0.5.20", tp_size=1, pp_size=1,
++        dp_size=1, dtype="bfloat16", quantization=None, source=str(model),
++    ).write(art)
++    return model, art
++
++
++def _serve(tmp_path, monkeypatch, artifact, engine, *flags):
++    """`launch` with a fake engine: `engine(env)` compiles, then the server reports ready."""
++    model, art = artifact
++    seen = {}
++
++    def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        seen["env"] = env or {}
++        engine({**os.environ, **(env or {})})
++        report = ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="sglang")
++        seen["stopped"] = on_ready(report) is True
++        return report
++
++    monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
++    monkeypatch.setattr("servekit.launch.stage", lambda src, dest, slices=64, file_pattern="*": StageResult(dest, 0.1, 1.0, 1))
++    monkeypatch.setattr("servekit.launch.DEFAULT_ROOT", tmp_path / "shm")
++    monkeypatch.setattr("servekit.launch.DEFAULT_CACHE_ROOT", tmp_path / "node-local")
++    out = tmp_path / "run.json"
++    rc = main([
++        "launch", "--servekit-artifact-path", str(art), "--out", str(out), *flags,
++        "--", "python", "-m", "sglang.launch_server", "--model-path", str(model),
++    ])
++    seen["rc"] = rc
++    seen["report"] = json.loads(out.read_text())
++    return seen
++
++
++def _home() -> Path:
++    return Path(os.environ["HOME"])
++
++
++def test_a_jit_cache_the_engine_keeps_in_home_is_reported_with_its_size(tmp_path, monkeypatch, artifact, capsys):
++    # An engine that ignores SGLANG_JIT_CACHE_DIR, as one would that renamed it.
++    def engine(env):
++        for i, n in enumerate((1000, 2000, 3000)):
++            _write(Path(env["HOME"]) / ".cache/sglang/jit/sm90" / f"m{i}" / "m.so", n)
++
++    seen = _serve(tmp_path, monkeypatch, artifact, engine)
++
++    assert seen["rc"] == 0 and not seen["stopped"]
++    assert seen["report"]["jit_cache"]["drift"] == [
++        {"path": "~/.cache/sglang/jit", "files": 3, "bytes": 6000, "variable": "SGLANG_JIT_CACHE_DIR"}
++    ]
++    out = capsys.readouterr().out
++    assert "6.0 kB in     3 files  ~/.cache/sglang/jit" in out
++    assert "servekit set SGLANG_JIT_CACHE_DIR, and the engine wrote to its default anyway" in out
++
++
++def test_strict_stops_the_server_and_fails_the_launch(tmp_path, monkeypatch, artifact, capsys):
++    seen = _serve(
++        tmp_path, monkeypatch, artifact,
++        lambda env: _write(Path(env["HOME"]) / ".cache/sglang/jit/sm90/m/m.so", 10),
++        "--jit-cache-strict",
++    )
++
++    assert seen["stopped"] and seen["rc"] == 3
++    assert "--jit-cache-strict" in capsys.readouterr().err
++
++
++def test_an_engine_that_honors_the_variables_drifts_nowhere(tmp_path, monkeypatch, artifact):
++    # sglang 0.5.20: load_jit under SGLANG_JIT_CACHE_DIR, Triton under TRITON_CACHE_DIR.
++    def engine(env):
++        _write(Path(env["SGLANG_JIT_CACHE_DIR"]) / "sm90/comm/build-0/deps-0/comm.so", 4096)
++        _write(Path(env["TRITON_CACHE_DIR"]) / "ABC/k.cubin", 100)
++
++    seen = _serve(tmp_path, monkeypatch, artifact, engine, "--jit-cache-strict")
++
++    jit = seen["report"]["jit_cache"]
++    assert seen["rc"] == 0 and jit["drift"] == []
++    assert jit["compiled"] == {"sglang-jit": {"files": 1, "bytes": 4096}, "triton": {"files": 1, "bytes": 100}}
++    assert jit["source"] == "none" and jit["key"] == jit_cache.validity_key("sglang").name
++
++
++def test_a_cache_servekit_has_never_heard_of_is_named_as_such(tmp_path, monkeypatch, artifact, capsys):
++    seen = _serve(tmp_path, monkeypatch, artifact, lambda env: _write(Path(env["HOME"]) / ".cache/newlib/kernels/k.bin", 5))
++
++    assert seen["report"]["jit_cache"]["drift"] == [
++        {"path": "~/.cache/newlib/kernels", "files": 1, "bytes": 5, "variable": None}
++    ]
++    assert "add it to servekit.jit_cache.CACHES" in capsys.readouterr().out
++
++
++def test_a_default_in_the_temp_dir_is_found_and_named(tmp_path, monkeypatch, artifact):
++    tmp = Path(tempfile.gettempdir())
++    seen = _serve(tmp_path, monkeypatch, artifact, lambda env: _write(tmp / "torchinductor_tester/fxgraph/ab/cd", 7))
++
++    assert seen["report"]["jit_cache"]["drift"] == [
++        {"path": str(tmp / "torchinductor_tester"), "files": 1, "bytes": 7, "variable": "TORCHINDUCTOR_CACHE_DIR"}
++    ]
++
++
++def test_in_the_temp_dir_only_compiled_code_counts(tmp_path, monkeypatch, artifact):
++    tmp = Path(tempfile.gettempdir())
++
++    def engine(env):
++        _write(tmp / "tmpk3x9/counter_1234.db", 1_000_000)  # Prometheus multiprocess, --enable-metrics
++        _write(tmp / "sglang_temp_file_1.sh", 40)  # the numa launcher script
++        _write(tmp / "symm_allocator/nccl_allocator.so", 300)  # sglang 0.5.20, --enable-symm-mem
++
++    seen = _serve(tmp_path, monkeypatch, artifact, engine)
++
++    assert seen["report"]["jit_cache"]["drift"] == [
++        {"path": str(tmp / "symm_allocator"), "files": 1, "bytes": 300, "variable": None}
++    ]
++
++
++def test_downloads_and_what_was_there_before_are_not_drift(tmp_path, monkeypatch, artifact):
++    _write(_home() / ".cache/sglang/jit/sm90/old/old.so", 50)  # from before this run, untouched
++
++    seen = _serve(tmp_path, monkeypatch, artifact, lambda env: _write(Path(env["HOME"]) / ".cache/huggingface/hub/x", 9))
++
++    assert seen["report"]["jit_cache"]["drift"] == []
++
++
++def test_a_cache_the_environment_points_elsewhere_is_left_to_it(tmp_path, monkeypatch, artifact, capsys):
++    shared = _home() / ".cache" / "site-triton"
++    monkeypatch.setenv("TRITON_CACHE_DIR", str(shared))
++
++    seen = _serve(tmp_path, monkeypatch, artifact, lambda env: _write(Path(env["TRITON_CACHE_DIR"]) / "ABC/k.cubin", 3))
++
++    assert "TRITON_CACHE_DIR" not in seen["env"]
++    assert seen["report"]["jit_cache"]["drift"] == []
++    assert f"TRITON_CACHE_DIR is set by the environment ({shared})" in capsys.readouterr().out
++
++
++def test_prepare_reports_what_it_could_not_keep_and_strict_fails_after_the_manifest(tmp_path, monkeypatch):
++    from servekit.prepare import prepare
++
++    script = tmp_path / "sharder.py"
++    script.write_text(
++        "import json, os, sys\n"
++        "a = sys.argv[1:]\n"
++        "arg = lambda n: a[a.index(n) + 1]\n"
++        "open(arg('--output') + '/model-rank-0-part-0.safetensors', 'wb').write(b'w')\n"
++        "json.dump({'engine': 'sglang', 'engine_version': '0.5.20', 'tp_size': 1, 'pp_size': 1, 'dp_size': 1,"
++        " 'dtype': 'bfloat16', 'quantization': None}, open(arg('--servekit-resolved-out'), 'w'))\n"
++        "p = os.path.expanduser('~/.cache/newlib/k.bin')\n"
++        "os.makedirs(os.path.dirname(p), exist_ok=True)\n"
++        "open(p, 'wb').write(b'k' * 11)\n"
++    )
++    monkeypatch.setattr("servekit.prepare.SAVE_SCRIPT", script)
++    model = tmp_path / "m"
++    model.mkdir()
++
++    rc = prepare(model, tmp_path / "out", tp=1, cache_root=tmp_path / "node-local", strict=True)
++
++    assert rc == 3
++    assert (tmp_path / "out" / "servekit.json").is_file()
++    assert jit_cache.has_namespace(tmp_path / "out", jit_cache.validity_key("sglang"))
++
++
++def test_the_audit_skips_what_servekit_itself_writes(tmp_path):
++    tmp = Path(tempfile.gettempdir())
++    ours = tmp / "servekit" / "caches"
++    audit = jit_audit.start(covered_root=None, skip=[ours])
++    _write(ours / "a" / "k.so", 10)
++
++    assert jit_audit.finish(audit).drift == []
++
++
++def test_on_ready_returning_true_stops_the_server():
++    serve = "import time; print('The server is fired up and ready to roll!', flush=True); time.sleep(60)"
++    t0 = time.monotonic()
++
++    report = run_profile([sys.executable, "-c", serve, "sglang"], ready_timeout=30, on_ready=lambda r: True)
++
++    assert report.success
++    assert time.monotonic() - t0 < 20
+diff --git a/tests/test_jit_cache.py b/tests/test_jit_cache.py
+index 368f518..005dc58 100644
+--- a/tests/test_jit_cache.py
++++ b/tests/test_jit_cache.py
+@@ -231,8 +231,9 @@ def test_caches_that_cannot_be_kept_do_not_fail_the_prepare(tmp_path, monkeypatc
+         raise OSError(122, "Disk quota exceeded")
+ 
+     monkeypatch.setattr(prepare_mod.jit_cache, "persist", quota)
++    audit = prepare_mod.jit_audit.start(None)
+ 
+-    prepare_mod.keep_caches(tmp_path / "b", tmp_path / "a", _key(), 3)
++    assert prepare_mod.keep_caches(tmp_path / "b", tmp_path / "a", _key(), 3, audit, dict(os.environ)) is False
+     assert "could not keep the JIT caches" in capsys.readouterr().out
+ 
+ 
+-- 
+2.50.1 (Apple Git-155)
+

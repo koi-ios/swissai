@@ -1,0 +1,1633 @@
+[
+ {
+  "id": "deepjit.env.name_composition",
+  "claim": "DeepJIT env var names are formed as <PREFIX>_<SUFFIX>",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/utils/env.hpp",
+  "line": 79,
+  "quote": "std::string(prefix) + \"_\" + std::string(suffix)"
+ },
+ {
+  "id": "deepjit.env.dj_fallback",
+  "claim": "If <PREFIX>_<SUFFIX> is unset DeepJIT falls back to the global DJ_<SUFFIX>",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/utils/env.hpp",
+  "line": 69,
+  "quote": "return get_with_prefix<T>(\"DJ\", suffix);"
+ },
+ {
+  "id": "deepjit.env.cache_dir_suffix",
+  "claim": "The disk cache root comes from the JIT_CACHE_DIR suffix (DG_JIT_CACHE_DIR for DeepGEMM)",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 91,
+  "quote": "env.get<std::string>(\"JIT_CACHE_DIR\")"
+ },
+ {
+  "id": "deepjit.env.colon_list",
+  "claim": "JIT_CACHE_DIR may be a colon list: first root writable, the rest read-only lookup roots",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 88,
+  "quote": "into a writable cache root followed by"
+ },
+ {
+  "id": "deepjit.default.home_dj",
+  "claim": "Without JIT_CACHE_DIR the cache root defaults to $HOME/.dj (not ~/.deep_gemm)",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 105,
+  "quote": "std::filesystem::path(home) / \".dj\""
+ },
+ {
+  "id": "deepjit.env.snapshot",
+  "claim": "Cache roots are parsed once when the lazy Runtime is constructed",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/runtime/runtime.hpp",
+  "line": 43,
+  "quote": "disk_cache(DiskCache::from_env(env)),"
+ },
+ {
+  "id": "deepjit.key.signature",
+  "claim": "The digest starts with the consumer's extra_signature",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/runtime/runtime.hpp",
+  "line": 52,
+  "quote": "hash_base.update(this->config.extra_signature);"
+ },
+ {
+  "id": "deepjit.key.nvcc_version_text",
+  "claim": "The complete `nvcc --version` output is captured as compiler identity",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/backend/cuda/backend.hpp",
+  "line": 64,
+  "quote": "call_external_command(toolkit.nvcc.string() + \" --version\")"
+ },
+ {
+  "id": "deepjit.key.flags",
+  "claim": "The effective NVCC flag list (get_flags) is part of the digest",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/backend/cuda/options.hpp",
+  "line": 138,
+  "quote": "hasher.update(str::join(get_flags()));"
+ },
+ {
+  "id": "deepjit.key.arch_flag",
+  "claim": "The target arch enters the flags (and so the digest) as --gpu-architecture=sm_<arch>",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/backend/cuda/options.hpp",
+  "line": 98,
+  "quote": "\"--gpu-architecture=sm_\" + *arch"
+ },
+ {
+  "id": "deepjit.key.arch_family",
+  "claim": "For major>9 the default arch is the family target (e.g. 100f), for sm_90 it is 90a",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/backend/cuda/device.hpp",
+  "line": 78,
+  "quote": "return arch + (use_arch_family ? \"f\" : \"a\");"
+ },
+ {
+  "id": "deepjit.key.source",
+  "claim": "The generated kernel source (with its tracked include tree) is the last digest input",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/runtime/runtime.hpp",
+  "line": 96,
+  "quote": ".update(parser.parse_into_hash(source))"
+ },
+ {
+  "id": "deepjit.key.include_paths_excluded",
+  "claim": "Absolute include-dir paths are intentionally not part of the digest",
+  "path": "vendor/src/DeepJIT-3732a3b/README.md",
+  "line": 288,
+  "quote": "Paths in `Config::include_dirs` are intentionally excluded"
+ },
+ {
+  "id": "deepjit.key.implicit_env_untracked",
+  "claim": "NVCC_PREPEND_FLAGS/NVCC_APPEND_FLAGS/CPATH and untracked headers are not in the key",
+  "path": "vendor/src/DeepJIT-3732a3b/README.md",
+  "line": 306,
+  "quote": "Variables such as `NVCC_PREPEND_FLAGS`, `NVCC_APPEND_FLAGS`, `CPATH`"
+ },
+ {
+  "id": "deepjit.content.entry_name",
+  "claim": "Entries live at <root>/cache/<tag>.<digest>/",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 122,
+  "quote": "const auto path = dir / \"cache\" / entry_name;"
+ },
+ {
+  "id": "deepjit.write.tmp_dir",
+  "claim": "A miss builds into <first root>/tmp/<pid>-<random hex> first",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 130,
+  "quote": "paths[0] / \"tmp\" / get_uuid()"
+ },
+ {
+  "id": "deepjit.write.commit_marker",
+  "claim": "Publishing writes an empty .committed marker into the temp dir",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 47,
+  "quote": "write_file_sync(path / kCommitFileName, \"\");"
+ },
+ {
+  "id": "deepjit.write.rename",
+  "claim": "The temp dir is published by an atomic whole-directory rename",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 54,
+  "quote": "std::filesystem::rename(path, commit_path, error_code);"
+ },
+ {
+  "id": "deepjit.lock.none",
+  "claim": "No lock: concurrent processes may compile the same entry; the first rename wins",
+  "path": "vendor/src/DeepJIT-3732a3b/README.md",
+  "line": 36,
+  "quote": "Concurrent processes can compile the same entry and reuse the published result."
+ },
+ {
+  "id": "deepjit.read.committed_check",
+  "claim": "A hit is decided by existence of <entry>/.committed in any root",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 123,
+  "quote": "std::filesystem::exists(path / kCommitFileName)"
+ },
+ {
+  "id": "deepjit.read.ro_ok",
+  "claim": "mtime bookkeeping failure on a read-only root must not turn a hit into a miss",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/utils/filesystem.hpp",
+  "line": 62,
+  "quote": "on a read-only lookup cache) must never turn a valid cache hit into"
+ },
+ {
+  "id": "deepjit.read.miss_mkdir",
+  "claim": "A miss must create a temp dir in the first root (throws if that root is read-only)",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/cache/disk.hpp",
+  "line": 131,
+  "quote": "std::filesystem::create_directories(temporary_path);"
+ },
+ {
+  "id": "deepjit.reloc.meta_paths",
+  "claim": "meta.json records the temp-dir command line; it is informational only",
+  "path": "vendor/src/DeepJIT-3732a3b/README.md",
+  "line": 302,
+  "quote": "Temporary paths in that command may no longer exist after publication."
+ },
+ {
+  "id": "deepjit.reloc.load_by_dir",
+  "claim": "Loading uses only <entry dir>/kernel.cubin, so a moved cache dir still loads",
+  "path": "vendor/src/DeepJIT-3732a3b/include/deep_jit/backend/cuda/kernel.hpp",
+  "line": 53,
+  "quote": "const auto cubin_path = dir / \"kernel.cubin\";"
+ },
+ {
+  "id": "deepjit.engine.nvcc_cubin",
+  "claim": "The CUDA backend compiles with NVCC to a CUBIN (no NVRTC path)",
+  "path": "vendor/src/DeepJIT-3732a3b/README.md",
+  "line": 186,
+  "quote": "It uses NVCC to generate a CUBIN."
+ },
+ {
+  "id": "deepgemm_vllm.env.name",
+  "claim": "vLLM refers to the DeepGEMM cache by DG_JIT_CACHE_DIR",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 279,
+  "quote": "DEEP_GEMM_JIT_CACHE_ENV_NAME = \"DG_JIT_CACHE_DIR\""
+ },
+ {
+  "id": "deepgemm_vllm.engine.set_if_unset",
+  "claim": "vLLM sets DG_JIT_CACHE_DIR only if it is unset or empty",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 280,
+  "quote": "if not os.environ.get(DEEP_GEMM_JIT_CACHE_ENV_NAME, None):"
+ },
+ {
+  "id": "deepgemm_vllm.default.vllm_cache_root",
+  "claim": "vLLM's default DeepGEMM dir is $VLLM_CACHE_ROOT/deep_gemm",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 282,
+  "quote": "envs.VLLM_CACHE_ROOT, \"deep_gemm\""
+ },
+ {
+  "id": "deepgemm_vllm.default.cache_root",
+  "claim": "VLLM_CACHE_ROOT defaults to <XDG cache>/vllm",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 715,
+  "quote": "os.path.join(get_default_cache_root(), \"vllm\"),"
+ },
+ {
+  "id": "deepgemm_vllm.default.xdg",
+  "claim": "The XDG cache base honours XDG_CACHE_HOME, else ~/.cache",
+  "path": "vendor/vllm-v0.32.0/vllm/envs.py",
+  "line": 340,
+  "quote": "\"XDG_CACHE_HOME\","
+ },
+ {
+  "id": "deepgemm_vllm.engine.lazy_init",
+  "claim": "The env var is set inside _lazy_init (first DeepGEMM use), not at vLLM import",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 234,
+  "quote": "def _lazy_init() -> None:"
+ },
+ {
+  "id": "deepgemm_vllm.engine.bypass_lazy_init",
+  "claim": "Some call sites import deep_gemm via _import_deep_gemm() without _lazy_init()",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/layers/fused_moe/deep_gemm_mega_moe.py",
+  "line": 153,
+  "quote": "deep_gemm = _import_deep_gemm()"
+ },
+ {
+  "id": "deepgemm_vllm.engine.prefers_pip",
+  "claim": "vLLM prefers a pip-installed deep_gemm over the vendored copy",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 194,
+  "quote": "module = importlib.import_module(\"deep_gemm\")"
+ },
+ {
+  "id": "deepgemm_vllm.engine.vendored_module",
+  "claim": "The vendored copy is vllm.third_party.deep_gemm",
+  "path": "vendor/vllm-v0.32.0/vllm/utils/deep_gemm.py",
+  "line": 205,
+  "quote": "importlib.import_module(\"vllm.third_party.deep_gemm\")"
+ },
+ {
+  "id": "deepgemm_vllm.engine.persistent_envs_empty",
+  "claim": "vLLM's build writes an empty persistent_envs, so no DG_* default is injected at import",
+  "path": "vendor/vllm-v0.32.0/cmake/external_projects/deepgemm.cmake",
+  "line": 174,
+  "quote": "persistent_envs = dict()"
+ },
+ {
+  "id": "deepgemm_vllm.engine.init_root",
+  "claim": "DeepGEMM passes its package dir as the JIT library root at import",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/deep_gemm/__init__.py",
+  "line": 113,
+  "quote": "_C.init(os.path.dirname(os.path.abspath(__file__)))"
+ },
+ {
+  "id": "deepgemm_vllm.key.extra_signature",
+  "claim": "DeepGEMM's extra_signature is the CUTLASS version",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/csrc/runtime/jit.hpp",
+  "line": 20,
+  "quote": "\"cutlass-\" + std::to_string(CUTLASS_VERSION),"
+ },
+ {
+  "id": "deepgemm_vllm.key.include_dir",
+  "claim": "The JIT include dir is <package>/include",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/csrc/runtime/jit.hpp",
+  "line": 16,
+  "quote": "const auto include_dir = library_root / \"include\";"
+ },
+ {
+  "id": "deepgemm_vllm.key.include_prefix",
+  "claim": "Only #include <deep_gemm/...> headers are content-tracked",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/csrc/runtime/jit.hpp",
+  "line": 22,
+  "quote": "{\"deep_gemm/\"});"
+ },
+ {
+  "id": "deepgemm_vllm.key.cutlass_headers_installed",
+  "claim": "CUTLASS/CuTe headers are installed into the same include dir but tracked only via CUTLASS_VERSION",
+  "path": "vendor/vllm-v0.32.0/cmake/external_projects/deepgemm.cmake",
+  "line": 191,
+  "quote": "install(DIRECTORY \"${deepgemm_SOURCE_DIR}/third-party/cutlass/include/\""
+ },
+ {
+  "id": "deepgemm_vllm.key.sm107_override",
+  "claim": "On SM107 DeepGEMM forces the 100f family target",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/csrc/runtime/jit.hpp",
+  "line": 33,
+  "quote": "runtime->default_compiler_options.arch = \"100f\";"
+ },
+ {
+  "id": "deepgemm_vllm.key.extra_flags",
+  "claim": "DeepGEMM appends diag-suppress flags to every compile (part of the key)",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/csrc/runtime/jit.hpp",
+  "line": 37,
+  "quote": "emplace_back(\"--diag-suppress=39,161,174,177,186,940\");"
+ },
+ {
+  "id": "deepgemm_vllm.engine.install_set",
+  "claim": "vLLM vendors only deep_gemm/* (+ headers) into vllm/third_party/deep_gemm",
+  "path": "vendor/vllm-v0.32.0/cmake/external_projects/deepgemm.cmake",
+  "line": 97,
+  "quote": "We vendor DeepGEMM into vllm/third_party/deep_gemm/ and bundle:"
+ },
+ {
+  "id": "deepgemm_vllm.engine.legacy_triton",
+  "claim": "DeepGEMM imports a legacy Triton path (A100) whose cache is Triton's",
+  "path": "vendor/src/vllm-DeepGEMM-1e1842a/deep_gemm/__init__.py",
+  "line": 106,
+  "quote": "# Legacy Triton kernels for A100"
+ },
+ {
+  "id": "deepgemm_sglang.engine.force_override",
+  "claim": "SGLang unconditionally overwrites DG_JIT_CACHE_DIR with SGLANG_DG_CACHE_DIR at import",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+  "line": 46,
+  "quote": "os.environ[\"DG_JIT_CACHE_DIR\"] = envs.SGLANG_DG_CACHE_DIR.get()"
+ },
+ {
+  "id": "deepgemm_sglang.default.dg_dir",
+  "claim": "SGLANG_DG_CACHE_DIR defaults to $SGLANG_CACHE_DIR/deep_gemm",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1154,
+  "quote": "SGLANG_DG_CACHE_DIR = EnvStr(lambda: _default_cache_subdir(\"deep_gemm\"))"
+ },
+ {
+  "id": "deepgemm_sglang.default.cache_root",
+  "claim": "SGLANG_CACHE_DIR defaults to ~/.cache/sglang",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1164,
+  "quote": "SGLANG_CACHE_DIR = EnvStr(os.path.expanduser(\"~/.cache/sglang\"))"
+ },
+ {
+  "id": "deepgemm_sglang.engine.dead_nvrtc_knob",
+  "claim": "SGLang sets DG_JIT_USE_NVRTC, which the DeepJIT-based DeepGEMM does not read",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+  "line": 51,
+  "quote": "os.environ[\"DG_JIT_USE_NVRTC\"] = os.getenv(\"SGL_DG_USE_NVRTC\", \"0\")"
+ },
+ {
+  "id": "deepgemm_sglang.lock.dir",
+  "claim": "SGLang adds its own lock dir <DG_JIT_CACHE_DIR>/locks",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+  "line": 132,
+  "quote": "lock_dir = Path(os.environ[\"DG_JIT_CACHE_DIR\"]) / \"locks\""
+ },
+ {
+  "id": "deepgemm_sglang.lock.name",
+  "claim": "One lock file per (kernel type, N, K, groups) precompile group",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+  "line": 134,
+  "quote": "f\"{kernel_type.name}_n{n}_k{k}_g{num_groups}.lock\""
+ },
+ {
+  "id": "deepgemm_sglang.lock.flock",
+  "claim": "The precompile lock is a blocking fcntl.flock LOCK_EX",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+  "line": 136,
+  "quote": "fcntl.flock(lock_file, fcntl.LOCK_EX)"
+ },
+ {
+  "id": "deepgemm_sglang.engine.precompile_cost",
+  "claim": "Cold DeepGEMM precompile is documented as typically 10-20 minutes",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py",
+  "line": 165,
+  "quote": "It may take a long time (typically 10-20 mins)"
+ },
+ {
+  "id": "deepgemm_sglang.engine.pin",
+  "claim": "SGLang 0.5.20 pins sgl-deep-gemm 0.2.0",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 79,
+  "quote": "\"sgl-deep-gemm==0.2.0\","
+ },
+ {
+  "id": "deepgemm_sglang.engine.init_root",
+  "claim": "sgl-deep-gemm passes its package dir (and CUDA home) to _C.init",
+  "path": "vendor/src/sgl-deep-gemm-0.2.0/deep_gemm/__init__.py",
+  "line": 560,
+  "quote": "os.path.dirname(os.path.abspath(__file__)),"
+ },
+ {
+  "id": "deepgemm_sglang.engine.prebuilt_c",
+  "claim": "_C.so ships prebuilt; tvm_ffi rebuild into the package only if it is missing",
+  "path": "vendor/src/sgl-deep-gemm-0.2.0/deep_gemm/__init__.py",
+  "line": 101,
+  "quote": "if not os.path.exists(lib_path):"
+ },
+ {
+  "id": "deepgemm_sglang.env.same_suffix",
+  "claim": "The DeepJIT headers shipped in sgl-deep-gemm read the same JIT_CACHE_DIR suffix",
+  "path": "vendor/src/sgl-deep-gemm-0.2.0/deep_gemm/include/deep_jit/cache/disk.hpp",
+  "line": 91,
+  "quote": "env.get<std::string>(\"JIT_CACHE_DIR\")"
+ },
+ {
+  "id": "deepgemm_sglang.default.same_home_dj",
+  "claim": "sgl-deep-gemm's DeepJIT copy also defaults to $HOME/.dj",
+  "path": "vendor/src/sgl-deep-gemm-0.2.0/deep_gemm/include/deep_jit/cache/disk.hpp",
+  "line": 105,
+  "quote": "std::filesystem::path(home) / \".dj\""
+ },
+ {
+  "id": "deepgemm_sglang.write.same_rename",
+  "claim": "sgl-deep-gemm's DeepJIT copy publishes by atomic directory rename",
+  "path": "vendor/src/sgl-deep-gemm-0.2.0/deep_gemm/include/deep_jit/cache/disk.hpp",
+  "line": 54,
+  "quote": "std::filesystem::rename(path, commit_path, error_code);"
+ },
+ {
+  "id": "deepgemm_sglang.key.same_digest",
+  "claim": "sgl-deep-gemm's DeepJIT copy uses the same source+include digest",
+  "path": "vendor/src/sgl-deep-gemm-0.2.0/deep_gemm/include/deep_jit/runtime/runtime.hpp",
+  "line": 96,
+  "quote": ".update(parser.parse_into_hash(source))"
+ },
+ {
+  "id": "deepgemm_sglang.engine.tilelang_dev_only",
+  "claim": "tilelang is only a dev extra of sgl-deep-gemm, not a runtime dependency",
+  "path": "vendor/src/sgl-deep-gemm-0.2.0/sgl_deep_gemm-0.2.0.dist-info/METADATA",
+  "line": 18,
+  "quote": "Requires-Dist: tilelang==0.1.9; extra == \"dev\""
+ },
+ {
+  "id": "cute_dsl.engine.libs_core_462",
+  "claim": "libs-base 4.6.2 does not contain the DSL runtime; it depends on libs-core 4.6.2 (not vendored)",
+  "path": "vendor/src/nvidia-cutlass-dsl-libs-base-4.6.2/nvidia_cutlass_dsl_libs_base-4.6.2.dist-info/METADATA",
+  "line": 29,
+  "quote": "Requires-Dist: nvidia-cutlass-dsl-libs-core==4.6.2"
+ },
+ {
+  "id": "cute_dsl.engine.libs_core_480",
+  "claim": "libs-base 4.8.0 likewise depends on the non-vendored libs-core 4.8.0",
+  "path": "vendor/src/nvidia-cutlass-dsl-libs-base-4.8.0/nvidia_cutlass_dsl_libs_base-4.8.0.dist-info/METADATA",
+  "line": 28,
+  "quote": "Requires-Dist: nvidia-cutlass-dsl-libs-core==4.8.0"
+ },
+ {
+  "id": "cute_dsl.engine.proxy_version",
+  "claim": "The only local CuTe DSL Python source is the CUTLASS 4.5 copy bundled in FlashInfer (proxy)",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/include/cutlass/version.h",
+  "line": 38,
+  "quote": "#define CUTLASS_MINOR 5"
+ },
+ {
+  "id": "cute_dsl.env.prefix",
+  "claim": "The CuTe DSL env prefix is CUTE_DSL",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/cutlass_dsl/cutlass.py",
+  "line": 1099,
+  "quote": "name = \"CUTE_DSL\""
+ },
+ {
+  "id": "cute_dsl.env.cache_dir",
+  "claim": "CUTE_DSL_CACHE_DIR relocates the file cache (read once at module import)",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 70,
+  "quote": "os.getenv(\"CUTE_DSL_CACHE_DIR\", None)"
+ },
+ {
+  "id": "cute_dsl.default.tmpdir",
+  "claim": "Default base is $TMPDIR, else tempfile.gettempdir()",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 71,
+  "quote": "tmp_dir = Path(os.environ.get(\"TMPDIR\", tempfile.gettempdir()))"
+ },
+ {
+  "id": "cute_dsl.default.name",
+  "claim": "Default leaf name is cutlass_python_cache",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 79,
+  "quote": "get_reusable_temp_dir(\"cutlass_python_cache\")"
+ },
+ {
+  "id": "cute_dsl.default.mkdir_at_import",
+  "claim": "The default dir is created at import time",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 75,
+  "quote": "path.mkdir(parents=True, exist_ok=True)"
+ },
+ {
+  "id": "cute_dsl.env.disable_file_caching",
+  "claim": "CUTE_DSL_DISABLE_FILE_CACHING turns off file-cache writes",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/env_manager.py",
+  "line": 376,
+  "quote": "f\"{prefix}_DISABLE_FILE_CACHING\", False"
+ },
+ {
+  "id": "cute_dsl.key.bytecode",
+  "claim": "The key hashes the traced MLIR module bytecode",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/dsl.py",
+  "line": 1045,
+  "quote": "module.operation.write_bytecode(s)"
+ },
+ {
+  "id": "cute_dsl.key.env_values",
+  "claim": "Every non-None env-manager attribute value is hashed into the key",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/dsl.py",
+  "line": 1046,
+  "quote": "for attr, value in self.envar.__dict__.items():"
+ },
+ {
+  "id": "cute_dsl.key.compile_options",
+  "claim": "Compile options are hashed into the key",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/dsl.py",
+  "line": 1050,
+  "quote": "s.write(self.compile_options.to_str().encode())"
+ },
+ {
+  "id": "cute_dsl.key.version_stub",
+  "claim": "In the open-source copy the version seed is an empty sha256 (no DSL version in key)",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/dsl.py",
+  "line": 1039,
+  "quote": "version_hash = hashlib.sha256()"
+ },
+ {
+  "id": "cute_dsl.key.dump_dir",
+  "claim": "dump_dir (hashed into the key) defaults to the process working directory",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/env_manager.py",
+  "line": 358,
+  "quote": "f\"{prefix}_DUMP_DIR\", get_default_file_dump_root()"
+ },
+ {
+  "id": "cute_dsl.key.cwd",
+  "claim": "The default dump root is Path.cwd()",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 90,
+  "quote": "dump_root = Path.cwd()"
+ },
+ {
+  "id": "cute_dsl.key.arch",
+  "claim": "Target arch (CUTE_DSL_ARCH or detected sm_XYa) is an env-manager attribute, hence keyed",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/env_manager.py",
+  "line": 367,
+  "quote": "get_str_env_var(f\"{prefix}_ARCH\", detect_gpu_arch(prefix))"
+ },
+ {
+  "id": "cute_dsl.key.cache_dir_value",
+  "claim": "The CUTE_DSL_CACHE_DIR value itself is an env-manager attribute, hence keyed",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/env_manager.py",
+  "line": 364,
+  "quote": "get_str_env_var(f\"{prefix}_CACHE_DIR\", None)"
+ },
+ {
+  "id": "cute_dsl.write.tmp_dir",
+  "claim": "Writes go to a per-process temp dir inside the cache dir",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 211,
+  "quote": "f\"tmp.pid_{pid}_{rnd_id}\""
+ },
+ {
+  "id": "cute_dsl.write.replace",
+  "claim": "The finished file is moved into place with os.replace (atomic, no lock)",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 229,
+  "quote": "os.replace(temp_fname, save_fname)"
+ },
+ {
+  "id": "cute_dsl.read.crc_check",
+  "claim": "Readers verify a trailing CRC32 before parsing the bytecode",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 130,
+  "quote": "if crc_appended_int != crc_computed:"
+ },
+ {
+  "id": "cute_dsl.read.load_failure_is_miss",
+  "claim": "A bad file only logs a warning and is treated as a miss",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 265,
+  "quote": "failed with loading generated IR cache for"
+ },
+ {
+  "id": "cute_dsl.read.write_failure_warns",
+  "claim": "A failed dump (e.g. read-only dir) only logs a warning",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 305,
+  "quote": "failed with dumping generated IR cache for"
+ },
+ {
+  "id": "cute_dsl.content.mlir",
+  "claim": "Entries are <dsl_name>_<module_hash>.mlir bytecode files",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/data/cutlass/python/CuTeDSL/cutlass/base_dsl/cache_helpers.py",
+  "line": 255,
+  "quote": "file = f\"{dsl_name.lower()}_{file}.mlir\""
+ },
+ {
+  "id": "cute_dsl.engine.flashinfer_sets",
+  "claim": "FlashInfer 0.7.0.post1 prims_ts sets CUTE_DSL_CACHE_DIR when unset",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer/prims_ts/utils.py",
+  "line": 34,
+  "quote": "os.environ[\"CUTE_DSL_CACHE_DIR\"] = cache_dir"
+ },
+ {
+  "id": "cute_dsl.engine.flashinfer_default",
+  "claim": "FlashInfer's value is <FLASHINFER_WORKSPACE_BASE or ~>/.cache/flashinfer/cute_dsl",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer/prims_ts/utils.py",
+  "line": 33,
+  "quote": "workspace_base / \".cache\" / \"flashinfer\" / \"cute_dsl\""
+ },
+ {
+  "id": "fa4.env.enabled",
+  "claim": "FA4 persistent cache is opt-in via FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 (default off)",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 34,
+  "quote": "os.getenv(\"FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED\", \"0\") == \"1\""
+ },
+ {
+  "id": "fa4.env.dir",
+  "claim": "FLASH_ATTENTION_CUTE_DSL_CACHE_DIR relocates the FA4 cache",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 39,
+  "quote": "os.getenv(\"FLASH_ATTENTION_CUTE_DSL_CACHE_DIR\", None)"
+ },
+ {
+  "id": "fa4.default.tmp_user",
+  "claim": "Default dir is <tempdir>/<user>/flash_attention_cute_dsl_cache",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 46,
+  "quote": "Path(tempfile.gettempdir()) / getuser() / \"flash_attention_cute_dsl_cache\""
+ },
+ {
+  "id": "fa4.env.vllm_same",
+  "claim": "vLLM's vendored FA4 uses the same opt-in flag",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 34,
+  "quote": "os.getenv(\"FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED\", \"0\") == \"1\""
+ },
+ {
+  "id": "fa4.engine.flashinfer_shares_env",
+  "claim": "FlashInfer's BSA kernels reuse the same FLASH_ATTENTION_CUTE_DSL_CACHE_* variables",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer/cute_dsl/sparse/bsa_utils/cache_utils.py",
+  "line": 46,
+  "quote": "os.getenv(\"FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED\", \"0\") == \"1\""
+ },
+ {
+  "id": "fa4.key.versions",
+  "claim": "The fingerprint includes the cutlass (and tvm_ffi, Python minor) versions",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 67,
+  "quote": "h.update(f\"cutlass={cutlass.__version__}\".encode())"
+ },
+ {
+  "id": "fa4.key.sources",
+  "claim": "The fingerprint hashes every flash_attn/cute/*.py file",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 70,
+  "quote": "for src in sorted(cute_root.rglob(\"*.py\")):"
+ },
+ {
+  "id": "fa4.key.fingerprint_dir",
+  "claim": "Entries are namespaced in <cache>/<fingerprint>/<name>/",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 303,
+  "quote": "path = get_cache_path() / _compute_source_fingerprint()"
+ },
+ {
+  "id": "fa4.key.pickle_sha",
+  "claim": "Entry name is sha256(pickle(compile_key))",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 278,
+  "quote": "hashlib.sha256(pickle.dumps(key)).hexdigest()"
+ },
+ {
+  "id": "fa4.key.compile_key",
+  "claim": "The fwd compile key tuple (dtype, head dims, flags, tiles, arch ...) starts here",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/interface.py",
+  "line": 1452,
+  "quote": "compile_key = ("
+ },
+ {
+  "id": "fa4.key.arch",
+  "claim": "Arch in the key is major*10+minor of the current device (or FLASH_ATTENTION_ARCH)",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/interface.py",
+  "line": 117,
+  "quote": "return major * 10 + int(minor)"
+ },
+ {
+  "id": "fa4.key.log_level",
+  "claim": "Even the FA log level is part of the compile key",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/interface.py",
+  "line": 1520,
+  "quote": "fa_logging.get_fa_log_level(),"
+ },
+ {
+  "id": "fa4.lock.o_creat",
+  "claim": "Even a shared (read) lock opens the lock file with O_CREAT",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 118,
+  "quote": "os.O_RDONLY | os.O_CREAT"
+ },
+ {
+  "id": "fa4.lock.flock",
+  "claim": "Locks are fcntl.flock, polled non-blocking",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 127,
+  "quote": "fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)"
+ },
+ {
+  "id": "fa4.lock.timeout",
+  "claim": "Lock acquisition times out after 15 s and raises",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 180,
+  "quote": "LOCK_TIMEOUT_SECONDS = 15"
+ },
+ {
+  "id": "fa4.write.tmp",
+  "claim": "flash-attn-4 4.0.0b35 exports to a per-pid temp object first",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 261,
+  "quote": "f\".{sha256_hex}.{os.getpid()}.tmp.o\""
+ },
+ {
+  "id": "fa4.write.replace",
+  "claim": "flash-attn-4 4.0.0b35 publishes the object with os.replace",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 269,
+  "quote": "os.replace(tmp_path, obj_path)"
+ },
+ {
+  "id": "fa4.read.unloadable_is_miss",
+  "claim": "flash-attn-4 4.0.0b35 treats an unloadable object as a miss and re-exports",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 230,
+  "quote": "self._unloadable.add(sha256_hex)"
+ },
+ {
+  "id": "fa4.write.vllm_in_place",
+  "claim": "vLLM's vendored FA4 exports directly to the final .o path (no temp+rename)",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 243,
+  "quote": "object_file_path=str(obj_path),"
+ },
+ {
+  "id": "fa4.read.vllm_no_recovery",
+  "claim": "vLLM's vendored FA4 loads without try/except: a truncated .o raises",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 219,
+  "quote": "m = cute.runtime.load_module(str(obj_path), enable_tvm_ffi=True)"
+ },
+ {
+  "id": "fa4.read.vllm_exists_skip",
+  "claim": "vLLM's vendored FA4 skips export whenever the .o exists (even if empty)",
+  "path": "vendor/src/vllm-flash-attention-9cd61de/flash_attn/cute/cache_utils.py",
+  "line": 237,
+  "quote": "if obj_path.exists():"
+ },
+ {
+  "id": "fa4.content.lock_file",
+  "claim": "Each entry has a <sha>.lock next to <sha>.o",
+  "path": "vendor/src/flash-attn-4-4.0.0b35/flash_attn/cute/cache_utils.py",
+  "line": 281,
+  "quote": "return self.cache_path / f\"{sha256_hex}.lock\""
+ },
+ {
+  "id": "fa4.engine.sglang_vendored_default",
+  "claim": "SGLang uses its vendored FA4 copy unless SGLANG_INKLING_FA4_USE_PIP=1",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attention_v4.py",
+  "line": 12,
+  "quote": "os.environ.get(\"SGLANG_INKLING_FA4_USE_PIP\") == \"1\""
+ },
+ {
+  "id": "fa4.engine.sglang_pip_user",
+  "claim": "SGLang's qwen sparse backend imports the pip flash_attn.cute",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/layers/attention/qwen_sparse_attn_backend.py",
+  "line": 82,
+  "quote": "from flash_attn.cute.interface import flash_attn_varlen_func"
+ },
+ {
+  "id": "fa4.engine.vllm_rewrite",
+  "claim": "vLLM installs FA4 as vllm.vllm_flash_attn.cute (import strings rewritten)",
+  "path": "vendor/vllm-v0.32.0/cmake/external_projects/vllm_flash_attn.cmake",
+  "line": 112,
+  "quote": "vllm.vllm_flash_attn.cute"
+ },
+ {
+  "id": "sglang_cute_aot.env.dir",
+  "claim": "SGLANG_CUTE_AOT_CACHE_DIR defaults to $SGLANG_CACHE_DIR/cute_aot (enabled by default)",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1168,
+  "quote": "SGLANG_CUTE_AOT_CACHE_DIR = EnvStr(lambda: _default_cache_subdir(\"cute_aot\"))"
+ },
+ {
+  "id": "sglang_cute_aot.env.empty_disables",
+  "claim": "An empty SGLANG_CUTE_AOT_CACHE_DIR disables the persistent cache",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 412,
+  "quote": "cache_dir = envs.SGLANG_CUTE_AOT_CACHE_DIR.get() or None"
+ },
+ {
+  "id": "sglang_cute_aot.engine.fa4_uses",
+  "claim": "SGLang's vendored FA4 interface uses this cache",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attn/cute/interface.py",
+  "line": 14,
+  "quote": "from sglang.kernels.jit.cute_aot_cache import get_jit_cache"
+ },
+ {
+  "id": "sglang_cute_aot.key.host",
+  "claim": "Fingerprint includes host platform/machine",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 62,
+  "quote": "h.update(f\"host={sys.platform}-{platform.machine()}\".encode())"
+ },
+ {
+  "id": "sglang_cute_aot.key.cuda",
+  "claim": "Fingerprint includes the CUDA version reported by cutlass",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 64,
+  "quote": "h.update(f\"cuda={getattr(cutlass, 'CUDA_VERSION', 'unknown')}\".encode())"
+ },
+ {
+  "id": "sglang_cute_aot.key.arch",
+  "claim": "Fingerprint includes the target arch",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 66,
+  "quote": "h.update(f\"arch={target_arch}\".encode())"
+ },
+ {
+  "id": "sglang_cute_aot.key.arch_source",
+  "claim": "Target arch is CUTE_DSL_ARCH if set, else sm_<major><minor> of the device",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 94,
+  "quote": "if target_arch := os.getenv(\"CUTE_DSL_ARCH\"):"
+ },
+ {
+  "id": "sglang_cute_aot.key.sources",
+  "claim": "FA4 passes its own source dir to be hashed into the fingerprint",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attn/cute/interface.py",
+  "line": 1857,
+  "quote": "source_paths=(os.path.dirname(os.path.abspath(__file__)),),"
+ },
+ {
+  "id": "sglang_cute_aot.key.sha",
+  "claim": "Entry name is sha256(pickle((enable_tvm_ffi, normalized key)))",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 376,
+  "quote": "return hashlib.sha256(pickle.dumps(disk_key)).hexdigest()"
+ },
+ {
+  "id": "sglang_cute_aot.lock.flock",
+  "claim": "Per-entry fcntl.flock, polled non-blocking",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 182,
+  "quote": "fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)"
+ },
+ {
+  "id": "sglang_cute_aot.lock.timeout",
+  "claim": "Lock timeout is 15 s",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 238,
+  "quote": "LOCK_TIMEOUT_SECONDS = 15"
+ },
+ {
+  "id": "sglang_cute_aot.write.tmp",
+  "claim": "Export goes to a hidden .<sha>.tmp.o first",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 352,
+  "quote": "temp_key = f\".{sha256_hex}.tmp\""
+ },
+ {
+  "id": "sglang_cute_aot.write.replace",
+  "claim": "The object is published with os.replace",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 367,
+  "quote": "os.replace(temp_obj_path, obj_path)"
+ },
+ {
+  "id": "sglang_cute_aot.read.evict_invalid",
+  "claim": "An unloadable object is unlinked under the exclusive lock (inode-checked)",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 331,
+  "quote": "obj_path.unlink()"
+ },
+ {
+  "id": "sglang_cute_aot.read.lazy_mkdir",
+  "claim": "The cache dir is mkdir'ed on first storage access",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 256,
+  "quote": "path.mkdir(parents=True, exist_ok=True)"
+ },
+ {
+  "id": "sglang_cute_aot.content.object",
+  "claim": "Entries are <sha>.o objects (plus <sha>.lock)",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/jit/cute_aot_cache.py",
+  "line": 283,
+  "quote": "obj_path = self.cache_path / f\"{sha256_hex}.o\""
+ },
+ {
+  "id": "quack.env.enabled",
+  "claim": "QuACK's persistent .o cache is ON by default (QUACK_CACHE_ENABLED=1)",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/__init__.py",
+  "line": 38,
+  "quote": "os.getenv(\"QUACK_CACHE_ENABLED\", \"1\") == \"1\""
+ },
+ {
+  "id": "quack.env.dir",
+  "claim": "QUACK_CACHE_DIR relocates the .o cache",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/__init__.py",
+  "line": 39,
+  "quote": "os.getenv(\"QUACK_CACHE_DIR\", None)"
+ },
+ {
+  "id": "quack.env.same_064",
+  "claim": "quack 0.6.4 has the identical default-on flag",
+  "path": "vendor/src/quack-kernels-0.6.4/quack/cache/__init__.py",
+  "line": 38,
+  "quote": "os.getenv(\"QUACK_CACHE_ENABLED\", \"1\") == \"1\""
+ },
+ {
+  "id": "quack.default.tmp_user",
+  "claim": "Default .o cache dir is <tempdir>/<user>/quack_cache",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 51,
+  "quote": "Path(tempfile.gettempdir()) / getuser() / \"quack_cache\""
+ },
+ {
+  "id": "quack.key.versions",
+  "claim": "Fingerprint includes cutlass (and tvm_ffi, Python minor) versions",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 72,
+  "quote": "h.update(f\"cutlass={cutlass.__version__}\".encode())"
+ },
+ {
+  "id": "quack.key.sources",
+  "claim": "Fingerprint hashes the whole quack package sources",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 79,
+  "quote": "_hash_source_dir(h, Path(_quack.__file__).resolve().parent)"
+ },
+ {
+  "id": "quack.key.sha",
+  "claim": "Entry key is sha256(pickle((qualname,)+args+sorted kwargs))",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 180,
+  "quote": "sha = _key_to_hash((fn.__qualname__,) + cache_key)"
+ },
+ {
+  "id": "quack.key.no_explicit_arch",
+  "claim": "Example compile function keys on dtypes/N/flags/config, no explicit arch argument",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/rmsnorm.py",
+  "line": 427,
+  "quote": "def _compile_rmsnorm_fwd("
+ },
+ {
+  "id": "quack.lock.flock",
+  "claim": "Per-key fcntl.flock lock, polled",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 110,
+  "quote": "fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)"
+ },
+ {
+  "id": "quack.lock.timeout",
+  "claim": "Lock timeout is 60 s",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 43,
+  "quote": "LOCK_TIMEOUT = 60"
+ },
+ {
+  "id": "quack.lock.timeout_fallback",
+  "claim": "On lock timeout QuACK compiles in-process without writing the disk cache",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 292,
+  "quote": "quack cache: lock timeout for key"
+ },
+ {
+  "id": "quack.write.tmp",
+  "claim": "Export goes to <sha>.o.tmp.<pid> first",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 320,
+  "quote": "o_path.with_suffix(f\".o.tmp.{os.getpid()}\")"
+ },
+ {
+  "id": "quack.write.replace",
+  "claim": "The object is published with os.replace",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 326,
+  "quote": "os.replace(tmp_path, o_path)"
+ },
+ {
+  "id": "quack.read.quarantine",
+  "claim": "A corrupt cached object is deleted and recompiled",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 201,
+  "quote": "o_path.unlink()"
+ },
+ {
+  "id": "quack.content.lock",
+  "claim": "Entries are <fingerprint>/<sha>.o plus <sha>.lock",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/cache/jit.py",
+  "line": 184,
+  "quote": "lock_path = cache_path / f\"{sha}.lock\""
+ },
+ {
+  "id": "quack.env.autotune_dir",
+  "claim": "The autotune JSON cache also uses QUACK_CACHE_DIR, else the default dir",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/autotuner.py",
+  "line": 46,
+  "quote": "_CACHE_DIR\", \"\").strip() or default_cache_dir()"
+ },
+ {
+  "id": "quack.default.autotune_home",
+  "claim": "Autotune default dir is <QUACK_HOME or ~>/.quack/cache",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/autotuner.py",
+  "line": 39,
+  "quote": "os.path.join(get_home_dir(), f\".{PACKAGE_NAME}\", \"cache\")"
+ },
+ {
+  "id": "quack.key.autotune",
+  "claim": "Autotune key = quack version + tuning key (shapes/strides/dtypes) + config strings",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/autotuner.py",
+  "line": 264,
+  "quote": "cache_key = [VERSION, str(tuning_key)] + config_str_list"
+ },
+ {
+  "id": "quack.content.autotune_json",
+  "claim": "Autotune results are <fn>.autotune.json",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/autotuner.py",
+  "line": 267,
+  "quote": "file_name = f\"{fn.__name__[:150]}.autotune.json\""
+ },
+ {
+  "id": "quack.engine.autotune_default_on",
+  "claim": "The autotune decorator defaults to cache_results=True",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/autotuner.py",
+  "line": 526,
+  "quote": "do_bench=None, cache_results=True"
+ },
+ {
+  "id": "quack.write.autotune_triton_base",
+  "claim": "Autotune storage subclasses Triton's FileCacheManager",
+  "path": "vendor/src/quack-kernels-0.6.5/quack/autotuner.py",
+  "line": 42,
+  "quote": "class FileCacheManager(triton.runtime.cache.FileCacheManager):"
+ },
+ {
+  "id": "quack.write.triton_put_replace",
+  "claim": "Triton's put (inherited) writes via temp dir + os.replace",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 124,
+  "quote": "os.replace(temp_path, filepath)"
+ },
+ {
+  "id": "quack.engine.triton_base_mkdir",
+  "claim": "Triton's base __init__ first creates <triton cache>/<key> before QuACK overrides the dir",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 55,
+  "quote": "os.makedirs(self.cache_dir, exist_ok=True)"
+ },
+ {
+  "id": "quack.engine.utility_only",
+  "claim": "Engines import only QuACK utilities such as make_fake_tensor",
+  "path": "vendor/vllm-v0.32.0/vllm/model_executor/layers/mamba/ops/gdn_chunk_cutedsl/__init__.py",
+  "line": 10,
+  "quote": "from quack.compile_utils import make_fake_tensor"
+ },
+ {
+  "id": "quack.engine.vllm_pin",
+  "claim": "vLLM 0.32.0 pins quack-kernels 0.6.5",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 25,
+  "quote": "quack-kernels==0.6.5"
+ },
+ {
+  "id": "tokenspeed_mla.read.functools_cache",
+  "claim": "Decode kernels are cached in memory only (functools.cache)",
+  "path": "vendor/src/tokenspeed-mla-0.2.15/tokenspeed_mla/mla_decode.py",
+  "line": 187,
+  "quote": "def _get_compiled_mla_kernel("
+ },
+ {
+  "id": "tokenspeed_mla.read.cute_compile",
+  "claim": "Kernels are built with cute.compile (CuTe DSL), no export_to_c",
+  "path": "vendor/src/tokenspeed-mla-0.2.15/tokenspeed_mla/mla_decode.py",
+  "line": 404,
+  "quote": "compiled_kernel = cute.compile("
+ },
+ {
+  "id": "tokenspeed_mla.read.prefill_dict",
+  "claim": "Prefill kernels are cached in a module-level dict",
+  "path": "vendor/src/tokenspeed-mla-0.2.15/tokenspeed_mla/mla_prefill.py",
+  "line": 212,
+  "quote": "_compiled_kernels = {}"
+ },
+ {
+  "id": "tokenspeed_mla.engine.triton_fork",
+  "claim": "Triton kernels use the tokenspeed_triton fork, not upstream triton",
+  "path": "vendor/src/tokenspeed-mla-0.2.15/tokenspeed_mla/_triton.py",
+  "line": 23,
+  "quote": "import tokenspeed_triton as triton"
+ },
+ {
+  "id": "tokenspeed_mla.engine.triton_dep",
+  "claim": "tokenspeed-triton is a runtime dependency (not vendored)",
+  "path": "vendor/src/tokenspeed-mla-0.2.15/tokenspeed_mla-0.2.15.dist-info/METADATA",
+  "line": 35,
+  "quote": "Requires-Dist: tokenspeed-triton>=3.8.10.post20260920"
+ },
+ {
+  "id": "tokenspeed_mla.engine.cutlass_dep",
+  "claim": "tokenspeed-mla requires nvidia-cutlass-dsl>=4.8.0",
+  "path": "vendor/src/tokenspeed-mla-0.2.15/tokenspeed_mla-0.2.15.dist-info/METADATA",
+  "line": 34,
+  "quote": "Requires-Dist: nvidia-cutlass-dsl>=4.8.0"
+ },
+ {
+  "id": "tokenspeed_mla.engine.vllm_pin",
+  "claim": "vLLM pins tokenspeed-mla 0.2.15",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 28,
+  "quote": "tokenspeed-mla==0.2.15"
+ },
+ {
+  "id": "tokenspeed_mla.engine.sglang_pin",
+  "claim": "SGLang pins tokenspeed_mla 0.1.8 (not vendored)",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 87,
+  "quote": "\"tokenspeed_mla==0.1.8\","
+ },
+ {
+  "id": "humming.env.cache_dir",
+  "claim": "HUMMING_CACHE_DIR relocates the cubin cache",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/utils/jit.py",
+  "line": 119,
+  "quote": "cache_dir = os.getenv(\"HUMMING_CACHE_DIR\")"
+ },
+ {
+  "id": "humming.default.cache_home",
+  "claim": "Default cubin cache is ~/.humming/cache/",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/utils/jit.py",
+  "line": 122,
+  "quote": "os.path.join(os.path.expanduser(\"~\"), \".humming/cache/\")"
+ },
+ {
+  "id": "humming.env.tmp_dir",
+  "claim": "HUMMING_TMP_DIR relocates the tmp area (locks, generated modules)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/utils/jit.py",
+  "line": 109,
+  "quote": "tmp_dir = os.getenv(\"HUMMING_TMP_DIR\")"
+ },
+ {
+  "id": "humming.default.tmp_home",
+  "claim": "Default tmp area is ~/.humming/tmp/",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/utils/jit.py",
+  "line": 112,
+  "quote": "os.path.join(os.path.expanduser(\"~\"), \".humming/tmp/\")"
+ },
+ {
+  "id": "humming.lock.dir_in_tmp",
+  "claim": "Lock files live under <tmp>/lock/, not in the cache dir",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/utils/jit.py",
+  "line": 136,
+  "quote": "dirname = os.path.join(tmp_dirname, \"lock/\")"
+ },
+ {
+  "id": "humming.lock.filelock",
+  "claim": "Every compile (hit or miss) runs under filelock.FileLock",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 77,
+  "quote": "with FileLock(lock_filename):"
+ },
+ {
+  "id": "humming.key.signature",
+  "claim": "Key = compiler class + compiler version + flags + kernel expr + full source",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 65,
+  "quote": "f\"{cls.__name__}$${cls.signature()}$${flags}$${kernel_expr}$${code}\""
+ },
+ {
+  "id": "humming.key.header_mtimes",
+  "claim": "Key includes the st_mtime of every installed .cuh header (by absolute path)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 52,
+  "quote": "data[filename] = os.stat(filename).st_mtime"
+ },
+ {
+  "id": "humming.key.mtime_appended",
+  "claim": "Header mtime map is appended to the signature",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 66,
+  "quote": "signature += \"$$\" + Compiler.cuh_last_update_time()"
+ },
+ {
+  "id": "humming.key.arch_flag",
+  "claim": "Target sm version is in the NVRTC flags (and the key)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 188,
+  "quote": "f\"--gpu-architecture=sm_{sm_version}\","
+ },
+ {
+  "id": "humming.key.abs_include_flags",
+  "claim": "Absolute include dirs are added as -I flags (part of the key)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 200,
+  "quote": "flags.append(f\"-I{d}\")"
+ },
+ {
+  "id": "humming.key.nvrtc_version",
+  "claim": "Compiler identity is the NVRTC major.minor",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 183,
+  "quote": "return f\"nvrtc+{major.value}.{minor.value}\""
+ },
+ {
+  "id": "humming.key.md5",
+  "claim": "The cache dir name is an md5 of the signature",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/utils/jit.py",
+  "line": 64,
+  "quote": "md5 = hashlib.md5()"
+ },
+ {
+  "id": "humming.key.md5_truncated_012",
+  "claim": "humming 0.1.12 truncates the md5 to 16 hex chars (different dir names than 0.1.17)",
+  "path": "vendor/src/humming-kernels-0.1.12/humming/utils/jit.py",
+  "line": 66,
+  "quote": "return md5.hexdigest()[0:16]"
+ },
+ {
+  "id": "humming.write.replace",
+  "claim": "The cubin is compiled to kernel_tmp.cubin and published with os.replace",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 108,
+  "quote": "os.replace(cache_dirname / \"kernel_tmp.cubin\", cache_filename)"
+ },
+ {
+  "id": "humming.read.exists_under_lock",
+  "claim": "Hit = kernel.cubin exists (checked under the lock)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 78,
+  "quote": "if cache_filename.exists():"
+ },
+ {
+  "id": "humming.content.dir",
+  "claim": "Entries are <HUMMING_CACHE_DIR>/<md5>/",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 72,
+  "quote": "Path(os.path.join(jit_utils.get_humming_cache_dir(), hash_hex))"
+ },
+ {
+  "id": "humming.content.signature_txt",
+  "claim": "Entries also hold kernel.cu and signature.txt (plus logs, cmdline.json, shims/)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 85,
+  "quote": "with open(cache_dirname / \"signature.txt\", \"w\") as f:"
+ },
+ {
+  "id": "humming.reloc.cmdline_json",
+  "claim": "cmdline.json stores the absolute compiler command (informational)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/compiler.py",
+  "line": 243,
+  "quote": "with open(Path(cache_dirname) / \"cmdline.json\", \"w\") as f:"
+ },
+ {
+  "id": "humming.engine.compiler_choice",
+  "claim": "HUMMING_COMPILER selects nvcc/nvrtc; default NVRTC when cuda.bindings imports",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/jit/runtime.py",
+  "line": 65,
+  "quote": "compiler = os.environ.get(\"HUMMING_COMPILER\", \"\").lower()"
+ },
+ {
+  "id": "humming.engine.bg_build_import",
+  "claim": "Importing humming.utils.nvrtc spawns a background build check subprocess",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/utils/nvrtc.py",
+  "line": 140,
+  "quote": "build_nvrtc_compile_binary_in_bg()"
+ },
+ {
+  "id": "humming.engine.precompiled_manifest",
+  "claim": "Precompiled aarch64 helpers ship with a source-hash manifest (used when it matches)",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/_native/aarch64/manifest.json",
+  "line": 1,
+  "quote": "\"nvrtc_compile\": \"3cf18af2b4c3281dfe4def300e85d872\""
+ },
+ {
+  "id": "humming.engine.launcher_fallback",
+  "claim": "Without a matching precompiled launcher, a torch cpp_extension is built under the cache dir",
+  "path": "vendor/src/humming-kernels-0.1.17/humming/ops/utils.py",
+  "line": 176,
+  "quote": "os.path.join(cache_dir, f\"launcher/{version}/{launcher_code_hash}\")"
+ },
+ {
+  "id": "humming.engine.vllm_pin",
+  "claim": "vLLM pins humming-kernels 0.1.17",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 31,
+  "quote": "humming-kernels[cu13]==0.1.17"
+ },
+ {
+  "id": "humming.engine.sglang_pin",
+  "claim": "SGLang pins humming-kernels 0.1.12",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 44,
+  "quote": "\"humming-kernels[cu13]==0.1.12\","
+ },
+ {
+  "id": "cuda_tile.engine.wheel_stub",
+  "claim": "The cuda-tile 1.6.0rc5 sdist is a wheel-stub (no source code)",
+  "path": "vendor/src/cuda-tile-1.6.0rc5/cuda_tile-1.6.0rc5/pyproject.toml",
+  "line": 6,
+  "quote": "build-backend = \"wheel_stub.buildapi\""
+ },
+ {
+  "id": "cuda_tile.engine.index",
+  "claim": "The real wheel is fetched from pypi.nvidia.com at install time",
+  "path": "vendor/src/cuda-tile-1.6.0rc5/cuda_tile-1.6.0rc5/pyproject.toml",
+  "line": 9,
+  "quote": "index_url = \"https://pypi.nvidia.com/\""
+ },
+ {
+  "id": "cuda_tile.engine.tileiras_extra",
+  "claim": "cuda-tile's compiler toolchain comes from cuda-toolkit[tileiras] (optional extra)",
+  "path": "vendor/src/cuda-tile-1.6.0rc5/cuda_tile-1.6.0rc5/PKG-INFO",
+  "line": 26,
+  "quote": "cuda-toolkit[nvcc,nvvm,tileiras]<13.5,>=13.2"
+ },
+ {
+  "id": "cuda_tile.engine.sglang_pin",
+  "claim": "SGLang pins cuda-tile 1.6.0rc5 (FlashInfer transitive dependency)",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 34,
+  "quote": "\"cuda-tile==1.6.0rc5\","
+ },
+ {
+  "id": "cuda_tile.engine.flashinfer_dep",
+  "claim": "FlashInfer 0.7.0.post1 (vLLM) requires cuda-tile>=1.4.0",
+  "path": "vendor/src/flashinfer-python-0.7.0.post1/flashinfer_python-0.7.0.post1.dist-info/METADATA",
+  "line": 14,
+  "quote": "Requires-Dist: cuda-tile>=1.4.0"
+ },
+ {
+  "id": "cuda_tile.engine.flashinfer_user",
+  "claim": "cuda.tile is used by FlashInfer's opt-in cutile backends",
+  "path": "vendor/src/flashinfer-python-0.6.18/flashinfer/gemm/kernels/cutile/mm_bf16_cutile.py",
+  "line": 35,
+  "quote": "import cuda.tile as ct"
+ },
+ {
+  "id": "hf_kernels.engine.pin",
+  "claim": "SGLang pins the HF kernels library <0.15 (not vendored locally)",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 47,
+  "quote": "\"kernels>=0.14.1,<0.15\","
+ },
+ {
+  "id": "hf_kernels.engine.dependency",
+  "claim": "SGLang declares the hub kernel kernels-community/sgl-flash-attn3 v1",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 266,
+  "quote": "\"kernels-community/sgl-flash-attn3\" = 1"
+ },
+ {
+  "id": "hf_kernels.engine.default_sgl_kernel",
+  "claim": "SGLANG_USE_SGL_FA3_KERNEL defaults to True (hub path not used by default)",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/environ.py",
+  "line": 1244,
+  "quote": "SGLANG_USE_SGL_FA3_KERNEL = EnvBool(True)"
+ },
+ {
+  "id": "hf_kernels.engine.sgl_kernel_first",
+  "claim": "With the default, FA3 comes from the AOT sgl-kernel build",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attention_v3.py",
+  "line": 34,
+  "quote": "if envs.SGLANG_USE_SGL_FA3_KERNEL.get():"
+ },
+ {
+  "id": "hf_kernels.default.lockfile",
+  "claim": "The hub lockfile is looked up at $SGLANG_CACHE_DIR/kernels.lock",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attention_v3.py",
+  "line": 42,
+  "quote": "envs.SGLANG_CACHE_DIR.get(), DEFAULT_FA3_KERNEL_LOCKFILE"
+ },
+ {
+  "id": "hf_kernels.read.load_kernel",
+  "claim": "With the lockfile present, load_kernel resolves the locked revision",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attention_v3.py",
+  "line": 52,
+  "quote": "ops = load_kernel(SGL_FA3_KERNEL_REPO, lockfile_path)"
+ },
+ {
+  "id": "hf_kernels.read.get_kernel_network",
+  "claim": "Without the lockfile, get_kernel fetches revision v1 from the Hub",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attention_v3.py",
+  "line": 54,
+  "quote": "ops = get_kernel(SGL_FA3_KERNEL_REPO, revision=SGL_FA3_KERNEL_REVISION)"
+ },
+ {
+  "id": "hf_kernels.read.fallback",
+  "claim": "Any hub load failure falls back to sgl-kernel's FA3",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/attention/flash_attention_v3.py",
+  "line": 65,
+  "quote": "Rollback to implementation from sgl-kernel"
+ },
+ {
+  "id": "hf_kernels.engine.docker_lock",
+  "claim": "The image build runs `kernels lock` to produce kernels.lock",
+  "path": "vendor/sglang-v0.5.20/docker/Dockerfile",
+  "line": 585,
+  "quote": "&& kernels lock python"
+ },
+ {
+  "id": "hf_kernels.engine.docker_aarch64_skip",
+  "claim": "On aarch64 the image skips the FA3 hub download (comment claims runtime JIT)",
+  "path": "vendor/sglang-v0.5.20/docker/Dockerfile",
+  "line": 587,
+  "quote": "ships no arm variants; JIT-compile at runtime."
+ },
+ {
+  "id": "hf_kernels.default.lockfile_baked",
+  "claim": "The lockfile is baked to /root/.cache/sglang/ in the image",
+  "path": "vendor/sglang-v0.5.20/docker/Dockerfile",
+  "line": 609,
+  "quote": "mv python/kernels.lock /root/.cache/sglang/"
+ },
+ {
+  "id": "numba.env.cache_dir",
+  "claim": "NUMBA_CACHE_DIR redirects the cache (default empty = unset)",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/config.py",
+  "line": 279,
+  "quote": "CACHE_DIR = _readenv(\"NUMBA_CACHE_DIR\", str, \"\")"
+ },
+ {
+  "id": "numba.default.locator_order",
+  "claim": "Locators are tried in order: user-provided, in-tree __pycache__, user-wide, ...",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 377,
+  "quote": "UserProvidedCacheLocator,"
+ },
+ {
+  "id": "numba.default.in_tree",
+  "claim": "Default location is __pycache__ next to the function's source file",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 223,
+  "quote": "os.path.join(os.path.dirname(self._py_file), '__pycache__')"
+ },
+ {
+  "id": "numba.default.user_wide",
+  "claim": "Fallback is the appdirs user cache dir for 'numba'",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 250,
+  "quote": "appdirs = AppDirs(appname=\"numba\", appauthor=False)"
+ },
+ {
+  "id": "numba.default.xdg",
+  "claim": "The user cache dir honours XDG_CACHE_HOME, else ~/.cache",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/misc/appdirs.py",
+  "line": 303,
+  "quote": "os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))"
+ },
+ {
+  "id": "numba.read.writable_probe",
+  "claim": "A locator is accepted only if a temp file can be created in its dir",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 112,
+  "quote": "tempfile.TemporaryFile(dir=path).close()"
+ },
+ {
+  "id": "numba.read.unwritable_skipped",
+  "claim": "An unwritable dir (incl. a read-only NUMBA_CACHE_DIR) silently falls through",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 187,
+  "quote": "Cannot ensure the cache directory exists or is writable"
+ },
+ {
+  "id": "numba.reloc.subpath_sha1",
+  "claim": "The cache subdir name embeds sha1 of the absolute source directory",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 155,
+  "quote": "hashed = hashlib.sha1(subpath.encode()).hexdigest()"
+ },
+ {
+  "id": "numba.key.source_stamp",
+  "claim": "Freshness stamp is the source file's (mtime, size)",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 173,
+  "quote": "return st.st_mtime, st.st_size"
+ },
+ {
+  "id": "numba.key.filename",
+  "claim": "Files are named <module>.<qualname>-<lineno>.py<maj><min><abiflags>",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 438,
+  "quote": "fmt = '%s-%s.py%d%d%s'"
+ },
+ {
+  "id": "numba.key.numba_version",
+  "claim": "The index is tagged with numba.__version__",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 543,
+  "quote": "self._version = numba.__version__"
+ },
+ {
+  "id": "numba.read.stale_stamp",
+  "claim": "A stamp mismatch makes the whole index a miss",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 599,
+  "quote": "if stamp != self._source_stamp:"
+ },
+ {
+  "id": "numba.key.index_key",
+  "claim": "Per-overload key = signature + codegen magic tuple + bytecode/closure hashes",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 781,
+  "quote": "return (sig, codegen.magic_tuple(), (hasher(codebytes),"
+ },
+ {
+  "id": "numba.key.cpu",
+  "claim": "Codegen magic tuple = target triple, host CPU name, CPU features",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/codegen.py",
+  "line": 1302,
+  "quote": "return (self._llvm_module.triple, self._get_host_cpu_name(),"
+ },
+ {
+  "id": "numba.write.tmp_uuid",
+  "claim": "Writes go to <file>.tmp.<uuid16> first",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 645,
+  "quote": "tmpname = '%s.tmp.%s' % (filepath, uid)"
+ },
+ {
+  "id": "numba.write.replace",
+  "claim": "Files are published with os.replace (no lock)",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 649,
+  "quote": "os.replace(tmpname, filepath)"
+ },
+ {
+  "id": "numba.content.nbi_nbc",
+  "claim": "Content is one .nbi index plus numbered .nbc data files per function",
+  "path": "vendor/src/numba-0.65.1/numba-0.65.1/numba/core/caching.py",
+  "line": 541,
+  "quote": "'%s.{number:d}.nbc' % (filename_base,)"
+ },
+ {
+  "id": "numba.engine.vllm_inkling",
+  "claim": "vLLM uses numba cache=True in the inkling processor",
+  "path": "vendor/vllm-v0.32.0/vllm/transformers_utils/processors/inkling.py",
+  "line": 123,
+  "quote": "@njit(cache=True)"
+ },
+ {
+  "id": "numba.engine.vllm_kimi",
+  "claim": "vLLM uses numba cache=True in the Kimi-K2.5 vision processor",
+  "path": "vendor/vllm-v0.32.0/vllm/transformers_utils/processors/kimi_k25_vision_fused.py",
+  "line": 26,
+  "quote": "@njit(parallel=True, cache=True)"
+ },
+ {
+  "id": "numba.engine.sglang_inkling",
+  "claim": "SGLang uses numba cache=True in its inkling image processor",
+  "path": "vendor/sglang-v0.5.20/python/sglang/srt/multimodal/inkling/image_processing.py",
+  "line": 106,
+  "quote": "@njit(cache=True)"
+ },
+ {
+  "id": "numba.engine.ngram_no_cache",
+  "claim": "vLLM's n-gram proposer JITs without cache=True (no disk cache)",
+  "path": "vendor/vllm-v0.32.0/vllm/v1/spec_decode/ngram_proposer.py",
+  "line": 180,
+  "quote": "@njit(parallel=True)"
+ },
+ {
+  "id": "numba.engine.vllm_pin",
+  "claim": "vLLM pins numba 0.65.0 (only 0.65.1 is vendored)",
+  "path": "vendor/vllm-v0.32.0/requirements/cuda.txt",
+  "line": 4,
+  "quote": "numba == 0.65.0"
+ },
+ {
+  "id": "numba.engine.sglang_pin",
+  "claim": "SGLang pins numba 0.65.1",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 53,
+  "quote": "\"numba==0.65.1\","
+ },
+ {
+  "id": "xgrammar.read.memory_cache",
+  "claim": "GrammarCompiler's cache is in-memory (cache_enabled)",
+  "path": "vendor/src/xgrammar-0.2.1/xgrammar-0.2.1/python/xgrammar/compiler.py",
+  "line": 112,
+  "quote": "cache_enabled: bool = True,"
+ },
+ {
+  "id": "xgrammar.read.memory_limit",
+  "claim": "The compiler cache is bounded by bytes in memory, no disk path",
+  "path": "vendor/src/xgrammar-0.2.1/xgrammar-0.2.1/python/xgrammar/compiler.py",
+  "line": 113,
+  "quote": "cache_limit_bytes: int = -1,"
+ },
+ {
+  "id": "xgrammar.engine.triton_default",
+  "claim": "On CUDA the default bitmask backend is Triton (Triton's own cache)",
+  "path": "vendor/src/xgrammar-0.2.1/xgrammar-0.2.1/python/xgrammar/matcher.py",
+  "line": 153,
+  "quote": "backend = \"triton\""
+ },
+ {
+  "id": "xgrammar.engine.cuda_not_used",
+  "claim": "The CUDA bitmask kernel is documented as not used by default",
+  "path": "vendor/src/xgrammar-0.2.1/xgrammar-0.2.1/python/xgrammar/kernels/__init__.py",
+  "line": 4,
+  "quote": "- CUDA: not used in the current implementation"
+ },
+ {
+  "id": "xgrammar.engine.cuda_load_inline",
+  "claim": "The opt-in CUDA kernel is JIT-built with torch cpp_extension.load_inline",
+  "path": "vendor/src/xgrammar-0.2.1/xgrammar-0.2.1/python/xgrammar/kernels/apply_token_bitmask_inplace_cuda.py",
+  "line": 83,
+  "quote": "torch.utils.cpp_extension.load_inline("
+ },
+ {
+  "id": "xgrammar.engine.ext_name",
+  "claim": "The cpp_extension name is xgrammar (torch extensions dir)",
+  "path": "vendor/src/xgrammar-0.2.1/xgrammar-0.2.1/python/xgrammar/kernels/apply_token_bitmask_inplace_cuda.py",
+  "line": 84,
+  "quote": "name=\"xgrammar\","
+ },
+ {
+  "id": "xgrammar.engine.sglang_own_kernel",
+  "claim": "SGLang applies bitmasks with its own Triton kernel",
+  "path": "vendor/sglang-v0.5.20/python/sglang/kernels/ops/grammar/__init__.py",
+  "line": 13,
+  "quote": "(\"bitmask_ops\", \"apply_token_bitmask_inplace_triton\"),"
+ },
+ {
+  "id": "xgrammar.engine.vllm_pin",
+  "claim": "vLLM pins xgrammar 0.2.8 (only 0.2.1 is vendored)",
+  "path": "vendor/vllm-v0.32.0/requirements/common.txt",
+  "line": 29,
+  "quote": "xgrammar == 0.2.8"
+ },
+ {
+  "id": "xgrammar.engine.sglang_pin",
+  "claim": "SGLang pins xgrammar 0.2.1",
+  "path": "vendor/sglang-v0.5.20/python/pyproject.toml",
+  "line": 99,
+  "quote": "\"xgrammar==0.2.1\","
+ }
+]

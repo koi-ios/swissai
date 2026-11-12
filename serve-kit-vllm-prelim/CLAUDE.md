@@ -1,0 +1,69 @@
+# servekit for vLLM: preliminary result
+
+Handoff from a Claude chat, 11 Nov 2026. Read this first, then start at the first unchecked task.
+
+## Goal
+
+Build a preliminary result by Thu 12 Nov. On Fri 13 Nov the user emails Prof. Ana Klimovic (EASL, ETH Zurich), with her PhD student Xiaozhe Yao in copy, a one-page proposal asking for paid research-assistant hours (10-15 h/week from December) to:
+
+1. add vLLM support to servekit (fast cold starts), and
+2. persist compiled-kernel caches for swiss-ai/model-launch issue #270.
+
+Full plans (claude.ai docs, same account):
+
+- Proposal plan: https://claude.ai/artifact/QT7tKDznHSpH8WUEt5g5gZ
+- Overall plan: https://claude.ai/artifact/KGtpHsjG91XCrp4nFdUGvu
+
+## Context
+
+- servekit (https://github.com/eth-easl/servekit) wraps SGLang only. Its roadmap item "Support vllm fast weight loading" is open. `servekit profile` on `main` already wraps `vllm serve` live; open PR #26 adds `servekit profile --log` for saved vLLM logs. No PR adds vLLM fast loading.
+- servekit article: https://serving.swissai.svc.cscs.ch/articles/05-servekit
+  - Llama-3.1-70B on SGLang (Bristen): weight loading was 72% of a 629.8 s cold start; mmap is the culprit.
+  - Weight loading: 453.7 s default, 45.7 s without mmap, 9.7 s with RAM staging + presharding + overlap.
+  - GLM-4.7: 827.9 s to 16.2 s. After this, CUDA-graph capture is the next bottleneck.
+- vLLM now ships its own options; compare against them. Check `vllm serve --help` in the installed version, since newer options may be missing:
+  - `--safetensors-load-strategy eager|prefetch`, `--safetensors-prefetch-num-threads`
+  - `--load-format sharded_state | instanttensor | runai_streamer | runai_streamer_sharded | fastsafetensors`
+  - `vllm preload` + `--load-format ipc_cache` (keeps weights on GPU across restarts; its daemon still loads from disk first)
+  - `vllm bench startup` (cold and warm startup timings, `--output-json`)
+- Presharding: vLLM's save-sharded-state example (`examples/offline_inference/save_sharded_state.py` in older releases, `examples/features/sharded_state/` in newer ones). The source model must be a local directory.
+- #270 (https://github.com/swiss-ai/model-launch/issues/270): TileLang, vLLM, FlashInfer and Triton compile caches are discarded after every job. DeepSeek-V4.1-Flash spends about 40 min on TileLang JIT; GLM-5.3 8-10 min on DeepGEMM warmup.
+
+## Machine
+
+- 2x H100 80 GB (or 2x A100 80 GB). A full VM, not a container: Docker's default `/dev/shm` is 64 MB.
+- At least 200 GB disk. Checkpoint on a network volume; a copy on local NVMe as a control.
+- Record versions in `ENV.md`: vLLM, torch, CUDA, driver, GPU, servekit commit, storage type.
+
+## Status
+
+- 11 Nov: every Day 1-2 script is written and passes `tests/selftest.sh` (55 checks against a mock engine) on a laptop. Nothing has run on a GPU yet. The run order is in README.md.
+- 11 Nov (evening): `run_once.py` also launches SGLang (`--engine sglang`) and has hooks for the other ideas' experiments (`--hold`, `--env`, `--engine-prefix`, `--fresh-home`); see HARNESS.md. Each idea now has its own folder next to this one (index: ../IDEAS.md).
+- Before trusting a script on the VM, read NOTES.md "Found while building the harness". It covers vLLM 0.33's auto-prefetch on NFS/Lustre, the extra `TVM_FFI_CACHE_DIR` cache, and what `vllm bench startup` counts as cold.
+
+## Tasks
+
+### Day 1 (Wed 11 Nov)
+
+- [ ] Install vLLM and servekit (`pip install git+https://github.com/eth-easl/servekit.git`); download `swiss-ai/Apertus-8B-Instruct-2509` to `/net/models/apertus-8b`.
+- [ ] `evict.py`: `posix_fadvise(POSIX_FADV_DONTNEED)` over every file in a directory. Verify that a read after eviction is much slower.
+- [ ] Baseline with `servekit profile -- vllm serve <model> --tensor-parallel-size {1,2}`:
+  - three run types x 3 repeats: cold (evicted weights, empty caches), warm weights with cold caches, both warm;
+  - for each cold run, fresh `mktemp -d` dirs for `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR`, `TORCHINDUCTOR_CACHE_DIR`, `FLASHINFER_WORKSPACE_BASE`, `TILELANG_CACHE_DIR`;
+  - cross-check totals with `vllm bench startup`;
+  - write `results/baseline.csv` (date, model, tp, run, repeat, phase, seconds).
+
+### Day 2 (Thu 12 Nov)
+
+- [ ] Preshard to `/net/models/apertus-8b-tp2` at TP 2.
+- [ ] `stage.py`: copy one rank's shard files into `/dev/shm/<model>` with N parallel processes, each reading a disjoint byte range in 16-64 MiB blocks (`os.pread`/`os.pwrite`); write to a temp name, rename when complete. Sweep N = 1, 2, 4, 8, 16, 32; write `results/staging.csv` (GB/s).
+- [ ] Arms at TP 2, three cold repeats each: default loader (network volume); default loader (local NVMe, control); `sharded_state` (network volume); staging + `sharded_state` from `/dev/shm` (staging time counted); plus every vLLM-native option above that this version has.
+- [ ] Correctness: `servekit verify --url http://127.0.0.1:8000 --record gold.json --wait-ready 300` against the default-loader server, then `--reference gold.json` against each fast arm. Every arm called faster must exit 0.
+- [ ] README with one headline table (arm, weight loading s, total cold start s, speedup, verify result). `NOTES.md`: surprises, failures, three questions for Xiaozhe.
+
+## Rules
+
+- Every number has units, its setup and a median of at least 3 runs with min and max. "Cold" means evicted page cache and empty compile caches.
+- A rented GPU has no Lustre: never claim Alps or capstor speedups; state the limit.
+- Credit servekit and its article: this ports their approach to vLLM.
+- GPU budget about USD 60. Stop idle instances.

@@ -1,0 +1,9 @@
+e671a20 feat: report JIT output the engine leaves outside the kept caches
+f1e63eb feat: key JIT caches by environment, prune old ones, warm a new image's
+9b90ab4 fix: keep sglang 0.5.20's JIT caches (SGLANG_JIT_CACHE_DIR and the rest)
+cd8f0b8 feat: servekit launch applies the vendored sglang backports itself (#25)
+Auto-merging README.md
+Auto-merging src/servekit/cli.py
+Auto-merging src/servekit/profile.py
+merged PR #26 cleanly
+196 passed, 1 skipped, 10 deselected in 14.34s

@@ -1,0 +1,96 @@
+     0.074 [mock TP0] Load weight begin. model=mock/model tp=1
+     0.117 [mock TP0] Lazy CUDA graph capture [prefill]: 0 of 58 buckets at startup [], 58 deferred.
+     0.117 [mock TP0] Capture target prefill CUDA graph begin. sizes=[]
+     0.117 [mock TP0] Capture target prefill CUDA graph end. elapsed=0.00 s, mem usage=0.00 GB, avail mem=10.00 GB.
+     0.117 [mock TP0] Lazy CUDA graph capture [decode]: 7 of 36 buckets at startup [1, 2, 4, 8, 32, 40, 48], 29 deferred.
+     0.117 [mock TP0] Capture target decode CUDA graph begin. sizes=[1, 2, 4, 8, 32, 40, 48]
+     0.138 [mock TP0] Capture target decode CUDA graph end. elapsed=0.91 s, mem usage=0.01 GB, avail mem=10.00 GB.
+     0.144 [mock TP0] The server is fired up and ready to roll!
+     0.181 [mock TP0] Lazy CUDA graph capture: decode bucket 12 captured in 0.130 s (step 0, 86 buckets pending).
+     0.194 [mock TP0] Lazy CUDA graph capture: decode bucket 24 captured in 0.130 s (step 1, 85 buckets pending).
+     0.416 [mock TP0] Lazy CUDA graph capture: decode bucket 16 captured in 0.130 s (step 2, 84 buckets pending).
+     0.457 [mock TP0] Lazy CUDA graph capture: prefill bucket 288 captured in 0.203 s (step 3, 83 buckets pending).
+     0.499 [mock TP0] Lazy CUDA graph capture: prefill bucket 320 captured in 0.206 s (step 4, 82 buckets pending).
+     0.549 [mock TP0] Lazy CUDA graph capture: prefill bucket 176 captured in 0.194 s (step 5, 81 buckets pending).
+     0.564 [mock TP0] Lazy CUDA graph capture: prefill bucket 352 captured in 0.208 s (step 6, 80 buckets pending).
+     0.582 [mock TP0] Lazy CUDA graph capture: prefill bucket 576 captured in 0.226 s (step 7, 79 buckets pending).
+     0.598 [mock TP0] Lazy CUDA graph capture: prefill bucket 256 captured in 0.200 s (step 8, 78 buckets pending).
+     0.614 [mock TP0] Lazy CUDA graph capture: prefill bucket 160 captured in 0.193 s (step 9, 77 buckets pending).
+     0.650 [mock TP0] Lazy CUDA graph capture: prefill bucket 192 captured in 0.195 s (step 10, 76 buckets pending).
+     0.666 [mock TP0] Lazy CUDA graph capture: prefill bucket 512 captured in 0.221 s (step 11, 75 buckets pending).
+     0.683 [mock TP0] Lazy CUDA graph capture: prefill bucket 384 captured in 0.211 s (step 12, 74 buckets pending).
+     0.699 [mock TP0] Lazy CUDA graph capture: prefill bucket 208 captured in 0.197 s (step 13, 73 buckets pending).
+     0.748 [mock TP0] Lazy CUDA graph capture: prefill bucket 224 captured in 0.198 s (step 14, 72 buckets pending).
+     0.816 [mock TP0] Lazy CUDA graph capture: prefill bucket 480 captured in 0.218 s (step 15, 71 buckets pending).
+     0.862 [mock TP0] Lazy CUDA graph capture: prefill bucket 240 captured in 0.199 s (step 16, 70 buckets pending).
+     0.917 [mock TP0] Lazy CUDA graph capture: prefill bucket 640 captured in 0.231 s (step 17, 69 buckets pending).
+     0.974 [mock TP0] Lazy CUDA graph capture: prefill bucket 416 captured in 0.213 s (step 18, 68 buckets pending).
+     1.038 [mock TP0] Lazy CUDA graph capture: prefill bucket 80 captured in 0.186 s (step 19, 67 buckets pending).
+     1.056 [mock TP0] Lazy CUDA graph capture: prefill bucket 64 captured in 0.185 s (step 20, 66 buckets pending).
+     1.073 [mock TP0] Lazy CUDA graph capture: prefill bucket 96 captured in 0.188 s (step 21, 65 buckets pending).
+     1.093 [mock TP0] Lazy CUDA graph capture: prefill bucket 1280 captured in 0.282 s (step 22, 64 buckets pending).
+     1.111 [mock TP0] Lazy CUDA graph capture: prefill bucket 1536 captured in 0.303 s (step 23, 63 buckets pending).
+     1.127 [mock TP0] Lazy CUDA graph capture: prefill bucket 448 captured in 0.216 s (step 24, 62 buckets pending).
+     1.144 [mock TP0] Lazy CUDA graph capture: prefill bucket 48 captured in 0.184 s (step 25, 61 buckets pending).
+     1.161 [mock TP0] Lazy CUDA graph capture: prefill bucket 32 captured in 0.183 s (step 26, 60 buckets pending).
+     1.178 [mock TP0] Lazy CUDA graph capture: prefill bucket 128 captured in 0.190 s (step 27, 59 buckets pending).
+     1.230 [mock TP0] Lazy CUDA graph capture: prefill bucket 112 captured in 0.189 s (step 28, 58 buckets pending).
+     1.248 [mock TP0] Lazy CUDA graph capture: prefill bucket 1792 captured in 0.323 s (step 29, 57 buckets pending).
+     1.267 [mock TP0] Lazy CUDA graph capture: prefill bucket 1024 captured in 0.262 s (step 30, 56 buckets pending).
+     1.284 [mock TP0] Lazy CUDA graph capture: prefill bucket 960 captured in 0.257 s (step 31, 55 buckets pending).
+     1.301 [mock TP0] Lazy CUDA graph capture: prefill bucket 704 captured in 0.236 s (step 32, 54 buckets pending).
+     1.345 [mock TP0] Lazy CUDA graph capture: prefill bucket 768 captured in 0.241 s (step 33, 53 buckets pending).
+     1.364 [mock TP0] Lazy CUDA graph capture: prefill bucket 2048 captured in 0.344 s (step 34, 52 buckets pending).
+     1.381 [mock TP0] Lazy CUDA graph capture: prefill bucket 144 captured in 0.192 s (step 35, 51 buckets pending).
+     1.397 [mock TP0] Lazy CUDA graph capture: prefill bucket 832 captured in 0.247 s (step 36, 50 buckets pending).
+     1.413 [mock TP0] Lazy CUDA graph capture: prefill bucket 896 captured in 0.252 s (step 37, 49 buckets pending).
+     1.435 [mock TP0] Lazy CUDA graph capture: prefill bucket 2304 captured in 0.364 s (step 38, 48 buckets pending).
+     1.454 [mock TP0] Lazy CUDA graph capture: prefill bucket 2816 captured in 0.405 s (step 39, 47 buckets pending).
+     1.472 [mock TP0] Lazy CUDA graph capture: prefill bucket 2560 captured in 0.385 s (step 40, 46 buckets pending).
+     1.527 [mock TP0] Lazy CUDA graph capture: prefill bucket 4608 captured in 0.549 s (step 41, 45 buckets pending).
+     1.547 [mock TP0] Lazy CUDA graph capture: prefill bucket 3072 captured in 0.426 s (step 42, 44 buckets pending).
+     1.568 [mock TP0] Lazy CUDA graph capture: prefill bucket 3328 captured in 0.446 s (step 43, 43 buckets pending).
+     1.612 [mock TP0] Lazy CUDA graph capture: prefill bucket 3840 captured in 0.487 s (step 44, 42 buckets pending).
+     1.636 [mock TP0] Lazy CUDA graph capture: prefill bucket 4096 captured in 0.508 s (step 45, 41 buckets pending).
+     1.674 [mock TP0] Lazy CUDA graph capture: prefill bucket 5120 captured in 0.590 s (step 46, 40 buckets pending).
+     1.705 [mock TP0] Lazy CUDA graph capture: prefill bucket 6656 captured in 0.712 s (step 47, 39 buckets pending).
+     1.730 [mock TP0] Lazy CUDA graph capture: prefill bucket 5632 captured in 0.631 s (step 48, 38 buckets pending).
+     1.759 [mock TP0] Lazy CUDA graph capture: prefill bucket 7680 captured in 0.794 s (step 49, 37 buckets pending).
+     1.782 [mock TP0] Lazy CUDA graph capture: prefill bucket 6144 captured in 0.672 s (step 50, 36 buckets pending).
+     1.808 [mock TP0] Lazy CUDA graph capture: prefill bucket 7168 captured in 0.753 s (step 51, 35 buckets pending).
+     1.836 [mock TP0] Lazy CUDA graph capture: decode bucket 56 captured in 0.130 s (step 52, 34 buckets pending).
+     1.850 [mock TP0] Lazy CUDA graph capture: decode bucket 64 captured in 0.130 s (step 53, 33 buckets pending).
+     1.862 [mock TP0] Lazy CUDA graph capture: decode bucket 72 captured in 0.130 s (step 54, 32 buckets pending).
+     1.878 [mock TP0] Lazy CUDA graph capture: decode bucket 80 captured in 0.130 s (step 55, 31 buckets pending).
+     1.914 [mock TP0] Lazy CUDA graph capture: decode bucket 88 captured in 0.130 s (step 56, 30 buckets pending).
+     1.928 [mock TP0] Lazy CUDA graph capture: decode bucket 96 captured in 0.130 s (step 57, 29 buckets pending).
+     1.941 [mock TP0] Lazy CUDA graph capture: decode bucket 104 captured in 0.130 s (step 58, 28 buckets pending).
+     1.954 [mock TP0] Lazy CUDA graph capture: decode bucket 112 captured in 0.130 s (step 59, 27 buckets pending).
+     1.970 [mock TP0] Lazy CUDA graph capture: decode bucket 120 captured in 0.130 s (step 60, 26 buckets pending).
+     1.986 [mock TP0] Lazy CUDA graph capture: decode bucket 128 captured in 0.130 s (step 61, 25 buckets pending).
+     2.001 [mock TP0] Lazy CUDA graph capture: decode bucket 136 captured in 0.130 s (step 62, 24 buckets pending).
+     2.015 [mock TP0] Lazy CUDA graph capture: decode bucket 144 captured in 0.130 s (step 63, 23 buckets pending).
+     2.031 [mock TP0] Lazy CUDA graph capture: decode bucket 152 captured in 0.130 s (step 64, 22 buckets pending).
+     2.044 [mock TP0] Lazy CUDA graph capture: decode bucket 160 captured in 0.130 s (step 65, 21 buckets pending).
+     2.060 [mock TP0] Lazy CUDA graph capture: decode bucket 168 captured in 0.130 s (step 66, 20 buckets pending).
+     2.074 [mock TP0] Lazy CUDA graph capture: decode bucket 176 captured in 0.130 s (step 67, 19 buckets pending).
+     2.087 [mock TP0] Lazy CUDA graph capture: decode bucket 184 captured in 0.130 s (step 68, 18 buckets pending).
+     2.102 [mock TP0] Lazy CUDA graph capture: decode bucket 192 captured in 0.130 s (step 69, 17 buckets pending).
+     2.117 [mock TP0] Lazy CUDA graph capture: decode bucket 200 captured in 0.130 s (step 70, 16 buckets pending).
+     2.130 [mock TP0] Lazy CUDA graph capture: decode bucket 208 captured in 0.130 s (step 71, 15 buckets pending).
+     2.144 [mock TP0] Lazy CUDA graph capture: decode bucket 216 captured in 0.130 s (step 72, 14 buckets pending).
+     2.157 [mock TP0] Lazy CUDA graph capture: decode bucket 224 captured in 0.130 s (step 73, 13 buckets pending).
+     2.170 [mock TP0] Lazy CUDA graph capture: decode bucket 232 captured in 0.130 s (step 74, 12 buckets pending).
+     2.186 [mock TP0] Lazy CUDA graph capture: decode bucket 240 captured in 0.130 s (step 75, 11 buckets pending).
+     2.202 [mock TP0] Lazy CUDA graph capture: decode bucket 248 captured in 0.130 s (step 76, 10 buckets pending).
+     2.215 [mock TP0] Lazy CUDA graph capture: decode bucket 256 captured in 0.130 s (step 77, 9 buckets pending).
+     2.232 [mock TP0] Lazy CUDA graph capture: prefill bucket 4 captured in 0.180 s (step 78, 8 buckets pending).
+     2.246 [mock TP0] Lazy CUDA graph capture: prefill bucket 8 captured in 0.181 s (step 79, 7 buckets pending).
+     2.263 [mock TP0] Lazy CUDA graph capture: prefill bucket 12 captured in 0.181 s (step 80, 6 buckets pending).
+     2.280 [mock TP0] Lazy CUDA graph capture: prefill bucket 16 captured in 0.181 s (step 81, 5 buckets pending).
+     2.297 [mock TP0] Lazy CUDA graph capture: prefill bucket 20 captured in 0.182 s (step 82, 4 buckets pending).
+     2.314 [mock TP0] Lazy CUDA graph capture: prefill bucket 24 captured in 0.182 s (step 83, 3 buckets pending).
+     2.328 [mock TP0] Lazy CUDA graph capture: prefill bucket 28 captured in 0.182 s (step 84, 2 buckets pending).
+     2.431 [mock TP0] Lazy CUDA graph capture: prefill bucket 3584 captured in 0.467 s (step 85, 1 buckets pending).
+     2.458 [mock TP0] Lazy CUDA graph capture: prefill bucket 8192 captured in 0.835 s (step 86, 0 buckets pending).
+     2.458 [mock TP0] Lazy CUDA graph capture: all planned buckets captured.

@@ -1,0 +1,1728 @@
+{
+  "argv": [
+    "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/bin/python",
+    "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py"
+  ],
+  "exit_code": 0,
+  "gate": "PASS",
+  "reasons": [],
+  "proposal": {
+    "TORCHINDUCTOR_CACHE_DIR": "{jit_cache}/inductor"
+  },
+  "proposal_entries": {
+    "TORCHINDUCTOR_CACHE_DIR": [
+      "inductor",
+      "inductor.fxgraph",
+      "inductor.aotautograd"
+    ]
+  },
+  "verification": {
+    "inductor": "verified",
+    "inductor.aotautograd": "verified",
+    "inductor.fxgraph": "verified"
+  },
+  "builds": {
+    "inductor": {
+      "binaries_cold": 10,
+      "binaries_warm": 0,
+      "files_cold": 32,
+      "files_warm": 0
+    },
+    "inductor.aotautograd": {
+      "binaries_cold": 0,
+      "binaries_warm": 0,
+      "files_cold": 2,
+      "files_warm": 0
+    },
+    "inductor.fxgraph": {
+      "binaries_cold": 0,
+      "binaries_warm": 0,
+      "files_cold": 2,
+      "files_warm": 0
+    }
+  },
+  "relocation": {},
+  "readonly": {
+    "returncode": 1,
+    "write_attempts_into_ro_cache": {
+      "inductor": 26
+    },
+    "failed_writes": 0
+  },
+  "outside": [],
+  "runs": {
+    "cold": {
+      "returncode": 0,
+      "wall_s": 22.617,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {},
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/home/Library/Caches/Homebrew",
+          "entry": "macos.homebrew",
+          "anchor": "HOME",
+          "variable": "HOMEBREW_CACHE",
+          "files": 637,
+          "bytes": 37383653,
+          "by_class": {
+            "metadata": 4,
+            "other": 633
+          },
+          "bytes_by_class": {
+            "metadata": 16479331,
+            "other": 20904322
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/precompiled_headers",
+          "entry": "inductor.pch",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 3,
+          "bytes": 31087424,
+          "by_class": {
+            "source": 1,
+            "other": 1,
+            "lock": 1
+          },
+          "bytes_by_class": {
+            "source": 44,
+            "other": 31087380,
+            "lock": 0
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "mixed (1 renames/links, 2 direct opens)",
+          "ops": {
+            "open_w": 2,
+            "rename_to": 1,
+            "mkdir": 3,
+            "delete": 1
+          },
+          "writers": {
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33": 7
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios",
+          "entry": "inductor",
+          "anchor": "TMPDIR",
+          "variable": "TORCHINDUCTOR_CACHE_DIR",
+          "files": 32,
+          "bytes": 471936,
+          "by_class": {
+            "source": 7,
+            "binary": 10,
+            "other": 10,
+            "lock": 5
+          },
+          "bytes_by_class": {
+            "source": 43906,
+            "binary": 422980,
+            "other": 5050,
+            "lock": 0
+          },
+          "path_baked": 15,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so.dSYM/Contents/Resources/DWARF/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so.dSYM/Contents/Resources/Relocations/aarch64/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so.yml",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.so.dSYM/Contents/Resources/DWARF/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.so"
+          ],
+          "write_pattern": "mixed (7 renames/links, 28 direct opens)",
+          "ops": {
+            "mkdir": 29,
+            "open_w": 28,
+            "rename_to": 7,
+            "delete": 5
+          },
+          "writers": {
+            "<string>:13": 8,
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28": 8,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33": 6,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:133": 6,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/fp/cfpssvuu7hf7lx67dmgogqg4p4x7krufsr26kdply6vkzt46shrl.py:171": 6,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:68": 5,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/fp/cfpssvuu7hf7lx67dmgogqg4p4x7krufsr26kdply6vkzt46shrl.py:33": 5,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/fp/cfpssvuu7hf7lx67dmgogqg4p4x7krufsr26kdply6vkzt46shrl.py:68": 5
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/fxgraph",
+          "entry": "inductor.fxgraph",
+          "anchor": "TMPDIR",
+          "variable": "TORCHINDUCTOR_CACHE_DIR",
+          "files": 2,
+          "bytes": 180583,
+          "by_class": {
+            "other": 2
+          },
+          "bytes_by_class": {
+            "other": 180583
+          },
+          "path_baked": 2,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/fxgraph/4n/f4nitpwhn3r7i657q3zwwtbpgpgludtrqqxjqica5bmdhzo3yd56/bqleioalsxp3js6vfy6466bx6ca2xqtw7ogevnr7kkybzj6ejcg",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/fxgraph/cq/fcqfmgucnsfy23my5jbjcf4rlk74kimqdgsuhv3mqndrimr2t345/3kgtejeuhgffsq6j7qjnq4geoqdkcdk3mb52y2q4vjqmilqkzrq"
+          ],
+          "write_pattern": "atomic publish (2 renames/links, 2 direct opens)",
+          "ops": {
+            "mkdir": 6,
+            "open_w": 2,
+            "rename_to": 2
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28": 10
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/aotautograd",
+          "entry": "inductor.aotautograd",
+          "anchor": "TMPDIR",
+          "variable": "TORCHINDUCTOR_CACHE_DIR",
+          "files": 2,
+          "bytes": 155582,
+          "by_class": {
+            "other": 2
+          },
+          "bytes_by_class": {
+            "other": 155582
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "atomic publish (2 renames/links, 2 direct opens)",
+          "ops": {
+            "mkdir": 2,
+            "open_w": 2,
+            "rename_to": 2
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28": 6
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "uname",
+            "-p"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463606.374296,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463606.409201,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463606.457542,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463606.499121,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "conda",
+            "list",
+            "llvm-openmp",
+            "--json"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463606.6977768,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "brew",
+            "--prefix",
+            "libomp"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463608.719993,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor_CxxBuild",
+          "pid": 47853,
+          "t": 1794463611.192029,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/bin/python",
+            "-c",
+            "\nimport sys\nif sys.platform != \"linux\":\n    import torch  # noqa: F401\nfrom ctypes import cdll\ncdll.LoadLibrary(\"/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so\")\n"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463612.3625228,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/tmpltoumowo/header.hpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/tmpltoumowo/header_CxxBuild",
+          "pid": 47853,
+          "t": 1794463614.796863,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "openssl",
+            "sha512",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/tmpltoumowo/header.i"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/work",
+          "pid": 47853,
+          "t": 1794463615.025822,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-x",
+            "c++-header",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h_CxxBuild",
+          "pid": 47853,
+          "t": 1794463615.061376,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/kz/ckz5s4qpiiwucppi4xkad5l7aohpl7aeoakp6zfl6l4bvfkelt6s.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/kz/ckz5s4qpiiwucppi4xkad5l7aohpl7aeoakp6zfl6l4bvfkelt6s.main_CxxBuild",
+          "pid": 47853,
+          "t": 1794463616.1666188,
+          "by": []
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/gu/cguevshx6s3trz6tga4efgrfrsohfhmoa2pbnxqfkwtixu4ffoxu.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/gu/cguevshx6s3trz6tga4efgrfrsohfhmoa2pbnxqfkwtixu4ffoxu.main_CxxBuild",
+          "pid": 47853,
+          "t": 1794463616.178261,
+          "by": []
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main_CxxBuild",
+          "pid": 47853,
+          "t": 1794463617.115077,
+          "by": []
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/ty/ctyqbh6oofkzpntbrxagbau7efsxgqfzxtrjfcv7nqptvtrayyws.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/cold-702029/tmp/torchinductor_koiios/ty/ctyqbh6oofkzpntbrxagbau7efsxgqfzxtrjfcv7nqptvtrayyws.main_CxxBuild",
+          "pid": 47853,
+          "t": 1794463617.129032,
+          "by": []
+        }
+      ],
+      "log_tail": "==> Downloading Homebrew API data\n\u2714\ufe0e JSON API packages.arm64_sequoia.jws.json\ncompile_s=13.03 inductor={'fxgraph_cache_miss': 2} aot_autograd={'autograd_cache_miss': 2, 'autograd_cache_saved': 2}"
+    },
+    "redirect": {
+      "returncode": 0,
+      "wall_s": 19.082,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TORCHINDUCTOR_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor"
+      },
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/home/Library/Caches/Homebrew",
+          "entry": "macos.homebrew",
+          "anchor": "HOME",
+          "variable": "HOMEBREW_CACHE",
+          "files": 637,
+          "bytes": 37383653,
+          "by_class": {
+            "metadata": 4,
+            "other": 633
+          },
+          "bytes_by_class": {
+            "metadata": 16479331,
+            "other": 20904322
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp/torchinductor_koiios/precompiled_headers",
+          "entry": "inductor.pch",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 3,
+          "bytes": 31087436,
+          "by_class": {
+            "source": 1,
+            "other": 1,
+            "lock": 1
+          },
+          "bytes_by_class": {
+            "source": 44,
+            "other": 31087392,
+            "lock": 0
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "mixed (1 renames/links, 2 direct opens)",
+          "ops": {
+            "open_w": 2,
+            "rename_to": 1,
+            "mkdir": 3,
+            "delete": 1
+          },
+          "writers": {
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33": 7
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor",
+          "entry": "inductor",
+          "anchor": "other",
+          "variable": "TORCHINDUCTOR_CACHE_DIR",
+          "files": 32,
+          "bytes": 471734,
+          "by_class": {
+            "source": 7,
+            "binary": 10,
+            "other": 10,
+            "lock": 5
+          },
+          "bytes_by_class": {
+            "source": 43906,
+            "binary": 422808,
+            "other": 5020,
+            "lock": 0
+          },
+          "path_baked": 15,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so.dSYM/Contents/Resources/DWARF/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so.dSYM/Contents/Resources/Relocations/aarch64/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so.yml",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.so.dSYM/Contents/Resources/DWARF/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.so"
+          ],
+          "write_pattern": "mixed (7 renames/links, 28 direct opens)",
+          "ops": {
+            "mkdir": 28,
+            "open_w": 28,
+            "rename_to": 7,
+            "delete": 5
+          },
+          "writers": {
+            "<string>:13": 8,
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28": 8,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:133": 6,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/fp/cfpssvuu7hf7lx67dmgogqg4p4x7krufsr26kdply6vkzt46shrl.py:171": 6,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33": 5,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:68": 5,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/fp/cfpssvuu7hf7lx67dmgogqg4p4x7krufsr26kdply6vkzt46shrl.py:33": 5,
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/fp/cfpssvuu7hf7lx67dmgogqg4p4x7krufsr26kdply6vkzt46shrl.py:68": 5
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/fxgraph",
+          "entry": "inductor.fxgraph",
+          "anchor": "other",
+          "variable": "TORCHINDUCTOR_CACHE_DIR",
+          "files": 2,
+          "bytes": 180571,
+          "by_class": {
+            "other": 2
+          },
+          "bytes_by_class": {
+            "other": 180571
+          },
+          "path_baked": 2,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/fxgraph/4n/f4nitpwhn3r7i657q3zwwtbpgpgludtrqqxjqica5bmdhzo3yd56/xgrt54xwlzf53vngkwmo4tw5cphkuvvuusppalqksrvfqne4dh3",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/fxgraph/cq/fcqfmgucnsfy23my5jbjcf4rlk74kimqdgsuhv3mqndrimr2t345/h6zwmaoyso2oqmraakcbf3pjtpmcrmjwssosgybbexclwrwmrj3"
+          ],
+          "write_pattern": "atomic publish (2 renames/links, 2 direct opens)",
+          "ops": {
+            "mkdir": 6,
+            "open_w": 2,
+            "rename_to": 2
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28": 10
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/aotautograd",
+          "entry": "inductor.aotautograd",
+          "anchor": "other",
+          "variable": "TORCHINDUCTOR_CACHE_DIR",
+          "files": 2,
+          "bytes": 155582,
+          "by_class": {
+            "other": 2
+          },
+          "bytes_by_class": {
+            "other": 155582
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "atomic publish (2 renames/links, 2 direct opens)",
+          "ops": {
+            "mkdir": 2,
+            "open_w": 2,
+            "rename_to": 2
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28": 6
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "uname",
+            "-p"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463625.982123,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463626.011934,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463626.060896,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463626.093982,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "conda",
+            "list",
+            "llvm-openmp",
+            "--json"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463626.26151,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "brew",
+            "--prefix",
+            "libomp"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463627.958883,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor_CxxBuild",
+          "pid": 47994,
+          "t": 1794463630.404463,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/bin/python",
+            "-c",
+            "\nimport sys\nif sys.platform != \"linux\":\n    import torch  # noqa: F401\nfrom ctypes import cdll\ncdll.LoadLibrary(\"/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/bs/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.so\")\n"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463631.5656471,
+          "by": [
+            "<string>:13",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp/tmp9bzh6y_k/header.hpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp/tmp9bzh6y_k/header_CxxBuild",
+          "pid": 47994,
+          "t": 1794463634.115325,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "openssl",
+            "sha512",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp/tmp9bzh6y_k/header.i"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 47994,
+          "t": 1794463634.3405492,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-x",
+            "c++-header",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h_CxxBuild",
+          "pid": 47994,
+          "t": 1794463634.371808,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/kz/ckz5s4qpiiwucppi4xkad5l7aohpl7aeoakp6zfl6l4bvfkelt6s.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/kz/ckz5s4qpiiwucppi4xkad5l7aohpl7aeoakp6zfl6l4bvfkelt6s.main_CxxBuild",
+          "pid": 47994,
+          "t": 1794463635.545643,
+          "by": []
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/gu/cguevshx6s3trz6tga4efgrfrsohfhmoa2pbnxqfkwtixu4ffoxu.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/gu/cguevshx6s3trz6tga4efgrfrsohfhmoa2pbnxqfkwtixu4ffoxu.main_CxxBuild",
+          "pid": 47994,
+          "t": 1794463635.55943,
+          "by": []
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/er/cergz3qov5ao6ad3t657uh67ydqjpf4b22pfdqka7f7beq2cc5zo.main_CxxBuild",
+          "pid": 47994,
+          "t": 1794463636.466988,
+          "by": []
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/ty/ctyqbh6oofkzpntbrxagbau7efsxgqfzxtrjfcv7nqptvtrayyws.main.cpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/ty/ctyqbh6oofkzpntbrxagbau7efsxgqfzxtrjfcv7nqptvtrayyws.main_CxxBuild",
+          "pid": 47994,
+          "t": 1794463636.483679,
+          "by": []
+        }
+      ],
+      "log_tail": "==> Downloading Homebrew API data\n\u2714\ufe0e JSON API packages.arm64_sequoia.jws.json\ncompile_s=12.32 inductor={'fxgraph_cache_miss': 2} aot_autograd={'autograd_cache_miss': 2, 'autograd_cache_saved': 2}"
+    },
+    "warm": {
+      "returncode": 0,
+      "wall_s": 13.28,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TORCHINDUCTOR_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor"
+      },
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/home-warm/Library/Caches/Homebrew",
+          "entry": "macos.homebrew",
+          "anchor": "HOME",
+          "variable": "HOMEBREW_CACHE",
+          "files": 637,
+          "bytes": 37383653,
+          "by_class": {
+            "metadata": 4,
+            "other": 633
+          },
+          "bytes_by_class": {
+            "metadata": 16479331,
+            "other": 20904322
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-warm/torchinductor_koiios/precompiled_headers",
+          "entry": "inductor.pch",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 3,
+          "bytes": 31087460,
+          "by_class": {
+            "source": 1,
+            "other": 1,
+            "lock": 1
+          },
+          "bytes_by_class": {
+            "source": 44,
+            "other": 31087416,
+            "lock": 0
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "mixed (1 renames/links, 2 direct opens)",
+          "ops": {
+            "open_w": 2,
+            "rename_to": 1,
+            "mkdir": 3,
+            "delete": 1
+          },
+          "writers": {
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33": 7
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "uname",
+            "-p"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48124,
+          "t": 1794463644.896717,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48124,
+          "t": 1794463644.923289,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48124,
+          "t": 1794463644.960518,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "conda",
+            "list",
+            "llvm-openmp",
+            "--json"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48124,
+          "t": 1794463645.136033,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "brew",
+            "--prefix",
+            "libomp"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48124,
+          "t": 1794463646.668381,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-warm/tmpvox5877_/header.hpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-warm/tmpvox5877_/header_CxxBuild",
+          "pid": 48124,
+          "t": 1794463648.8157089,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "openssl",
+            "sha512",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-warm/tmpvox5877_/header.i"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48124,
+          "t": 1794463649.1057851,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48124,
+          "t": 1794463649.12972,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-x",
+            "c++-header",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-warm/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-warm/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h_CxxBuild",
+          "pid": 48124,
+          "t": 1794463649.1618078,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        }
+      ],
+      "log_tail": "==> Downloading Homebrew API data\n\u2714\ufe0e JSON API packages.arm64_sequoia.jws.json\ncompile_s=5.88 inductor={'fxgraph_cache_hit': 2} aot_autograd={'autograd_cache_hit': 2}"
+    },
+    "relocate": {
+      "returncode": 0,
+      "wall_s": 14.677,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TORCHINDUCTOR_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor"
+      },
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/home-relocate/Library/Caches/Homebrew",
+          "entry": "macos.homebrew",
+          "anchor": "HOME",
+          "variable": "HOMEBREW_CACHE",
+          "files": 637,
+          "bytes": 37383653,
+          "by_class": {
+            "metadata": 4,
+            "other": 633
+          },
+          "bytes_by_class": {
+            "metadata": 16479331,
+            "other": 20904322
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-relocate/torchinductor_koiios/precompiled_headers",
+          "entry": "inductor.pch",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 3,
+          "bytes": 31087472,
+          "by_class": {
+            "source": 1,
+            "other": 1,
+            "lock": 1
+          },
+          "bytes_by_class": {
+            "source": 44,
+            "other": 31087428,
+            "lock": 0
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "mixed (1 renames/links, 2 direct opens)",
+          "ops": {
+            "open_w": 2,
+            "rename_to": 1,
+            "mkdir": 3,
+            "delete": 1
+          },
+          "writers": {
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33": 7
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "uname",
+            "-p"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48251,
+          "t": 1794463658.722592,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48251,
+          "t": 1794463658.750369,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48251,
+          "t": 1794463658.787584,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "conda",
+            "list",
+            "llvm-openmp",
+            "--json"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48251,
+          "t": 1794463658.9696262,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "brew",
+            "--prefix",
+            "libomp"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48251,
+          "t": 1794463661.054118,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-relocate/tmpvxzbej49/header.hpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-relocate/tmpvxzbej49/header_CxxBuild",
+          "pid": 48251,
+          "t": 1794463663.5720682,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "openssl",
+            "sha512",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-relocate/tmpvxzbej49/header.i"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48251,
+          "t": 1794463663.969606,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48251,
+          "t": 1794463663.9928918,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-x",
+            "c++-header",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-relocate/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-relocate/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h_CxxBuild",
+          "pid": 48251,
+          "t": 1794463664.026007,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-moved/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        }
+      ],
+      "log_tail": "==> Downloading Homebrew API data\n\u2714\ufe0e JSON API packages.arm64_sequoia.jws.json\ncompile_s=7.65 inductor={'fxgraph_cache_hit': 2} aot_autograd={'autograd_cache_hit': 2}"
+    },
+    "readonly": {
+      "returncode": 1,
+      "wall_s": 14.234,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TORCHINDUCTOR_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor"
+      },
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/home-readonly/Library/Caches/Homebrew",
+          "entry": "macos.homebrew",
+          "anchor": "HOME",
+          "variable": "HOMEBREW_CACHE",
+          "files": 637,
+          "bytes": 37383653,
+          "by_class": {
+            "metadata": 4,
+            "other": 633
+          },
+          "bytes_by_class": {
+            "metadata": 16479331,
+            "other": 20904322
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-readonly/torchinductor_koiios/precompiled_headers",
+          "entry": "inductor.pch",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 3,
+          "bytes": 31087472,
+          "by_class": {
+            "source": 1,
+            "other": 1,
+            "lock": 1
+          },
+          "bytes_by_class": {
+            "source": 44,
+            "other": 31087428,
+            "lock": 0
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "mixed (1 renames/links, 2 direct opens)",
+          "ops": {
+            "open_w": 2,
+            "rename_to": 1,
+            "mkdir": 3,
+            "delete": 1
+          },
+          "writers": {
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33": 7
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "uname",
+            "-p"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48359,
+          "t": 1794463673.744402,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48359,
+          "t": 1794463673.769526,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "--version"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48359,
+          "t": 1794463673.8061938,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "conda",
+            "list",
+            "llvm-openmp",
+            "--json"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48359,
+          "t": 1794463673.9702132,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "brew",
+            "--prefix",
+            "libomp"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48359,
+          "t": 1794463675.71063,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-readonly/tmp5qgrdsbx/header.hpp",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "-O3",
+            "-DNDEBUG"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-readonly/tmp5qgrdsbx/header_CxxBuild",
+          "pid": 48359,
+          "t": 1794463678.142462,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "openssl",
+            "sha512",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-readonly/tmp5qgrdsbx/header.i"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48359,
+          "t": 1794463678.5830379,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-v"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/work",
+          "pid": 48359,
+          "t": 1794463678.6126988,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "clang++",
+            "-x",
+            "c++-header",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-readonly/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h",
+            "-D",
+            "TORCH_INDUCTOR_CPP_WRAPPER",
+            "-D",
+            "STANDALONE_TORCH_HEADER",
+            "-D",
+            "TORCH_INDUCTOR_PRECOMPILE_HEADERS",
+            "-D",
+            "C10_USING_CUSTOM_GENERATED_MACROS",
+            "-D",
+            "CPU_CAPABILITY_NEON",
+            "-D",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/tmp-readonly/torchinductor_koiios/precompiled_headers/cv6uge55xseowtyicfh3qtneyvb3nqyxsaehqahxkjvmbakcowi3.h_CxxBuild",
+          "pid": 48359,
+          "t": 1794463678.6529222,
+          "by": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/3m/c3mo5soouw4mtdok44bxqzfsw7mir5ydqmbcfsy2lbsqjqndml2p.py:33",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:28",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/torch_compile_cpu.py:37"
+          ]
+        }
+      ],
+      "log_tail": "  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/torch/_inductor/cpu_vec_isa.py\", line 189, in check_build\n    with lock:\n         ^^^^\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/torch/utils/_filelock.py\", line 24, in __enter__\n    result = super().__enter__()\n             ^^^^^^^^^^^^^^^^^^^\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_api.py\", line 873, in __enter__\n    self.acquire()\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_api.py\", line 973, in acquire\n    self._poll_until_acquired(\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_api.py\", line 1095, in _poll_until_acquired\n    self._acquire_with_fork_tracking()\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_api.py\", line 1129, in _acquire_with_fork_tracking\n    self._acquire()\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_unix.py\", line 84, in _acquire\n    if (missing_flock := self._acquire_native()) is not None:\n                         ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_unix.py\", line 89, in _acquire_native\n    if (opened := self._open_lock_file()) is None:\n                  ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_unix.py\", line 145, in _open_lock_file\n    return self._open_existing_lock_file(open_flags, open_mode)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/filelock/_unix.py\", line 149, in _open_existing_lock_file\n    return os.open(self._lock_path, open_flags, open_mode), False\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntorch._inductor.exc.InductorError: PermissionError: [Errno 13] Permission denied: '/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-torch_compile_cpu/redirect-20814f/cache-ro/inductor/locks/cbsqbxwaxynnklnbvnw33kasmmgdmb2gdnmw5nygbyf4kjorgzor.lock'\n\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS=\"+dynamo\"\n"
+    }
+  }
+}

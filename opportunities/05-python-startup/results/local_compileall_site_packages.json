@@ -1,0 +1,15 @@
+{
+ "site_packages": "/Users/koiios/Documents/Projects/swissai/opportunities/05-python-startup/.venv/lib/python3.12/site-packages",
+ "py_files": 9727,
+ "py_MB": 165.9,
+ "compileall_j0_s": {
+  "median": 5.689,
+  "min": 5.681,
+  "max": 6.458
+ },
+ "pyc_files": 9802,
+ "pyc_MB": 203.1,
+ "pyc_to_py_ratio": 1.22,
+ "cpus": 14,
+ "note": "macOS arm64 venv (torch 2.9.1, transformers 5.22, modal, fastapi, ...); pyc count includes the stdlib modules compileall imports"
+}

@@ -1,0 +1,1585 @@
+From 496d202f6912a5634b3d7ac401c852ea0cdb50ce Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 07:03:05 +0100
+Subject: [PATCH 2/3] feat(verify): calibrate the noise floor; exact where it
+ reproduces, statistical where not
+
+The 1e-6 per-token check is bitwise equality: it fails correct loads
+whenever the candidate does not run the reference's kernels on the
+reference's shapes. This repo's own Llama-3.1-70B fixtures at TP4 and
+TP8 differ by up to 0.155; a fixture from other hardware drifts by
+~1e-1 and fails 16/16 (#22); FP4 models fail bitwise. A hand-picked
+tolerance would trade those false alarms for missed faults.
+
+`--record --calibrate N` measures the trusted server's own noise: one
+repeat of the reference schedule (does it reproduce bitwise?) and N
+captures under perturbed load (concurrency, filler traffic, shuffled
+order), stored in the reference. `--reference --mode` then decides:
+
+  exact        bitwise; on a mismatch it says whether the drift is
+               within the calibrated noise, and still fails
+  statistical  per-token drift over s * (1 - p) -- a token's logprob
+               noise scales with 1 - p, as the TP4/TP8 fixtures show
+               across six decades -- tested by max_z, rms_z and a
+               one-sided NLL shift against leave-one-out prediction
+               bounds at --alpha, plus margin-aware top-1 and greedy
+               checks that explain near-ties instead of failing them
+  auto         exact if the calibration proved the schedule reproduces,
+               statistical otherwise; legacy for uncalibrated references
+  legacy       the original --token-tol/--nll-tol, unchanged
+
+`--calibration-from` adds benign captures from other nodes, restarts or
+TP degrees. `--weights` records and compares SGLang's /weights_checker
+checksums (>= 0.5.20). Captures move to format 2: full-precision
+logprobs, top-2 alternatives per position and greedy step; format-1
+references keep working.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ README.md                    |  34 ++-
+ src/servekit/cli.py          | 111 ++++++-
+ src/servekit/verify.py       | 405 +++++++++++++++++++++++--
+ src/servekit/verify_stats.py | 552 +++++++++++++++++++++++++++++++++++
+ tests/test_verify_stats.py   | 266 +++++++++++++++++
+ 5 files changed, 1328 insertions(+), 40 deletions(-)
+ create mode 100644 src/servekit/verify_stats.py
+ create mode 100644 tests/test_verify_stats.py
+
+diff --git a/README.md b/README.md
+index b381a0f..bd997b6 100644
+--- a/README.md
++++ b/README.md
+@@ -93,8 +93,38 @@ servekit verify --url http://127.0.0.1:8080 --record gold.json --wait-ready 300
+ servekit verify --url http://127.0.0.1:8080 --reference gold.json --wait-ready 300
+ ```
+ 
+-Exits 0 if every prompt is within tolerance (`--token-tol`, `--nll-tol`), 1
+-otherwise. `--out` writes the per-prompt result as JSON.
++Exits 0 if the check passes, 1 otherwise. `--out` writes the per-prompt result
++as JSON.
++
++Bitwise equality is the right check only where the engine reproduces bitwise.
++A different TP degree, GPU, kernel choice or batch composition moves logprobs
++on a correct load (Llama-3.1-70B: up to 0.155 between the TP4 and TP8
++fixtures here), and an FP4 MoE may not reproduce at all. So the reference can
++carry its own noise floor:
++
++```bash
++# record, then measure the trusted server's noise: 1 repeat + 8 captures under perturbed load
++servekit verify --url http://127.0.0.1:8080 --record gold.json --calibrate 8 --weights
++
++# check: exact where the repeat reproduced bitwise, the calibrated test otherwise
++servekit verify --url http://127.0.0.1:8080 --reference gold.json
++```
++
++`--mode` picks the check:
++* `exact`: every logprob and greedy token bitwise equal. On a mismatch, it says whether the drift is inside the calibrated noise.
++* `statistical`: per-token drift normalized by the noise expected at that token's probability. It fails on three things: a token moved further than calibration allows (`max_z`); diffuse drift (`rms_z`, `shift`) beyond a prediction bound at false-alarm rate `--alpha` (default 0.01); and a top-1 or greedy token that changed where the reference's winner led by more than noise can close.
++* `auto` (default): `exact` if calibration showed the reference schedule reproduces bitwise, else `statistical`. An uncalibrated reference keeps the original fixed tolerances (`legacy`, `--token-tol`, `--nll-tol`).
++
++`--calibration-from` adds benign captures recorded elsewhere, such as another
++node, a restart or another TP degree, when the check must accept those
++differences too. `--weights` also records and compares SGLang's
++`/weights_checker` checksums of the live weights (SGLang >= 0.5.20). They are
++exact and noise-free, but they only cover tensors the module tree exposes.
++
++`python -m servekit.faults` writes corrupted copies of a checkpoint to prove a
++check catches them. It covers zeroed, duplicated, permuted or transposed TP
++shards, bit flips, missing tensors, FP8 block scales, MXFP4 E8M0 scales and
++swapped MoE experts, each at a chosen magnitude.
+ 
+ ### Roadmap 👷‍♂️🚧
+ 
+diff --git a/src/servekit/cli.py b/src/servekit/cli.py
+index 1f73c5c..8a77a80 100644
+--- a/src/servekit/cli.py
++++ b/src/servekit/cli.py
+@@ -12,14 +12,26 @@ from .launch import launch
+ from .profile import ProfileReport, detect_framework, render_table, run_profile, save_json
+ from .stage import DEFAULT_SLICES
+ from .topology import read_topology
+-from .verify import capture, compare, discover_model, load_prompt_set, render_verify, wait_for_ready
++from .verify import (
++    calibrate,
++    capture,
++    check,
++    discover_model,
++    load_prompt_set,
++    noise_model,
++    render_check,
++    wait_for_ready,
++    weights_checksum,
++)
+ 
+ USAGE = """usage:
+   servekit launch --servekit-artifact-path PATH [--only-prepare] [--out PATH]
+                   [--slices N] [--overlap] -- <command...>
+   servekit profile [--out PATH] [--timeout SECONDS] -- <command...>
+   servekit bench --url URL (--into PATH | --out PATH) [--wait-ready SECONDS] [...]
+-  servekit verify --url URL (--record PATH | --reference PATH) [--wait-ready SECONDS] [...]
++  servekit verify --url URL --record PATH [--calibrate N] [--weights] [--wait-ready SECONDS] [...]
++  servekit verify --url URL --reference PATH [--mode auto|exact|statistical|legacy] [--alpha A]
++                  [--calibration-from PATH...] [--weights] [--out PATH] [...]
+ 
+ `launch` wraps an engine command. It writes a presharded checkpoint into
+ --servekit-artifact-path if there is not one there already, copies it into
+@@ -33,7 +45,10 @@ servekit names the mismatch and runs the command on the engine's own loader.
+ the OpenAI protocol, whether or not servekit launched it. `verify` checks that a
+ served model produces the same per-token logprobs it did before: `--record`
+ captures a reference from a trusted server, `--reference` checks a later server
+-against it.
++against it. `--record --calibrate N` also measures the trusted server's noise
++floor under perturbed load, so that `--reference` can tell kernel
++nondeterminism from a corrupted load: bitwise equality where the engine
++reproduces bitwise, a calibrated statistical test where it does not.
+ 
+   servekit launch --servekit-artifact-path /scratch/llama70b-tp4 -- \\
+       python -m sglang.launch_server --model-path /store/llama70b --tensor-parallel-size 4
+@@ -277,8 +292,39 @@ def _verify(argv: List[str]) -> int:
+     parser.add_argument("--out", type=Path, default=None, help="write the machine-readable check result here")
+     parser.add_argument("--wait-ready", type=float, default=0.0, help="seconds to wait for the server to serve")
+     parser.add_argument("--timeout", type=float, default=600.0, help="per-request timeout")
+-    parser.add_argument("--token-tol", type=float, default=1e-6, help="max allowed |delta| per token logprob")
+-    parser.add_argument("--nll-tol", type=float, default=1e-6, help="max allowed |delta| in mean NLL")
++    parser.add_argument(
++        "--calibrate",
++        type=int,
++        default=0,
++        metavar="N",
++        help="--record only: also measure this server's noise floor with a repeat of the reference schedule "
++        "and N captures under perturbed load (8 or more recommended)",
++    )
++    parser.add_argument("--max-concurrency", type=int, default=16, help="cap on concurrent requests while calibrating")
++    parser.add_argument("--top-logprobs", type=int, default=2, help="alternatives recorded per position (>= 2)")
++    parser.add_argument(
++        "--mode",
++        choices=("auto", "exact", "statistical", "legacy"),
++        default="auto",
++        help="--reference only: exact (bitwise), statistical (calibrated noise floor), legacy (--token-tol), "
++        "auto (exact where calibration proved the engine deterministic; legacy for uncalibrated references)",
++    )
++    parser.add_argument("--alpha", type=float, default=0.01, help="target false-alarm rate of the statistical mode")
++    parser.add_argument(
++        "--calibration-from",
++        type=Path,
++        nargs="+",
++        default=[],
++        help="--reference only: more benign captures to calibrate with, e.g. a reference recorded on another "
++        "node, restart or TP degree; each file's main capture and calibration runs are all used",
++    )
++    parser.add_argument(
++        "--weights",
++        action="store_true",
++        help="also record/compare SGLang's /weights_checker checksums of the live weights (SGLang >= 0.5.20)",
++    )
++    parser.add_argument("--token-tol", type=float, default=1e-6, help="legacy mode: max allowed |delta| per token logprob")
++    parser.add_argument("--nll-tol", type=float, default=1e-6, help="legacy mode: max allowed |delta| in mean NLL")
+     args = parser.parse_args(argv)
+ 
+     if not args.url:
+@@ -290,6 +336,16 @@ def _verify(argv: List[str]) -> int:
+     if args.reference and args.prompts:
+         print("error: --prompts only applies to --record; the reference carries its own prompts", file=sys.stderr)
+         return 2
++    if args.reference and args.calibrate:
++        print("error: --calibrate applies to --record; calibrate the trusted server, not the one under test",
++              file=sys.stderr)
++        return 2
++    if args.record and (args.calibration_from or args.mode != "auto"):
++        print("error: --mode and --calibration-from apply to --reference", file=sys.stderr)
++        return 2
++    if args.top_logprobs < 1:
++        print("error: --top-logprobs must be at least 1 (2 to tell near-ties from clear winners)", file=sys.stderr)
++        return 2
+ 
+     if args.wait_ready > 0:
+         print(f"[SERVEKIT] waiting up to {args.wait_ready:g}s for {args.url} to serve", flush=True)
+@@ -304,12 +360,39 @@ def _verify(argv: List[str]) -> int:
+     if args.record:
+         prompt_set, prompts = load_prompt_set(args.prompts)
+         print(f"[SERVEKIT] recording {len(prompts)} prompts from {args.url}", flush=True)
+-        result = capture(args.url, model, prompts, prompt_set, timeout=args.timeout)
++        result = capture(args.url, model, prompts, prompt_set, timeout=args.timeout, top_logprobs=args.top_logprobs)
++        if args.weights:
++            result["weights"] = weights_checksum(args.url, args.timeout)
++            if result["weights"] is None:
++                print("[SERVEKIT] warning: no /weights_checker on this server; recording logprobs only", flush=True)
++        if args.calibrate:
++            print(f"[SERVEKIT] calibrating: 1 repeat + {args.calibrate} perturbed captures", flush=True)
++            result["calibration"] = calibrate(
++                args.url, model, prompts, prompt_set, args.calibrate, timeout=args.timeout,
++                top_logprobs=args.top_logprobs, max_concurrency=args.max_concurrency,
++                log=lambda m: print(f"[SERVEKIT] {m}", flush=True),
++            )
++            nm = noise_model(result)
++            print(
++                f"[SERVEKIT] noise floor: max |delta logprob| {nm.max_abs_delta:.3g} under perturbed load; "
++                f"reference schedule {'reproduces bitwise' if nm.deterministic else 'does NOT reproduce bitwise'}"
++                f"{'; batch-invariant' if nm.batch_invariant else ''}",
++                flush=True,
++            )
++            for w in nm.warnings:
++                print(f"[SERVEKIT] warning: {w}", flush=True)
+         args.record.write_text(json.dumps(result, indent=1))
+         print(f"[SERVEKIT] reference written to {args.record}", flush=True)
+         return 0
+ 
+     reference = json.loads(args.reference.read_text())
++    extra = []
++    for path in args.calibration_from:
++        other = json.loads(path.read_text())
++        for cap in [other] + list(other.get("calibration") or []):
++            cap = {k: v for k, v in cap.items() if k != "calibration"}
++            cap["schedule"] = {"kind": "external", "source": str(path), "was": cap.get("schedule")}
++            extra.append(cap)
+     prompt_set, prompts = load_prompt_set(None)
+     ref_prompts = [(p["key"], p["text"]) for p in reference["prompts"]]
+     print(f"[SERVEKIT] checking {len(ref_prompts)} prompts from {args.url} against {args.reference}", flush=True)
+@@ -321,13 +404,23 @@ def _verify(argv: List[str]) -> int:
+         timeout=args.timeout,
+         greedy_prompts=reference.get("greedy_prompts", 8),
+         greedy_tokens=reference.get("greedy_tokens", 32),
++        top_logprobs=reference.get("top_logprobs", args.top_logprobs) if reference.get("format", 1) >= 2 else 1,
+     )
+-    result = compare(reference, captured, token_tol=args.token_tol, nll_tol=args.nll_tol)
++    if args.weights:
++        captured["weights"] = weights_checksum(args.url, args.timeout)
++    try:
++        result = check(reference, captured, mode=args.mode, alpha=args.alpha, extra_calibration=extra,
++                       token_tol=args.token_tol, nll_tol=args.nll_tol)
++    except ValueError as e:
++        print(f"error: {e}", file=sys.stderr)
++        return 2
+     print()
+-    print(render_verify(args.url, result))
++    print(render_check(args.url, result))
+ 
+     if args.out:
+-        args.out.write_text(json.dumps(result.to_dict(), indent=2))
++        out = result.legacy.to_dict() if result.mode == "legacy" and result.legacy is not None else {}
++        out.update(result.to_dict())
++        args.out.write_text(json.dumps(out, indent=2))
+         print(f"\nresult written to {args.out}", flush=True)
+ 
+     return 0 if result.passed else 1
+diff --git a/src/servekit/verify.py b/src/servekit/verify.py
+index 7049209..62166a2 100644
+--- a/src/servekit/verify.py
++++ b/src/servekit/verify.py
+@@ -6,24 +6,50 @@ against a later server and compares. The reference is self-contained -- it
+ carries the prompt texts it was recorded with, so it stays valid even if the
+ built-in prompt set changes.
+ 
++`--record --calibrate N` also measures the server's own noise floor: one repeat
++of the reference schedule (does it reproduce bitwise?) and N captures under
++perturbed load (concurrency, interleaved filler requests, shuffled order),
++stored in the reference. `--reference` then decides with `--mode`:
++
++  exact        every logprob and greedy token bitwise equal
++  statistical  drift within the calibrated noise floor (see verify_stats.py)
++  auto         exact if calibration showed the reference schedule reproduces
++               bitwise, statistical otherwise; legacy for an uncalibrated
++               reference
++  legacy       the original fixed tolerances, --token-tol and --nll-tol
++
++`--weights` additionally records and compares SGLang's `/weights_checker`
++checksums of the live (dequantized) parameters and buffers, when the server
++has that route (SGLang >= 0.5.20).
++
+ Speaks the OpenAI protocol (``GET /v1/models`` + ``POST /v1/completions``), same
+ as ``bench.py``, and reuses its HTTP helpers.
+ """
+ from __future__ import annotations
+ 
+ import json
++import threading
++import urllib.error
++import urllib.request
++from concurrent.futures import ThreadPoolExecutor
+ from dataclasses import dataclass, field
+ from pathlib import Path
+-from typing import List, Optional, Tuple
++from random import Random
++from typing import Dict, List, Optional, Sequence, Tuple
+ 
+-from .bench import _completions, discover_model, wait_for_ready  # noqa: F401
++from .bench import _VOCAB, _completions, discover_model, wait_for_ready  # noqa: F401
++from . import verify_stats
+ 
+ _BUILTIN_PROMPTS = Path(__file__).parent / "_verify" / "prompts.json"
+ 
++FORMAT = 2
++
+ # Not 0. SGLang's OpenAI adapter reads meta_info["input_top_logprobs"] whenever
+ # echo and logprobs are both set, but only fills it when top_logprobs >= 1, so
+-# logprobs=0 is a KeyError 500 (seen on v0.5.10).
+-TOP_LOGPROBS = 1
++# logprobs=0 is a KeyError 500 (seen on v0.5.10). Two, so every position carries
++# the margin between the best and second-best token: that is what tells a
++# near-tie, which noise may flip, from a clear winner, which it may not.
++TOP_LOGPROBS = 2
+ 
+ 
+ def load_prompt_set(path: Optional[Path]) -> Tuple[str, List[Tuple[str, str]]]:
+@@ -34,18 +60,31 @@ def load_prompt_set(path: Optional[Path]) -> Tuple[str, List[Tuple[str, str]]]:
+     return data.get("prompt_set", "custom"), prompts
+ 
+ 
+-def score(base_url: str, model: str, text: str, timeout: float) -> Tuple[List[float], List[str]]:
++def _tops(entries) -> List[List]:
++    """OpenAI top_logprobs entries ({token: lp} per position) as [[token, lp], ...] best first."""
++    out = []
++    for e in entries:
++        if not e:
++            out.append([])
++            continue
++        items = sorted(((str(t), float(v)) for t, v in e.items() if v is not None), key=lambda x: -x[1])
++        out.append([[t, v] for t, v in items])
++    return out
++
++
++def score(base_url: str, model: str, text: str, timeout: float, top_logprobs: int = TOP_LOGPROBS):
+     """Per-token logprobs of `text` itself, under the model that is serving it.
+ 
+-    `max_tokens: 1` rather than 0 because some SGLang builds reject 0; the
+-    generated token is sliced back off, so the choice does not reach the capture.
+-    The leading entry is null (nothing predicts the first token) and goes too.
++    Returns (logprobs, tokens, top-k per position). `max_tokens: 1` rather than 0
++    because some SGLang builds reject 0; the generated token is sliced back off,
++    so the choice does not reach the capture. The leading entry is null (nothing
++    predicts the first token) and goes too.
+     """
+     resp = _completions(
+         base_url,
+         model,
+         text,
+-        {"max_tokens": 1, "echo": True, "logprobs": TOP_LOGPROBS, "temperature": 0.0},
++        {"max_tokens": 1, "echo": True, "logprobs": top_logprobs, "temperature": 0.0},
+         timeout,
+     )
+     lp = (resp.get("choices") or [{}])[0].get("logprobs") or {}
+@@ -56,29 +95,51 @@ def score(base_url: str, model: str, text: str, timeout: float) -> Tuple[List[fl
+             f"the server returned no prompt logprobs; echo+logprobs is how verify works. "
+             f"Got keys {sorted(lp)} for prompt {text[:40]!r}"
+         )
++    tops = lp.get("top_logprobs") or [None] * len(tokens)
+     # Drop the generated token, then the leading null.
+     prompt_len = len(tokens) - 1
+-    logprobs, toks = token_logprobs[:prompt_len], tokens[:prompt_len]
++    logprobs, toks, tops = token_logprobs[:prompt_len], tokens[:prompt_len], list(tops[:prompt_len])
+     if logprobs and logprobs[0] is None:
+-        logprobs, toks = logprobs[1:], toks[1:]
++        logprobs, toks, tops = logprobs[1:], toks[1:], tops[1:]
+     if any(v is None for v in logprobs):
+         raise RuntimeError(f"unexpected None in token_logprobs beyond the leading entry for prompt {text[:40]!r}")
+-    return logprobs, toks
++    return logprobs, toks, _tops(tops)
+ 
+ 
+-def greedy(base_url: str, model: str, text: str, timeout: float, n_tokens: int) -> List[str]:
++def greedy(base_url: str, model: str, text: str, timeout: float, n_tokens: int,
++           top_logprobs: int = TOP_LOGPROBS):
++    """(generated tokens, top-k per generated token)."""
+     resp = _completions(
+         base_url,
+         model,
+         text,
+-        {"max_tokens": n_tokens, "temperature": 0.0, "logprobs": TOP_LOGPROBS},
++        {"max_tokens": n_tokens, "temperature": 0.0, "logprobs": top_logprobs},
+         timeout,
+     )
+     choice = (resp.get("choices") or [{}])[0]
+-    tokens = ((choice.get("logprobs") or {}).get("tokens")) or []
++    lp = choice.get("logprobs") or {}
++    tokens = lp.get("tokens") or []
+     if not tokens:
+         raise RuntimeError(f"the server returned no generated tokens for prompt {text[:40]!r}")
+-    return tokens
++    return tokens, _tops(lp.get("top_logprobs") or [None] * len(tokens))
++
++
++def _entry(base_url, model, i, key, text, timeout, greedy_prompts, greedy_tokens, top_logprobs) -> dict:
++    logprobs, tokens, tops = score(base_url, model, text, timeout, top_logprobs)
++    entry = {
++        "key": key,
++        "text": text,
++        "n_tokens": len(tokens),
++        "tokens": tokens,
++        "token_logprobs": [float(v) for v in logprobs],
++        "mean_nll": -sum(logprobs) / len(logprobs) if logprobs else 0.0,
++        "top_logprobs": tops,
++    }
++    if i < greedy_prompts:
++        g, gtops = greedy(base_url, model, text, timeout, greedy_tokens, top_logprobs)
++        entry["greedy_tokens"] = g
++        entry["greedy_top_logprobs"] = gtops
++    return entry
+ 
+ 
+ def capture(
+@@ -89,29 +150,177 @@ def capture(
+     timeout: float = 600.0,
+     greedy_prompts: int = 8,
+     greedy_tokens: int = 32,
++    top_logprobs: int = TOP_LOGPROBS,
++    schedule: str = "reference",
+ ) -> dict:
+-    out = []
+-    for i, (key, text) in enumerate(prompts):
+-        logprobs, tokens = score(base_url, model, text, timeout)
+-        entry = {
+-            "key": key,
+-            "text": text,
+-            "n_tokens": len(tokens),
+-            "token_logprobs": [round(v, 6) for v in logprobs],
+-            "mean_nll": round(-sum(logprobs) / len(logprobs), 6) if logprobs else 0.0,
+-        }
+-        if i < greedy_prompts:
+-            entry["greedy_tokens"] = greedy(base_url, model, text, timeout, greedy_tokens)
+-        out.append(entry)
++    """The reference schedule: one request at a time, in prompt order, nothing else in flight."""
++    out = [
++        _entry(base_url, model, i, key, text, timeout, greedy_prompts, greedy_tokens, top_logprobs)
++        for i, (key, text) in enumerate(prompts)
++    ]
+     return {
++        "format": FORMAT,
+         "model": model,
+         "prompt_set": prompt_set,
+         "greedy_prompts": greedy_prompts,
+         "greedy_tokens": greedy_tokens,
++        "top_logprobs": top_logprobs,
++        "schedule": {"kind": schedule},
+         "prompts": out,
+     }
+ 
+ 
++class _Fillers:
++    """Background requests that keep a server's batches mixed while a capture runs.
++
++    What a serving engine computes for one request depends on what else is in
++    its batch: GEMM split-K and attention split-KV choices, chunked-prefill
++    boundaries, CUDA-graph buckets. Fillers of random lengths make those vary
++    the way production load does. Their own results are thrown away, and a
++    failed filler is not an error.
++    """
++
++    def __init__(self, base_url: str, model: str, n: int, seed: int, timeout: float):
++        self.base_url, self.model, self.n, self.seed, self.timeout = base_url, model, n, seed, timeout
++        self.stop = threading.Event()
++        self.threads: List[threading.Thread] = []
++
++    def _loop(self, idx: int) -> None:
++        rng = Random(self.seed * 1009 + idx)
++        while not self.stop.is_set():
++            words = rng.choice((8, 24, 64, 160, 400, 900))
++            prompt = " ".join(rng.choice(_VOCAB) for _ in range(words))
++            try:
++                _completions(self.base_url, self.model, prompt,
++                             {"max_tokens": rng.randint(1, 48), "temperature": 0.0}, self.timeout)
++            except Exception:  # noqa: BLE001 -- load generator, best effort
++                pass
++
++    def __enter__(self):
++        for i in range(self.n):
++            t = threading.Thread(target=self._loop, args=(i,), daemon=True)
++            t.start()
++            self.threads.append(t)
++        return self
++
++    def __exit__(self, *exc):
++        self.stop.set()
++        for t in self.threads:
++            t.join(timeout=self.timeout)
++
++
++# (concurrency of the probed requests, filler threads), cycled over calibration runs
++PERTURBATIONS = [(4, 0), (1, 4), (8, 2), (2, 8), (16, 0), (1, 1), (4, 6), (8, 8)]
++
++
++def capture_perturbed(
++    base_url: str,
++    model: str,
++    prompts: List[Tuple[str, str]],
++    prompt_set: str,
++    seed: int,
++    concurrency: int,
++    fillers: int,
++    timeout: float = 600.0,
++    greedy_prompts: int = 8,
++    greedy_tokens: int = 32,
++    top_logprobs: int = TOP_LOGPROBS,
++) -> dict:
++    """The same prompts, shuffled, `concurrency` at a time, among `fillers` streams of other traffic."""
++    order = list(range(len(prompts)))
++    Random(seed).shuffle(order)
++    with _Fillers(base_url, model, fillers, seed, timeout):
++        with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
++            futures = {
++                i: ex.submit(_entry, base_url, model, i, prompts[i][0], prompts[i][1], timeout,
++                             greedy_prompts, greedy_tokens, top_logprobs)
++                for i in order
++            }
++            entries = {i: f.result() for i, f in futures.items()}
++    return {
++        "format": FORMAT,
++        "model": model,
++        "prompt_set": prompt_set,
++        "greedy_prompts": greedy_prompts,
++        "greedy_tokens": greedy_tokens,
++        "top_logprobs": top_logprobs,
++        "schedule": {"kind": "perturbed", "seed": seed, "concurrency": concurrency, "fillers": fillers},
++        "prompts": [entries[i] for i in range(len(prompts))],
++    }
++
++
++def calibrate(
++    base_url: str,
++    model: str,
++    prompts: List[Tuple[str, str]],
++    prompt_set: str,
++    runs: int,
++    timeout: float = 600.0,
++    greedy_prompts: int = 8,
++    greedy_tokens: int = 32,
++    top_logprobs: int = TOP_LOGPROBS,
++    max_concurrency: int = 16,
++    log=None,
++) -> List[dict]:
++    """A repeat of the reference schedule, then `runs` perturbed captures."""
++    out = [capture(base_url, model, prompts, prompt_set, timeout, greedy_prompts, greedy_tokens, top_logprobs,
++                   schedule="repeat")]
++    for k in range(runs):
++        conc, fill = PERTURBATIONS[k % len(PERTURBATIONS)]
++        conc = min(conc, max_concurrency)
++        if log:
++            log(f"calibration run {k + 1}/{runs}: concurrency {conc}, {fill} filler streams")
++        out.append(capture_perturbed(base_url, model, prompts, prompt_set, seed=k + 1, concurrency=conc,
++                                     fillers=fill, timeout=timeout, greedy_prompts=greedy_prompts,
++                                     greedy_tokens=greedy_tokens, top_logprobs=top_logprobs))
++    return out
++
++
++# --------------------------------------------------------------------------
++# SGLang's /weights_checker
++
++
++def weights_checksum(base_url: str, timeout: float = 600.0) -> Optional[dict]:
++    """SGLang's checksums of the live parameters and buffers, or None if the server has no such route."""
++    body = json.dumps({"action": "checksum"}).encode()
++    req = urllib.request.Request(f"{base_url}/weights_checker", data=body,
++                                 headers={"Content-Type": "application/json"})
++    try:
++        with urllib.request.urlopen(req, timeout=timeout) as r:
++            data = json.loads(r.read())
++    except (urllib.error.HTTPError, urllib.error.URLError, ValueError):
++        return None
++    if not data.get("success") or not data.get("ranks"):
++        return None
++    return {"per_engine_checksum": data.get("per_engine_checksum"), "ranks": data["ranks"]}
++
++
++def compare_weights(reference: Optional[dict], captured: Optional[dict]) -> Tuple[Optional[bool], List[str]]:
++    """(equal?, messages). None when either side has no checksums or their layouts differ."""
++    if not reference or not captured:
++        return None, ["no weight checksums on one side"]
++
++    def layout(ws):
++        return [tuple(sorted((r.get("parallelism_info") or {}).items())) for r in ws["ranks"]]
++
++    if layout(reference) != layout(captured):
++        return None, ["weight checksums come from different parallel layouts; not comparable"]
++    if reference.get("per_engine_checksum") == captured.get("per_engine_checksum"):
++        return True, []
++    msgs = []
++    for i, (ra, rb) in enumerate(zip(reference["ranks"], captured["ranks"])):
++        a, b = ra.get("checksums") or {}, rb.get("checksums") or {}
++        for name in sorted(set(a) | set(b)):
++            if a.get(name) != b.get(name):
++                what = "missing" if name not in b else ("new" if name not in a else "differs")
++                msgs.append(f"rank {i}: {name} {what}")
++    return False, msgs or ["per-engine checksum differs"]
++
++
++# --------------------------------------------------------------------------
++# the original fixed-tolerance comparison (format-1 references)
++
++
+ @dataclass
+ class VerifyResult:
+     passed: bool
+@@ -249,3 +458,141 @@ def render_verify(url: str, result: VerifyResult) -> str:
+     for f in result.failures:
+         lines.append(f"! {f}")
+     return "\n".join(lines)
++
++
++# --------------------------------------------------------------------------
++# calibrated checks
++
++
++@dataclass
++class CheckResult:
++    """What `--reference` decided, in any mode."""
++
++    passed: bool
++    mode: str
++    decision: Optional[verify_stats.Decision] = None
++    legacy: Optional[VerifyResult] = None
++    noise: Optional[verify_stats.NoiseModel] = None
++    weights: Optional[bool] = None
++    weight_messages: List[str] = field(default_factory=list)
++    model_warning: Optional[str] = None
++    diagnosis: List[str] = field(default_factory=list)
++
++    @property
++    def failures(self) -> List[str]:
++        out = []
++        if self.weights is False:
++            out += ["weight checksums differ: " + m for m in self.weight_messages[:10]]
++        if self.decision is not None:
++            out += self.decision.failures
++        if self.legacy is not None:
++            out += self.legacy.failures
++        return out
++
++    def to_dict(self) -> dict:
++        d = {
++            "passed": self.passed,
++            "mode": self.mode,
++            "failures": self.failures,
++            "model_warning": self.model_warning,
++            "weights_equal": self.weights,
++            "weight_messages": self.weight_messages,
++            "diagnosis": self.diagnosis,
++        }
++        if self.decision is not None:
++            d.update(self.decision.to_dict())
++            d["passed"] = self.passed
++            d["failures"] = self.failures
++        if self.legacy is not None:
++            d["legacy"] = self.legacy.to_dict()
++        if self.noise is not None:
++            d["noise_model"] = self.noise.to_dict()
++        return d
++
++
++def noise_model(reference: dict, extra: Sequence[dict] = (), alpha: float = 0.01) -> Optional[verify_stats.NoiseModel]:
++    calib = list(reference.get("calibration") or []) + list(extra)
++    if not calib:
++        return None
++    return verify_stats.fit(reference, calib, alpha=alpha)
++
++
++def check(reference: dict, captured: dict, mode: str = "auto", alpha: float = 0.01,
++          extra_calibration: Sequence[dict] = (), token_tol: float = 1e-6, nll_tol: float = 1e-6) -> CheckResult:
++    model = noise_model(reference, extra_calibration, alpha) if mode != "legacy" else None
++    chosen = verify_stats.choose_mode(mode, model)
++    res = CheckResult(passed=True, mode=chosen, noise=model)
++    ref_model, got_model = reference.get("model"), captured.get("model")
++    if ref_model and got_model and ref_model != got_model:
++        res.model_warning = f"served model {got_model!r} differs from the reference's {ref_model!r}"
++
++    if "weights" in reference or "weights" in captured:
++        res.weights, res.weight_messages = compare_weights(reference.get("weights"), captured.get("weights"))
++
++    if chosen == "legacy":
++        res.legacy = compare(reference, captured, token_tol=token_tol, nll_tol=nll_tol)
++        ok = res.legacy.passed
++    elif chosen == "exact":
++        res.decision = verify_stats.decide_exact(reference, captured)
++        ok = res.decision.passed
++        if not ok and model is not None and model.n_runs and model.scale > 0:
++            # Never a pass, but say whether the drift looks like noise or like a fault.
++            stat = verify_stats.decide_statistical(reference, captured, model)
++            verdict = "within" if stat.passed else "beyond"
++            res.diagnosis.append(
++                f"not bitwise equal; the drift is {verdict} the calibrated noise of perturbed load "
++                f"(max_z {stat.stats.max_z:.3g} vs {model.thresholds.get('max_z', 0):.3g}). "
++                + ("A restart- or process-level difference is the likely cause; if this engine is known to "
++                   "vary across restarts, check with --mode statistical." if stat.passed else
++                   "That is what a corrupted load looks like.")
++            )
++    else:
++        if model is None:
++            raise ValueError("--mode statistical needs a calibrated reference (record it with --calibrate N)")
++        res.decision = verify_stats.decide_statistical(reference, captured, model)
++        ok = res.decision.passed
++    res.passed = ok and res.weights is not False
++    return res
++
++
++def render_check(url: str, res: CheckResult) -> str:
++    if res.mode == "legacy" and res.legacy is not None:
++        text = render_verify(url, res.legacy)
++        if res.weights is not None:
++            text += f"\nweight checksums: {'equal' if res.weights else 'DIFFER'}"
++        return text
++    d = res.decision
++    st = d.stats
++    lines = [f"[SERVEKIT] Verify of {url} ({res.mode} mode)", "-" * 40]
++    if res.model_warning:
++        lines.append(f"! {res.model_warning}")
++    if st is not None and st.per_prompt:
++        lines.append(f"{'prompt':<20} {'n_tok':>6} {'max|dlp|':>10} {'max z':>8} {'dnll':>10}  {'greedy':>8}")
++        for key, row in st.per_prompt.items():
++            lines.append(f"{key:<20} {row['n']:>6} {row['max_abs_delta']:>10.4g} {row['max_z']:>8.3g} "
++                         f"{row['nll_delta']:>+10.3g}  {st.greedy_status.get(key, '-'):>8}")
++        lines.append("")
++    m = res.noise
++    if st is not None and res.mode == "statistical" and m is not None:
++        for name in verify_stats.CONTINUOUS:
++            null = m.null.get(name) or []
++            rng = f"[{min(null):.3g}, {max(null):.3g}]" if null else "-"
++            lines.append(f"{name:<7} {st.get(name):>9.4g}   threshold {m.thresholds.get(name, 0):.4g}   "
++                         f"calibration {rng}")
++        lines.append(f"top-1 flips at clear winners: {st.flips}/{st.flips_checked}; "
++                     f"greedy divergences: {st.greedy_bad} unexplained, {st.greedy_explained} at near-ties")
++    elif st is not None:
++        lines.append(f"max |delta token_logprob|: {st.max_abs_delta:.6g}   bitwise equal: {st.bitwise_equal}")
++    if m is not None:
++        lines.append(f"calibration: {m.n_runs} perturbed runs, scale {m.scale:.3g}, deterministic "
++                     f"{m.deterministic}, batch-invariant {m.batch_invariant}")
++    if res.weights is not None:
++        lines.append(f"weight checksums: {'equal' if res.weights else 'DIFFER'}")
++    for i in (d.info if d else []):
++        lines.append(f"  {i}")
++    for x in res.diagnosis:
++        lines.append(f"  {x}")
++    lines.append("PASS" if res.passed else "FAIL")
++    for f in res.failures:
++        lines.append(f"! {f}")
++    return "\n".join(lines)
+diff --git a/src/servekit/verify_stats.py b/src/servekit/verify_stats.py
+new file mode 100644
+index 0000000..b1a56a1
+--- /dev/null
++++ b/src/servekit/verify_stats.py
+@@ -0,0 +1,552 @@
++"""How far may a capture drift from its reference before it is a fault, not noise?
++
++`servekit verify --reference` used to demand |delta logprob| <= 1e-6 per token,
++which is bitwise equality in practice. That holds when the candidate runs the
++same kernels on the same batch shapes as the reference, and fails on a correct
++load whenever it does not: another TP degree, another GPU, a kernel whose
++reduction order depends on the batch, FP4 MoE paths. This module replaces the
++fixed tolerance with one measured on the reference server itself.
++
++Calibration. Next to the reference capture, `--record --calibrate N` takes N
++more captures from the same trusted server while perturbing what a serving
++engine perturbs: concurrency and batch composition, which move split-K and
++split-KV choices, chunked-prefill boundaries and CUDA-graph buckets. Their
++differences from the reference are the noise floor.
++
++Noise model. A token's logprob moves by
++    d log p_y = (1 - p_y) dz_y - sum_{j != y} p_j dz_j
++for logit perturbations dz, so its noise scales with (1 - p_y): near-certain
++tokens barely move, uncertain ones move by about the logit noise. In the
++Llama-3.1-70B TP4-vs-TP8 fixtures |delta|/(1 - p) has the same spread across
++six decades of (1 - p), so one pooled scale s fits every token:
++    z_i = delta_i / sigma_i,   sigma_i = max(s * max(1 - p_i, REL_FLOOR), ABS_FLOOR)
++
++Statistics. Three continuous ones, each with a threshold calibrated at
++alpha/3 (Bonferroni):
++    max_z   the largest |z|: a fault that hits few tokens hard (one MoE expert,
++            one vocab shard, a few flipped exponent bits)
++    rms_z   root-mean-square z: a fault that moves every token a little
++    shift   mean of -z, one-sided: the candidate finds the reference text less
++            likely, which is what damaged weights do on average
++and two rules with no tolerance beyond the noise floor:
++    flips   the candidate's top-1 token differs where the reference's top-1
++            led its runner-up by more than `margin_tau`
++    greedy  a free-running greedy continuation diverges at a step where the
++            reference's margin exceeded `margin_tau`
++`margin_tau` is twice the largest logprob movement seen in calibration (times
++a safety factor): a margin that wide cannot close under that noise.
++
++Thresholds. Each calibration run is scored against the reference like a
++candidate, with the scale estimated from the other runs (leave-one-out), giving
++K null samples per statistic. The threshold is the upper (1 - alpha/3)
++prediction bound of a normal fitted to them (on log scale for max_z and rms_z):
++mean + t_{K-1} * sd * sqrt(1 + 1/K), and never below the largest null sample.
++The false-alarm rate is then alpha for a candidate whose benign variation
++matches the calibration's -- the assumption to check, and what the Modal
++study measures for restarts, other TP degrees and other kernels.
++
++Exact mode. If a repeat capture with the reference's own schedule is bitwise
++identical, the engine is deterministic for this setup and nothing but equality
++is needed or accepted; if the perturbed captures are identical too, the engine
++is batch-invariant (SGLang --enable-deterministic-inference, vLLM
++VLLM_BATCH_INVARIANT=1) and verify can run on a loaded server.
++
++Stdlib only, like the rest of verify.
++"""
++from __future__ import annotations
++
++import math
++import statistics
++from dataclasses import dataclass, field
++from typing import Dict, List, Optional, Sequence, Tuple
++
++REL_FLOOR = 1e-4  # (1 - p) below this counts as this: float32 logprobs near 0 carry ~1e-7 absolute error
++ABS_FLOOR = 1e-6  # the rounding of format-1 references
++SCALE_QUANTILE = 0.9
++MARGIN_SAFETY = 1.5
++FALLBACK_FACTOR = 2.0  # thresholds from fewer than 3 calibration runs: this x the largest null sample
++CONTINUOUS = ("max_z", "rms_z", "shift")
++
++
++# --------------------------------------------------------------------------
++# Student-t quantile, for prediction bounds from a handful of runs
++
++
++def _betacf(a: float, b: float, x: float) -> float:
++    fpmin = 1e-300
++    qab, qap, qam = a + b, a + 1.0, a - 1.0
++    c, d = 1.0, 1.0 - qab * x / qap
++    d = 1.0 / (d if abs(d) > fpmin else fpmin)
++    h = d
++    for m in range(1, 400):
++        m2 = 2 * m
++        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
++        d = 1.0 + aa * d
++        d = 1.0 / (d if abs(d) > fpmin else fpmin)
++        c = 1.0 + aa / c
++        c = c if abs(c) > fpmin else fpmin
++        h *= d * c
++        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
++        d = 1.0 + aa * d
++        d = 1.0 / (d if abs(d) > fpmin else fpmin)
++        c = 1.0 + aa / c
++        c = c if abs(c) > fpmin else fpmin
++        de = d * c
++        h *= de
++        if abs(de - 1.0) < 1e-15:
++            break
++    return h
++
++
++def _betainc(a: float, b: float, x: float) -> float:
++    """Regularized incomplete beta I_x(a, b)."""
++    if x <= 0.0:
++        return 0.0
++    if x >= 1.0:
++        return 1.0
++    lbt = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
++    if x < (a + 1.0) / (a + b + 2.0):
++        return math.exp(lbt) * _betacf(a, b, x) / a
++    return 1.0 - math.exp(lbt) * _betacf(b, a, 1.0 - x) / b
++
++
++def t_cdf(t: float, df: float) -> float:
++    x = df / (df + t * t)
++    tail = 0.5 * _betainc(df / 2.0, 0.5, x)
++    return 1.0 - tail if t >= 0 else tail
++
++
++def t_ppf(p: float, df: float) -> float:
++    """Quantile of Student's t with `df` degrees of freedom, by bisection on the CDF."""
++    if not 0.0 < p < 1.0:
++        raise ValueError(f"p={p} outside (0, 1)")
++    if p < 0.5:
++        return -t_ppf(1.0 - p, df)
++    lo, hi = 0.0, 1.0
++    while t_cdf(hi, df) < p:
++        hi *= 2.0
++    for _ in range(200):
++        mid = 0.5 * (lo + hi)
++        if t_cdf(mid, df) < p:
++            lo = mid
++        else:
++            hi = mid
++    return 0.5 * (lo + hi)
++
++
++# --------------------------------------------------------------------------
++# aligning captures
++
++
++def _top(entry) -> List[Tuple[str, float]]:
++    """A top-logprobs entry as [(token, logprob)] sorted best first; accepts pairs or a {token: lp} dict."""
++    if not entry:
++        return []
++    items = entry.items() if isinstance(entry, dict) else [tuple(x) for x in entry]
++    return sorted(((str(t), float(v)) for t, v in items if v is not None), key=lambda x: -x[1])
++
++
++@dataclass
++class Aligned:
++    """Per-token data of one capture against the reference, prompt by prompt."""
++
++    prompts: List[dict] = field(default_factory=list)  # {key, ref, got, ref_top, got_top, tokens}
++    failures: List[str] = field(default_factory=list)  # structural: absent prompts, tokenization changes
++
++
++def align(reference: dict, captured: dict) -> Aligned:
++    out = Aligned()
++    by_key = {p["key"]: p for p in captured.get("prompts", [])}
++    for exp in reference.get("prompts", []):
++        key = exp["key"]
++        got = by_key.get(key)
++        if got is None:
++            out.failures.append(f"{key}: absent from the captured run")
++            continue
++        if got.get("n_tokens") != exp.get("n_tokens") or len(got["token_logprobs"]) != len(exp["token_logprobs"]):
++            out.failures.append(
++                f"{key}: tokenized to {got.get('n_tokens')} tokens, the reference got {exp.get('n_tokens')} "
++                f"-- nothing below is comparable"
++            )
++            continue
++        out.prompts.append({
++            "key": key,
++            "ref": [float(v) for v in exp["token_logprobs"]],
++            "got": [float(v) for v in got["token_logprobs"]],
++            "tokens": exp.get("tokens"),
++            "ref_top": exp.get("top_logprobs"),
++            "got_top": got.get("top_logprobs"),
++            "ref_greedy": exp.get("greedy_tokens"),
++            "got_greedy": got.get("greedy_tokens"),
++            "ref_greedy_top": exp.get("greedy_top_logprobs"),
++        })
++    return out
++
++
++def _one_minus_p(lp: float) -> float:
++    return -math.expm1(min(lp, 0.0))
++
++
++def _abs_floor(*captures: dict) -> float:
++    # format-1 captures were rounded to 6 decimals; format 2 keeps full precision
++    return ABS_FLOOR if any(c.get("format", 1) < 2 for c in captures) else ABS_FLOOR / 10
++
++
++def normalized_deltas(al: Aligned, scale: float, abs_floor: float) -> List[Tuple[str, int, float, float]]:
++    """[(prompt key, position, delta, z)] for every token.
++
++    A NaN or infinite logprob is a model that lost the token entirely: it
++    counts as an infinite drop, so every statistic sees it.
++    """
++    out = []
++    for p in al.prompts:
++        for i, (r, g) in enumerate(zip(p["ref"], p["got"])):
++            if not (math.isfinite(g) and math.isfinite(r)):
++                out.append((p["key"], i, -math.inf, -math.inf))
++                continue
++            d = g - r
++            sigma = max(scale * max(_one_minus_p(r), REL_FLOOR), abs_floor)
++            out.append((p["key"], i, d, d / sigma))
++    return out
++
++
++def pooled_u(al: Aligned) -> List[float]:
++    """|delta| / max(1 - p, REL_FLOOR) for every token: the unscaled noise."""
++    return [abs(g - r) / max(_one_minus_p(r), REL_FLOOR) for p in al.prompts for r, g in zip(p["ref"], p["got"])]
++
++
++def _quantile(xs: Sequence[float], q: float) -> float:
++    xs = sorted(xs)
++    if not xs:
++        return 0.0
++    pos = q * (len(xs) - 1)
++    lo, hi = int(math.floor(pos)), int(math.ceil(pos))
++    return xs[lo] + (xs[hi] - xs[lo]) * (pos - lo)
++
++
++# --------------------------------------------------------------------------
++# statistics of one capture
++
++
++def _flips(al: Aligned, margin_tau: float) -> Tuple[int, int, List[str]]:
++    """(unexplained top-1 flips, positions checked, descriptions)."""
++    bad, checked, notes = 0, 0, []
++    for p in al.prompts:
++        rt, gt = p.get("ref_top"), p.get("got_top")
++        if not rt or not gt:
++            continue
++        for i, (re_, ge) in enumerate(zip(rt, gt)):
++            r, g = _top(re_), _top(ge)
++            if len(r) < 2 or not g:
++                continue
++            margin = r[0][1] - r[1][1]
++            if margin <= margin_tau:
++                continue
++            checked += 1
++            best = g[0][1]
++            leaders = {t for t, v in g if v >= best}
++            if r[0][0] not in leaders:
++                bad += 1
++                if len(notes) < 5:
++                    notes.append(f"{p['key']}[{i}]: top-1 {g[0][0]!r} replaced {r[0][0]!r}, which led by {margin:.3f}")
++    return bad, checked, notes
++
++
++def _greedy(al: Aligned, margin_tau: float) -> Tuple[int, int, List[str], Dict[str, str]]:
++    """(unexplained divergences, explained ones, descriptions, per-prompt status)."""
++    bad, explained, notes, status = 0, 0, [], {}
++    for p in al.prompts:
++        ga, gb = p.get("ref_greedy"), p.get("got_greedy")
++        if ga is None:
++            continue
++        if gb is None:
++            bad += 1
++            status[p["key"]] = "missing"
++            notes.append(f"{p['key']}: reference has greedy_tokens but the captured run does not")
++            continue
++        n = min(len(ga), len(gb))
++        first = next((i for i in range(n) if ga[i] != gb[i]), None)
++        if first is None and len(ga) == len(gb):
++            status[p["key"]] = "ok"
++            continue
++        first = n if first is None else first
++        tops = p.get("ref_greedy_top")
++        margin = None
++        if tops and first < len(tops):
++            r = _top(tops[first])
++            if len(r) >= 2:
++                margin = r[0][1] - r[1][1]
++        same = sum(1 for x, y in zip(ga, gb) if x == y)
++        if margin is not None and margin <= margin_tau:
++            explained += 1
++            status[p["key"]] = f"tie@{first}"
++            continue
++        bad += 1
++        status[p["key"]] = f"{same}/{max(len(ga), len(gb))}"
++        why = "no margin recorded" if margin is None else f"the reference led by {margin:.3f} > {margin_tau:.3f}"
++        notes.append(
++            f"{p['key']}: greedy continuation diverged at token {first} ({ga[first:first + 1]} vs "
++            f"{gb[first:first + 1]}); {why}"
++        )
++    return bad, explained, notes, status
++
++
++@dataclass
++class RunStats:
++    max_z: float
++    rms_z: float
++    shift: float
++    max_abs_delta: float
++    n_tokens: int
++    flips: int = 0
++    flips_checked: int = 0
++    greedy_bad: int = 0
++    greedy_explained: int = 0
++    bitwise_equal: bool = False
++    worst: List[dict] = field(default_factory=list)
++    notes: List[str] = field(default_factory=list)
++    greedy_status: Dict[str, str] = field(default_factory=dict)
++    per_prompt: Dict[str, dict] = field(default_factory=dict)
++
++    def get(self, name: str) -> float:
++        return getattr(self, name)
++
++
++def run_stats(al: Aligned, scale: float, abs_floor: float, margin_tau: float, top_n: int = 5) -> RunStats:
++    rows = normalized_deltas(al, scale, abs_floor)
++    if not rows:
++        return RunStats(0.0, 0.0, 0.0, 0.0, 0, bitwise_equal=not al.failures)
++    zs = [z for *_, z in rows]
++    max_z = max(abs(z) for z in zs)
++    rms_z = math.sqrt(sum(z * z for z in zs) / len(zs))
++    shift = -sum(zs) / len(zs)
++    max_abs = max(abs(d) for _, _, d, _ in rows)
++    bitwise = all(d == 0.0 for _, _, d, _ in rows)
++    worst = sorted(rows, key=lambda r: -abs(r[3]))[:top_n]
++    tok_of = {p["key"]: p.get("tokens") for p in al.prompts}
++    ref_of = {p["key"]: p["ref"] for p in al.prompts}
++    stats = RunStats(max_z=max_z, rms_z=rms_z, shift=shift, max_abs_delta=max_abs, n_tokens=len(rows),
++                     bitwise_equal=bitwise and not al.failures)
++    for key, pos, d, z in worst:
++        toks = tok_of.get(key)
++        stats.worst.append({"prompt": key, "position": pos, "token": toks[pos] if toks and pos < len(toks) else None,
++                            "ref_logprob": ref_of[key][pos], "delta": d, "z": z})
++    per: Dict[str, dict] = {}
++    for key, _, d, z in rows:
++        e = per.setdefault(key, {"n": 0, "max_abs_delta": 0.0, "max_z": 0.0, "sum_d": 0.0})
++        e["n"] += 1
++        e["max_abs_delta"] = max(e["max_abs_delta"], abs(d))
++        e["max_z"] = max(e["max_z"], abs(z))
++        e["sum_d"] += d
++    stats.per_prompt = {k: {"n": v["n"], "max_abs_delta": v["max_abs_delta"], "max_z": v["max_z"],
++                            "nll_delta": -v["sum_d"] / v["n"]} for k, v in per.items()}
++    stats.flips, stats.flips_checked, fnotes = _flips(al, margin_tau)
++    stats.greedy_bad, stats.greedy_explained, gnotes, stats.greedy_status = _greedy(al, margin_tau)
++    stats.notes = fnotes + gnotes
++    return stats
++
++
++# --------------------------------------------------------------------------
++# calibration
++
++
++@dataclass
++class NoiseModel:
++    scale: float
++    margin_tau: float
++    abs_floor: float
++    alpha: float
++    n_runs: int
++    thresholds: Dict[str, float]
++    null: Dict[str, List[float]]
++    deterministic: bool  # the reference schedule reproduced bitwise
++    batch_invariant: bool  # every perturbed capture reproduced bitwise too
++    max_abs_delta: float
++    warnings: List[str] = field(default_factory=list)
++
++    def to_dict(self) -> dict:
++        return {
++            "scale": self.scale,
++            "margin_tau": self.margin_tau,
++            "abs_floor": self.abs_floor,
++            "alpha": self.alpha,
++            "n_runs": self.n_runs,
++            "thresholds": self.thresholds,
++            "null": self.null,
++            "deterministic": self.deterministic,
++            "batch_invariant": self.batch_invariant,
++            "calibration_max_abs_delta": self.max_abs_delta,
++            "warnings": self.warnings,
++        }
++
++
++def _bound(xs: List[float], alpha: float, log: bool) -> Tuple[float, Optional[str]]:
++    """Upper (1 - alpha) prediction bound for one more draw like `xs`, never below max(xs)."""
++    top = max(xs)
++    k = len(xs)
++    if k < 3:
++        return FALLBACK_FACTOR * top if top > 0 else 0.0, (
++            f"{k} calibration run(s): thresholds are {FALLBACK_FACTOR:g}x the largest null value, not a "
++            f"prediction bound; use --calibrate 8 or more")
++    if log:
++        if top <= 0:
++            return 0.0, None
++        pos = [x for x in xs if x > 0]
++        if len(pos) < 3:
++            return FALLBACK_FACTOR * top, "too few nonzero calibration statistics for a log-normal bound"
++        ys = [math.log(x) for x in pos]
++    else:
++        ys = list(xs)
++    mean = statistics.fmean(ys)
++    sd = statistics.stdev(ys) if len(ys) > 1 else 0.0
++    t = t_ppf(1.0 - alpha, len(ys) - 1)
++    b = mean + t * sd * math.sqrt(1.0 + 1.0 / len(ys))
++    b = math.exp(b) if log else b
++    return max(b, top), None
++
++
++def fit(reference: dict, calibration: Sequence[dict], alpha: float = 0.01) -> NoiseModel:
++    """The noise model and per-statistic thresholds from calibration captures.
++
++    Captures whose schedule is "repeat" (the reference's own) only probe
++    determinism; the perturbed ones are the null samples.
++    """
++    if not calibration:
++        raise ValueError("no calibration captures; record with --calibrate N")
++    abs_floor = _abs_floor(reference, *calibration)
++    aligned = [align(reference, c) for c in calibration]
++    for c, al in zip(calibration, aligned):
++        if al.failures:
++            raise ValueError(f"calibration capture {c.get('schedule', {})} does not align: {al.failures[0]}")
++        if not all(math.isfinite(v) for p in al.prompts for v in p["ref"] + p["got"]):
++            raise ValueError(f"calibration capture {c.get('schedule', {})} has non-finite logprobs; "
++                             f"a trusted server should not produce those")
++    repeats = [al for c, al in zip(calibration, aligned) if c.get("schedule", {}).get("kind") == "repeat"]
++    perturbed = [al for c, al in zip(calibration, aligned) if c.get("schedule", {}).get("kind") != "repeat"]
++    u_all = [pooled_u(al) for al in aligned]
++    max_abs = max((abs(g - r) for al in aligned for p in al.prompts for r, g in zip(p["ref"], p["got"])), default=0.0)
++    deterministic = bool(repeats) and all(all(x == 0.0 for x in u) for al, u in zip(aligned, u_all) if al in repeats)
++    batch_invariant = bool(perturbed) and all(all(x == 0.0 for x in pooled_u(al)) for al in perturbed)
++    margin_tau = 2.0 * MARGIN_SAFETY * max_abs
++
++    pert_u = [pooled_u(al) for al in perturbed]
++    pooled = [x for u in pert_u for x in u]
++    scale = _quantile(pooled, SCALE_QUANTILE) if pooled else 0.0
++    warnings: List[str] = []
++    null: Dict[str, List[float]] = {s: [] for s in CONTINUOUS}
++    if len(perturbed) >= 2 and scale > 0:
++        for k, al in enumerate(perturbed):
++            others = [x for j, u in enumerate(pert_u) if j != k for x in u]
++            s_k = _quantile(others, SCALE_QUANTILE) or scale
++            st = run_stats(al, s_k, abs_floor, margin_tau)
++            for name in CONTINUOUS:
++                null[name].append(st.get(name))
++    elif perturbed and scale > 0:
++        st = run_stats(perturbed[0], scale, abs_floor, margin_tau)
++        for name in CONTINUOUS:
++            null[name].append(st.get(name))
++
++    thresholds: Dict[str, float] = {}
++    a = alpha / len(CONTINUOUS)
++    for name in CONTINUOUS:
++        xs = null[name]
++        if not xs:
++            thresholds[name] = 0.0
++            continue
++        b, warn = _bound(xs, a, log=(name != "shift"))
++        thresholds[name] = b
++        if warn and warn not in warnings:
++            warnings.append(warn)
++    if not perturbed:
++        warnings.append("no perturbed calibration captures: only exact comparison is possible")
++    return NoiseModel(scale=scale, margin_tau=margin_tau, abs_floor=abs_floor, alpha=alpha,
++                      n_runs=len(perturbed), thresholds=thresholds, null=null, deterministic=deterministic,
++                      batch_invariant=batch_invariant, max_abs_delta=max_abs, warnings=warnings)
++
++
++# --------------------------------------------------------------------------
++# decisions
++
++
++@dataclass
++class Decision:
++    passed: bool
++    mode: str
++    stats: Optional[RunStats]
++    failures: List[str] = field(default_factory=list)
++    info: List[str] = field(default_factory=list)
++
++    def to_dict(self) -> dict:
++        st = self.stats
++        return {
++            "passed": self.passed,
++            "mode": self.mode,
++            "failures": self.failures,
++            "info": self.info,
++            "stats": None if st is None else {
++                "max_z": st.max_z, "rms_z": st.rms_z, "shift": st.shift, "max_abs_delta": st.max_abs_delta,
++                "n_tokens": st.n_tokens, "flips": st.flips, "flips_checked": st.flips_checked,
++                "greedy_unexplained": st.greedy_bad, "greedy_explained": st.greedy_explained,
++                "bitwise_equal": st.bitwise_equal, "worst_tokens": st.worst, "greedy": st.greedy_status,
++                "per_prompt": st.per_prompt,
++            },
++        }
++
++
++def decide_exact(reference: dict, captured: dict) -> Decision:
++    """Bitwise equality of every logprob and every greedy token."""
++    al = align(reference, captured)
++    st = run_stats(al, 1.0, _abs_floor(reference, captured), 0.0)
++    failures = list(al.failures)
++    # Format-1 references were rounded to 6 decimals: equal means equal once rounded the same way.
++    same = (lambda r, g: round(g, 6) == r) if reference.get("format", 1) < 2 else (lambda r, g: r == g)
++    for p in al.prompts:
++        diff = [i for i, (r, g) in enumerate(zip(p["ref"], p["got"])) if not same(r, g)]
++        if diff:
++            i = max(diff, key=lambda j: abs(p["got"][j] - p["ref"][j]))
++            failures.append(f"{p['key']}: {len(diff)}/{len(p['ref'])} logprobs differ; worst at token {i} by "
++                            f"{p['got'][i] - p['ref'][i]:+.3g}")
++        if p.get("ref_greedy") is not None and p.get("got_greedy") != p.get("ref_greedy"):
++            failures.append(f"{p['key']}: greedy continuation differs")
++    return Decision(passed=not failures, mode="exact", stats=st, failures=failures)
++
++
++def decide_statistical(reference: dict, captured: dict, model: NoiseModel) -> Decision:
++    al = align(reference, captured)
++    st = run_stats(al, model.scale if model.scale > 0 else 1.0, model.abs_floor, model.margin_tau)
++    failures = list(al.failures)
++    info = [f"noise model: scale {model.scale:.3g} x (1 - p), {model.n_runs} perturbed calibration runs, "
++            f"margin_tau {model.margin_tau:.3g}, alpha {model.alpha:g}"]
++    info += model.warnings
++    if model.scale <= 0:
++        # Calibration saw no noise at all: anything else than equality is unexplained.
++        if not st.bitwise_equal:
++            failures.append(f"calibration showed no noise, yet logprobs moved by up to {st.max_abs_delta:.3g}")
++    else:
++        for name in CONTINUOUS:
++            val, thr = st.get(name), model.thresholds.get(name, 0.0)
++            if val > thr:
++                worst = st.worst[0] if st.worst else {}
++                extra = ""
++                if name == "max_z" and worst:
++                    extra = (f" (worst: {worst['prompt']}[{worst['position']}] {worst.get('token')!r}, "
++                             f"delta {worst['delta']:+.4g} from {worst['ref_logprob']:.4g})")
++                failures.append(f"{name} {val:.3g} > calibrated threshold {thr:.3g}{extra}")
++    if st.flips:
++        failures.append(f"{st.flips} top-1 flips at positions whose reference margin exceeds {model.margin_tau:.3g}")
++    if st.greedy_bad:
++        failures.append(f"{st.greedy_bad} greedy continuations diverged where the reference had a clear winner")
++    failures += [n for n in st.notes if n not in failures]
++    if st.greedy_explained:
++        info.append(f"{st.greedy_explained} greedy divergence(s) at near-ties (margin <= {model.margin_tau:.3g}), "
++                    f"explained by noise")
++    return Decision(passed=not failures, mode="statistical", stats=st, failures=failures, info=info)
++
++
++def choose_mode(requested: str, model: Optional[NoiseModel]) -> str:
++    """'auto' is exact where calibration proved the engine deterministic, statistical otherwise."""
++    if requested in ("exact", "statistical", "legacy"):
++        return requested
++    if model is None:
++        return "legacy"
++    return "exact" if model.deterministic else "statistical"
+diff --git a/tests/test_verify_stats.py b/tests/test_verify_stats.py
+new file mode 100644
+index 0000000..9d8f7ea
+--- /dev/null
++++ b/tests/test_verify_stats.py
+@@ -0,0 +1,266 @@
++"""Tests for the calibrated verify statistics, on synthetic captures with known noise."""
++import json
++import math
++import random
++import tempfile
++from pathlib import Path
++
++import pytest
++
++from servekit import verify_stats as vs
++from servekit.cli import main
++from servekit.verify import check, compare_weights
++
++from test_bench import _start_server
++
++LENGTHS = {"a": 40, "b": 120, "c": 25, "d": 300}
++
++
++def _ref(seed=0, n_greedy=8):
++    rng = random.Random(seed)
++    prompts = []
++    for key, n in LENGTHS.items():
++        lps = []
++        for _ in range(n):
++            u = rng.random()
++            lps.append(-rng.expovariate(1 / 1e-3) if u < 0.5 else -rng.expovariate(1 / 2.5))
++        tops = []
++        for lp in lps:
++            best = max(lp, -rng.expovariate(1.0))
++            tops.append([["best", best], ["second", best - rng.choice([0.0, 0.01, 0.5, 3.0, 8.0])]])
++        greedy_top = [[["g%d" % i, -0.1], ["alt", -0.1 - m]] for i, m in enumerate([5.0] * 10 + [0.001] + [5.0] * 5)]
++        prompts.append({"key": key, "n_tokens": n, "tokens": ["t%d" % i for i in range(n)], "token_logprobs": lps,
++                        "top_logprobs": tops, "greedy_tokens": ["g%d" % i for i in range(16)],
++                        "greedy_top_logprobs": greedy_top})
++    return {"format": 2, "model": "m", "prompts": prompts, "schedule": {"kind": "reference"}}
++
++
++def _noisy(ref, seed, s=0.05, kind="perturbed"):
++    """A capture whose logprobs move by s * (1 - p) * (student-t noise): the model the stats assume."""
++    rng = random.Random(seed)
++    cap = json.loads(json.dumps(ref))
++    cap["schedule"] = {"kind": kind, "seed": seed}
++    for p in cap["prompts"]:
++        new = []
++        for lp in p["token_logprobs"]:
++            t = rng.gauss(0, 1) / math.sqrt(max(rng.gammavariate(2.5, 1 / 2.5), 1e-3))
++            new.append(min(0.0, lp + s * (-math.expm1(lp)) * t))
++        p["token_logprobs"] = new
++    return cap
++
++
++def _model(ref, k=8, alpha=0.01, s=0.05):
++    calib = [_noisy(ref, 0, s=0.0, kind="repeat")] + [_noisy(ref, 100 + i, s=s) for i in range(k)]
++    return vs.fit(ref, calib, alpha=alpha)
++
++
++@pytest.mark.parametrize("p,df,expect", [(0.975, 5, 2.570582), (0.999, 9, 4.296806), (0.995, 19, 2.860935),
++                                         (0.99, 1, 31.820516), (0.9, 100, 1.290075)])
++def test_t_ppf_matches_tables(p, df, expect):
++    assert vs.t_ppf(p, df) == pytest.approx(expect, rel=1e-5)
++    assert vs.t_ppf(1 - p, df) == pytest.approx(-expect, rel=1e-5)
++
++
++def test_fit_reports_determinism_and_scale():
++    ref = _ref()
++    m = _model(ref)
++    assert m.deterministic and not m.batch_invariant
++    assert m.n_runs == 8
++    assert 0.0 < m.scale < 0.5
++    assert set(m.thresholds) == set(vs.CONTINUOUS)
++    for name in vs.CONTINUOUS:
++        assert m.thresholds[name] >= max(m.null[name])
++
++
++def test_false_alarm_rate_is_near_alpha_on_held_out_benign_runs():
++    ref = _ref()
++    m = _model(ref, k=16, alpha=0.05)
++    alarms = sum(not vs.decide_statistical(ref, _noisy(ref, 1000 + i), m).passed for i in range(200))
++    assert alarms / 200 <= 0.10  # nominal 0.05; the bound is conservative but K=16 is small
++
++
++def test_identical_capture_passes_every_mode():
++    ref = _ref()
++    m = _model(ref)
++    same = json.loads(json.dumps(ref))
++    assert vs.decide_statistical(ref, same, m).passed
++    assert vs.decide_exact(ref, same).passed
++
++
++def test_a_few_hard_hit_tokens_fail_max_z():
++    ref = _ref()
++    m = _model(ref)
++    bad = _noisy(ref, 7)
++    for i in (3, 50, 77):
++        bad["prompts"][1]["token_logprobs"][i] -= 2.0
++    d = vs.decide_statistical(ref, bad, m)
++    assert not d.passed
++    assert any(f.startswith("max_z") and "b[" in f for f in d.failures)
++
++
++def test_a_small_consistent_drift_fails_shift_but_not_max_z():
++    ref = _ref()
++    m = _model(ref)
++    bad = _noisy(ref, 8)
++    for p in bad["prompts"]:
++        p["token_logprobs"] = [lp - 0.4 * m.scale * max(-math.expm1(lp), vs.REL_FLOOR) for lp in p["token_logprobs"]]
++    d = vs.decide_statistical(ref, bad, m)
++    assert not d.passed
++    assert any(f.startswith("shift") for f in d.failures)
++    assert not any(f.startswith("max_z") for f in d.failures)
++
++
++def test_greedy_divergence_at_a_near_tie_is_explained_and_at_a_clear_winner_is_not():
++    ref = _ref()
++    m = _model(ref)
++    tie = json.loads(json.dumps(ref))
++    tie["prompts"][0]["greedy_tokens"] = tie["prompts"][0]["greedy_tokens"][:10] + ["alt"] + ["x"] * 5
++    d = vs.decide_statistical(ref, tie, m)
++    assert d.passed and d.stats.greedy_explained == 1
++    clear = json.loads(json.dumps(ref))
++    clear["prompts"][0]["greedy_tokens"] = clear["prompts"][0]["greedy_tokens"][:4] + ["alt"] * 12
++    d = vs.decide_statistical(ref, clear, m)
++    assert not d.passed and any("greedy continuation diverged at token 4" in f for f in d.failures)
++
++
++def test_top1_flip_only_counts_at_clear_winners():
++    ref = _ref()
++    m = _model(ref)
++    cap = json.loads(json.dumps(ref))
++    tops = ref["prompts"][3]["top_logprobs"]
++    clear = next(i for i, t in enumerate(tops) if t[0][1] - t[1][1] > m.margin_tau)
++    near = next(i for i, t in enumerate(tops) if t[0][1] - t[1][1] == 0.01)
++    for i in (near,):
++        cap["prompts"][3]["top_logprobs"][i] = [["second", -0.1], ["best", -0.11]]
++    assert vs.decide_statistical(ref, cap, m).passed
++    cap["prompts"][3]["top_logprobs"][clear] = [["second", -0.1], ["best", -0.2]]
++    d = vs.decide_statistical(ref, cap, m)
++    assert not d.passed and d.stats.flips == 1
++
++
++def test_non_finite_logprobs_fail():
++    ref = _ref()
++    m = _model(ref)
++    bad = json.loads(json.dumps(ref))
++    bad["prompts"][2]["token_logprobs"][5] = float("nan")
++    assert not vs.decide_statistical(ref, bad, m).passed
++    bad["prompts"][2]["token_logprobs"][5] = float("-inf")
++    assert not vs.decide_statistical(ref, bad, m).passed
++
++
++def test_batch_invariant_calibration_means_exact():
++    ref = _ref()
++    calib = [_noisy(ref, 0, s=0.0, kind="repeat")] + [_noisy(ref, i, s=0.0) for i in range(4)]
++    m = vs.fit(ref, calib)
++    assert m.deterministic and m.batch_invariant and m.scale == 0.0
++    assert vs.choose_mode("auto", m) == "exact"
++    one_off = json.loads(json.dumps(ref))
++    one_off["prompts"][0]["token_logprobs"][0] += 1e-7
++    assert not vs.decide_exact(ref, one_off).passed
++    # statistical mode on a noiseless calibration accepts nothing but equality either
++    assert not vs.decide_statistical(ref, one_off, m).passed
++
++
++def test_nondeterministic_reference_schedule_means_statistical():
++    ref = _ref()
++    calib = [_noisy(ref, 1, kind="repeat")] + [_noisy(ref, 100 + i) for i in range(8)]
++    m = vs.fit(ref, calib)
++    assert not m.deterministic
++    assert vs.choose_mode("auto", m) == "statistical"
++    assert vs.choose_mode("auto", None) == "legacy"
++
++
++def test_tokenization_change_fails_structurally():
++    ref = _ref()
++    m = _model(ref)
++    bad = json.loads(json.dumps(ref))
++    bad["prompts"][0]["n_tokens"] += 1
++    bad["prompts"][0]["token_logprobs"].append(-1.0)
++    d = vs.decide_statistical(ref, bad, m)
++    assert not d.passed and any("tokenized to" in f for f in d.failures)
++
++
++def test_few_calibration_runs_fall_back_and_warn():
++    ref = _ref()
++    m = _model(ref, k=2)
++    assert any("calibration run" in w for w in m.warnings)
++    assert vs.decide_statistical(ref, json.loads(json.dumps(ref)), m).passed
++
++
++def test_check_keeps_legacy_semantics_for_uncalibrated_references():
++    ref = _ref()
++    ref["format"] = 1
++    cap = json.loads(json.dumps(ref))
++    cap["prompts"][0]["token_logprobs"][0] -= 5e-7
++    res = check(ref, cap)
++    assert res.mode == "legacy" and res.passed
++    cap["prompts"][0]["token_logprobs"][0] -= 1e-3
++    assert not check(ref, cap).passed
++
++
++def test_check_exact_mode_explains_a_mismatch_within_noise():
++    ref = _ref()
++    ref["calibration"] = [_noisy(ref, 0, s=0.0, kind="repeat")] + [_noisy(ref, 100 + i) for i in range(8)]
++    res = check(ref, _noisy(ref, 999, s=0.01))
++    assert res.mode == "exact" and not res.passed
++    assert res.diagnosis and "within the calibrated noise" in res.diagnosis[0]
++    assert check(ref, _noisy(ref, 999, s=0.01), mode="statistical").passed
++
++
++def test_compare_weights():
++    a = {"per_engine_checksum": "x", "ranks": [{"checksums": {"w": "1", "v": "2"}, "parallelism_info": {"tp_rank": 0}}]}
++    b = json.loads(json.dumps(a))
++    assert compare_weights(a, b) == (True, [])
++    b["per_engine_checksum"] = "y"
++    b["ranks"][0]["checksums"]["v"] = "3"
++    ok, msgs = compare_weights(a, b)
++    assert ok is False and msgs == ["rank 0: v differs"]
++    b["ranks"][0]["parallelism_info"] = {"tp_rank": 1}
++    assert compare_weights(a, b)[0] is None
++    assert compare_weights(None, b)[0] is None
++
++
++def test_cli_record_with_calibration_then_check():
++    srv, url = _start_server()
++    try:
++        with tempfile.TemporaryDirectory() as d:
++            prompts = Path(d) / "prompts.json"
++            prompts.write_text(json.dumps({"prompt_set": "t", "prompts": [
++                {"key": "greet", "text": "hello world"}, {"key": "long", "text": "one two three four five six"}]}))
++            gold = Path(d) / "gold.json"
++            assert main(["verify", "--url", url, "--record", str(gold), "--prompts", str(prompts),
++                         "--calibrate", "3", "--max-concurrency", "2"]) == 0
++            ref = json.loads(gold.read_text())
++            assert ref["format"] == 2 and len(ref["calibration"]) == 4
++            assert [c["schedule"]["kind"] for c in ref["calibration"]] == ["repeat", "perturbed", "perturbed", "perturbed"]
++
++            out = Path(d) / "verify.json"
++            assert main(["verify", "--url", url, "--reference", str(gold), "--out", str(out)]) == 0
++            result = json.loads(out.read_text())
++            assert result["passed"] and result["mode"] == "exact"  # the stub is deterministic
++
++            ref["prompts"][0]["token_logprobs"][0] -= 0.5
++            gold.write_text(json.dumps(ref))
++            assert main(["verify", "--url", url, "--reference", str(gold), "--out", str(out)]) == 1
++            assert json.loads(out.read_text())["passed"] is False
++    finally:
++        srv.shutdown()
++
++
++def test_cli_rejects_flags_on_the_wrong_side():
++    with tempfile.TemporaryDirectory() as d:
++        ref = Path(d) / "g.json"
++        ref.write_text(json.dumps(_ref()))
++        assert main(["verify", "--url", "http://x", "--reference", str(ref), "--calibrate", "4"]) == 2
++        assert main(["verify", "--url", "http://x", "--record", str(ref), "--mode", "exact"]) == 2
++
++
++def test_exact_mode_against_a_rounded_format1_reference():
++    ref = _ref()
++    ref["format"] = 1
++    for p in ref["prompts"]:
++        p["token_logprobs"] = [round(v, 6) for v in p["token_logprobs"]]
++    full = _ref()  # the same logprobs at full precision, as a format-2 capture holds them
++    assert vs.decide_exact(ref, full).passed
++    full["prompts"][1]["token_logprobs"][3] -= 1e-5
++    assert not vs.decide_exact(ref, full).passed
+-- 
+2.50.1 (Apple Git-155)
+

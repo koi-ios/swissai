@@ -1,0 +1,31 @@
+From: (to be filled by the sender)
+Subject: [PATCH] deepseek_v2: alias kv_b_proj on attn_mha without registering a submodule
+
+Refresh of sgl-project/sglang#35715 (youssef62) against origin/main: since 2d8484740d (#35314)
+the forward_prepare fill-in carries an `and hasattr(self, "kv_b_proj")` guard, so the
+open PR no longer applies as written. Fixes #35702 (auto-closed as inactive, still present).
+
+---
+--- a/python/sglang/srt/models/deepseek_v2.py
++++ b/python/sglang/srt/models/deepseek_v2.py
+@@ -2290,7 +2290,9 @@
+             init_modelslim_mla_kv(self, prefix)
+ 
+         self.alt_stream = alt_stream
+-        self.attn_mha.kv_b_proj = None
++        # Alias for backends that only get the RadixAttention layer. Not registered
++        # as a submodule: a second state_dict name breaks sharded_state round-trips.
++        object.__setattr__(self.attn_mha, "kv_b_proj", self.kv_b_proj)
+ 
+         self.w_kc = None
+         self.w_vc = None
+@@ -2459,9 +2461,6 @@
+         llama_4_scaling: Optional[torch.Tensor] = None,
+         prev_topk_indices: Optional[torch.Tensor] = None,
+     ):
+-        if self.attn_mha.kv_b_proj is None and hasattr(self, "kv_b_proj"):
+-            self.attn_mha.kv_b_proj = self.kv_b_proj
+-
+         # when hidden_states is a tuple of tensors, the tuple will include quantized weight and scale tensor
+         if isinstance(hidden_states, tuple):
+             if (

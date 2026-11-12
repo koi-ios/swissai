@@ -1,0 +1,53 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "model": "Qwen/Qwen2.5-3B-Instruct",
+  "correctness": {
+    "max_new_tokens": 64,
+    "results": [
+      {
+        "prompt": "The capital of France is",
+        "output": " Paris. The capital of Germany is Berlin. The capital of Italy is Rome. The capital of Spain is Madrid. The capital of Portugal is Lisbon. The capital of Switzerland is Bern. The capital of Austria is Vienna. The capital of Denmark is Copenhagen. The capital of Norway is Oslo. The capital of Sweden is Stockholm"
+      },
+      {
+        "prompt": "Explain in one sentence why the sky is blue.",
+        "output": " The sky appears blue because the Earth's atmosphere scatters sunlight in all directions and blue light is scattered more than other colors due to its shorter wavelength."
+      },
+      {
+        "prompt": "List the first 10 prime numbers.",
+        "output": " To determine the first 10 prime numbers, we need to identify numbers that are greater than 1 and have no positive divisors other than 1 and themselves. Let's list them step by step:\n\n1. The number 2 is a prime number because it has no positive divisors other than 1 and"
+      },
+      {
+        "prompt": "Q: If a train travels 60 km in 1.5 hours, what is its average speed? A:",
+        "output": " We can solve this by using the formula: speed = distance / time. The train traveled 60 km in 1. 5 hours, so we can plug these values into the formula: speed = 60 km / 1. 5 hours = 40 km/h. Therefore, the answer"
+      },
+      {
+        "prompt": "def fibonacci(n):",
+        "output": " \n    if n <= 1: \n        return n \n    else: \n        return(fibonacci(n-1) + fibonacci(n-2)) \n\nnterms = 10\n\n# check if the number of terms is valid \nif nterms <= 0: \n    print(\"Ple"
+      },
+      {
+        "prompt": "The three laws of thermodynamics are:",
+        "output": " the first law, the second law, and the third law. The first law states that energy can be converted from one form to another, but it cannot be created or destroyed. The second law states that the total entropy of a closed system will always increase over time. The third law states that as the temperature of a"
+      }
+    ]
+  },
+  "throughput": {
+    "requests": 64,
+    "completed": 64,
+    "errors": 0,
+    "concurrency": 16,
+    "input_len": 512,
+    "output_len": 128,
+    "wall_s": 32.324,
+    "output_tokens": 8192,
+    "output_tok_per_s": 253.4,
+    "requests_per_s": 1.98,
+    "latency_s": {
+      "mean": 7.572,
+      "p50": 8.073,
+      "p99": 8.087,
+      "max": 8.087
+    }
+  },
+  "ready_wait_s": 0.048,
+  "errors": []
+}

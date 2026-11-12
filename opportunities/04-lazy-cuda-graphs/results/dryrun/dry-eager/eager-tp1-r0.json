@@ -1,0 +1,88 @@
+{
+ "spec": {
+  "model": "mock/model",
+  "tp": 1,
+  "server_args": [
+   "--mem-fraction-static",
+   "0.85",
+   "--disable-cuda-graph"
+  ],
+  "launch_request": null,
+  "timeout_s": 120,
+  "arm": "eager",
+  "repeat": 0,
+  "cuda_graph_config": null,
+  "env": {},
+  "eager_sweep": {
+   "prefill_tokens": [
+    512,
+    1536,
+    4096,
+    8192
+   ],
+   "decode_bs": [
+    1,
+    8
+   ],
+   "reps": 1,
+   "decode_tokens": 8
+  },
+  "run_id": "dry-eager"
+ },
+ "tag": "eager-tp1-r0",
+ "time_to_ready_s": 0.25679579097777605,
+ "gpu_mem_after_replay_mib": null,
+ "eager_sweep": {
+  "prefill_ttft_s": {
+   "512": {
+    "median": 0.004254584084264934,
+    "min": 0.004254584084264934,
+    "max": 0.004254584084264934,
+    "n": 1
+   },
+   "1536": {
+    "median": 0.008720416924916208,
+    "min": 0.008720416924916208,
+    "max": 0.008720416924916208,
+    "n": 1
+   },
+   "4096": {
+    "median": 0.023520625079981983,
+    "min": 0.023520625079981983,
+    "max": 0.023520625079981983,
+    "n": 1
+   },
+   "8192": {
+    "median": 0.03772908297833055,
+    "min": 0.03772908297833055,
+    "max": 0.03772908297833055,
+    "n": 1
+   }
+  },
+  "decode_tpot_s": {
+   "1": {
+    "median": 0.00036572029681078026,
+    "min": 0.00036572029681078026,
+    "max": 0.00036572029681078026,
+    "n": 1
+   },
+   "8": {
+    "median": 0.00037422021185713153,
+    "min": 0.00037422021185713153,
+    "max": 0.00037422021185713153,
+    "n": 1
+   }
+  }
+ },
+ "log": {
+  "startup_capture": {},
+  "lazy_setup": {},
+  "lazy_disabled": {},
+  "lazy_steps": [],
+  "lazy_all_captured_t": null,
+  "ready_log_t": 0.09220479091163725,
+  "errors": [],
+  "startup_capture_total_s": 0,
+  "lazy_capture_total_s": 0
+ }
+}

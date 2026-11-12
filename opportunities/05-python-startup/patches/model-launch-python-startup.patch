@@ -1,0 +1,145 @@
+From 69d2e173d77c1bd4b076c03dd7aca474e3a37763 Mon Sep 17 00:00:00 2001
+From: pystartup <pystartup@localhost>
+Date: Thu, 12 Nov 2026 06:40:23 +0100
+Subject: [PATCH] images: ship bytecode; sglang: overridable entrypoint
+
+The uv-built vLLM images contain no .pyc files, so the first process of every launch
+compiles torch, transformers and vLLM from source (and every process does on a
+read-only root). Add a gap-filling compileall step with unchecked-hash pycs to the
+SGLang and vLLM Dockerfiles. Make the SGLang entrypoint overridable through
+SML_SGLANG_ENTRYPOINT so a deployment can start SGLang through a launcher such as the
+worker-zygote wrapper without a code change; the default is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ images/sglang_0.5.20/Dockerfile                  |  8 ++++++++
+ images/sglang_cuda13/Dockerfile                  |  8 ++++++++
+ images/vllm_0.30.0/Dockerfile                    |  8 ++++++++
+ images/vllm_apertus_1.5_release/Dockerfile       |  8 ++++++++
+ images/vllm_cuda13/Dockerfile                    |  8 ++++++++
+ images/vllm_cuda13_v2/Dockerfile                 | 10 +++++++++-
+ src/swiss_ai_model_launch/launchers/framework.py |  5 ++++-
+ 7 files changed, 53 insertions(+), 2 deletions(-)
+
+diff --git a/images/sglang_0.5.20/Dockerfile b/images/sglang_0.5.20/Dockerfile
+index df392c9..486de92 100644
+--- a/images/sglang_0.5.20/Dockerfile
++++ b/images/sglang_0.5.20/Dockerfile
+@@ -89,4 +89,12 @@ RUN pip install --no-cache-dir nvidia-cublas==13.4.0.1 && \
+     conda install -y curl && conda clean -ya && \
+     pip install --no-cache-dir sglang-router==0.3.2
+ 
++# Ship bytecode with the image. Without it the first process of every launch compiles torch,
++# transformers and the engine from source (uv never compiles; pip does), and on a read-only
++# root every process does. Hash-based pycs that are never checked against the source
++# (PEP 552, unchecked-hash) suit an immutable image and survive mtime changes on the way to
++# the .sqsh. No -f: valid pycs that pip already wrote are kept.
++RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
++    || echo "compileall: some sources did not compile (unimportable files); continuing"
++
+ WORKDIR /opt
+diff --git a/images/sglang_cuda13/Dockerfile b/images/sglang_cuda13/Dockerfile
+index 5427051..34d5cec 100644
+--- a/images/sglang_cuda13/Dockerfile
++++ b/images/sglang_cuda13/Dockerfile
+@@ -71,4 +71,12 @@ RUN pip install --no-cache-dir --no-deps --force-reinstall \
+     conda install -y curl && conda clean -ya && \
+     pip install --no-cache-dir sglang-router==0.3.2
+ 
++# Ship bytecode with the image. Without it the first process of every launch compiles torch,
++# transformers and the engine from source (uv never compiles; pip does), and on a read-only
++# root every process does. Hash-based pycs that are never checked against the source
++# (PEP 552, unchecked-hash) suit an immutable image and survive mtime changes on the way to
++# the .sqsh. No -f: valid pycs that pip already wrote are kept.
++RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
++    || echo "compileall: some sources did not compile (unimportable files); continuing"
++
+ WORKDIR /opt
+diff --git a/images/vllm_0.30.0/Dockerfile b/images/vllm_0.30.0/Dockerfile
+index 78e1f2f..2688c10 100644
+--- a/images/vllm_0.30.0/Dockerfile
++++ b/images/vllm_0.30.0/Dockerfile
+@@ -62,4 +62,12 @@ RUN pip uninstall -y nvidia-cublas 2>/dev/null; true
+ # Install curl for router health checks.
+ RUN conda install -y curl && conda clean -ya
+ 
++# Ship bytecode with the image. Without it the first process of every launch compiles torch,
++# transformers and the engine from source (uv never compiles; pip does), and on a read-only
++# root every process does. Hash-based pycs that are never checked against the source
++# (PEP 552, unchecked-hash) suit an immutable image and survive mtime changes on the way to
++# the .sqsh. No -f: valid pycs that pip already wrote are kept.
++RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
++    || echo "compileall: some sources did not compile (unimportable files); continuing"
++
+ WORKDIR /opt
+diff --git a/images/vllm_apertus_1.5_release/Dockerfile b/images/vllm_apertus_1.5_release/Dockerfile
+index ac24ca4..631d426 100644
+--- a/images/vllm_apertus_1.5_release/Dockerfile
++++ b/images/vllm_apertus_1.5_release/Dockerfile
+@@ -113,3 +113,11 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+     --reinstall-package vllm \
+     --no-build-isolation ".[audio]" \
+     --torch-backend=auto;
++
++# Ship bytecode with the image. Without it the first process of every launch compiles torch,
++# transformers and the engine from source (uv never compiles; pip does), and on a read-only
++# root every process does. Hash-based pycs that are never checked against the source
++# (PEP 552, unchecked-hash) suit an immutable image and survive mtime changes on the way to
++# the .sqsh. No -f: valid pycs that pip already wrote are kept.
++RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" /workspace/vllm \
++    || echo "compileall: some sources did not compile (unimportable files); continuing"
+diff --git a/images/vllm_cuda13/Dockerfile b/images/vllm_cuda13/Dockerfile
+index 9dfab1c..40642d4 100644
+--- a/images/vllm_cuda13/Dockerfile
++++ b/images/vllm_cuda13/Dockerfile
+@@ -60,4 +60,12 @@ RUN pip uninstall -y nvidia-cublas 2>/dev/null; true
+ # Install curl for router health checks.
+ RUN conda install -y curl && conda clean -ya
+ 
++# Ship bytecode with the image. Without it the first process of every launch compiles torch,
++# transformers and the engine from source (uv never compiles; pip does), and on a read-only
++# root every process does. Hash-based pycs that are never checked against the source
++# (PEP 552, unchecked-hash) suit an immutable image and survive mtime changes on the way to
++# the .sqsh. No -f: valid pycs that pip already wrote are kept.
++RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
++    || echo "compileall: some sources did not compile (unimportable files); continuing"
++
+ WORKDIR /opt
+diff --git a/images/vllm_cuda13_v2/Dockerfile b/images/vllm_cuda13_v2/Dockerfile
+index 04f7c84..e9d061a 100644
+--- a/images/vllm_cuda13_v2/Dockerfile
++++ b/images/vllm_cuda13_v2/Dockerfile
+@@ -107,4 +107,12 @@ RUN uv pip install --python /opt/conda/bin/python --no-cache --no-deps \
+     numpy==2.3.5 && \
+     rm -rf /root/.cache/uv
+ 
+-WORKDIR /opt
+\ No newline at end of file
++# Ship bytecode with the image. Without it the first process of every launch compiles torch,
++# transformers and the engine from source (uv never compiles; pip does), and on a read-only
++# root every process does. Hash-based pycs that are never checked against the source
++# (PEP 552, unchecked-hash) suit an immutable image and survive mtime changes on the way to
++# the .sqsh. No -f: valid pycs that pip already wrote are kept.
++RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
++    || echo "compileall: some sources did not compile (unimportable files); continuing"
++
++WORKDIR /opt
+diff --git a/src/swiss_ai_model_launch/launchers/framework.py b/src/swiss_ai_model_launch/launchers/framework.py
+index 9f626c2..6aa452d 100644
+--- a/src/swiss_ai_model_launch/launchers/framework.py
++++ b/src/swiss_ai_model_launch/launchers/framework.py
+@@ -53,7 +53,10 @@ class Framework:
+ 
+ class Sglang(Framework):
+     name = "sglang"
+-    entrypoint = "python3 -m sglang.launch_server"
++    # Overridable at job runtime (bash expansion in the rank scripts), e.g.
++    # SML_SGLANG_ENTRYPOINT="python3 -m pystartup.sglang_launch --" to fork the TP
++    # workers from a preloaded zygote instead of spawning fresh interpreters.
++    entrypoint = "${SML_SGLANG_ENTRYPOINT:-python3 -m sglang.launch_server}"
+     env_exports = [
+         'export no_proxy="0.0.0.0,$no_proxy"',
+         'export NO_PROXY="0.0.0.0,$NO_PROXY"',
+-- 
+2.50.1 (Apple Git-155)
+

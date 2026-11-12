@@ -1,0 +1,53 @@
+{
+  "mla_alias": {
+    "sharded_state_after_a_forward": "KeyError: model.layers.0.self_attn.attn_mha.kv_b_proj.weight",
+    "sharded_state_before_any_forward": "loads",
+    "sharded_state_with_fixed_backport": "exact (deep-state equal)",
+    "raw_preshard_unpatched_sglang": "exact (deep-state equal)"
+  },
+  "servekit_cd8f0b8_backport_on_0_5_20": "refused: error: the forward_prepare fill-in is not in /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-114/test_servekit_main_backport_no",
+  "mxfp4_triton": {
+    "sharded_state_load": "no error",
+    "checkpoint_bytes": 7552,
+    "sharded_state_bytes": 2176,
+    "dropped_fraction": 0.712,
+    "state_dict_check": "passes (wrongly)",
+    "deepstate_check": {
+      "differ": [
+        "experts.quant_method.w13_precision_config.b_mx_scale.storage.data",
+        "experts.quant_method.w13_weight_triton_tensor.storage.data",
+        "experts.quant_method.w2_weight_triton_tensor.storage.data"
+      ],
+      "missing": []
+    },
+    "outputs_equal": false,
+    "raw_preshard": {
+      "deepstate": "exact",
+      "outputs_equal": true,
+      "stored_bytes": 7552
+    }
+  },
+  "gemma_rmsnorm": {
+    "sharded_state": "loads; norm.gemma_weight stays 1.0 (as if the checkpoint norm were 0)",
+    "readers_in_v0_5_20": "layernorm.py forward_with_allreduce_fusion, ROCm and NPU paths; qwen35_flashinfer_fusion.py; minimax_m3.py:1102 (q_norm.gemma_weight)",
+    "raw_preshard": "exact"
+  },
+  "quant_guard_gpt_oss_default_backend": {
+    "servekit_cd8f0b8": "not refused",
+    "this_branch": "refused for sharded_state, allowed as raw",
+    "why": "SGLang 0.5.20 resolves --moe-runner-backend auto to triton_kernel for gpt-oss below SM100 (arg_groups/model_overrides/gpt_oss.py:106-125)"
+  },
+  "sglang_source_extracted": [
+    "python/sglang/srt/layers/layernorm.py:1069-1083  GemmaRMSNorm.__init__",
+    "python/sglang/srt/layers/layernorm.py:1085-1089  GemmaRMSNorm._weight_loader",
+    "python/sglang/srt/layers/quantization/mxfp4.py:1016-1043  Mxfp4MoEMethod.process_weights_after_loading: body of `if self.use_triton_kernels:`",
+    "python/sglang/srt/model_loader/loader.py:1688-1730  ShardedStateLoader._filter_subtensors",
+    "python/sglang/srt/model_loader/loader.py:1732-1743  ShardedStateLoader._prepare_weights",
+    "python/sglang/srt/model_loader/loader.py:1748-1809  ShardedStateLoader.load_model",
+    "python/sglang/srt/model_loader/loader.py:1812-1845  ShardedStateLoader.save_model",
+    "python/sglang/srt/model_loader/loader.py:307-313  _post_load_weights",
+    "python/sglang/srt/models/deepseek_v2.py:1920-1920  DeepseekV2AttentionMLA.__init__ statement",
+    "python/sglang/srt/models/deepseek_v2.py:2070-2071  DeepseekV2AttentionMLA.forward_prepare statement"
+  ],
+  "torch": "2.13.0"
+}

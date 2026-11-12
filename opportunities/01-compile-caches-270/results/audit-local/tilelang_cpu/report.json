@@ -1,0 +1,719 @@
+{
+  "argv": [
+    "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/bin/python",
+    "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py"
+  ],
+  "exit_code": 0,
+  "gate": "PASS",
+  "reasons": [],
+  "proposal": {
+    "TILELANG_CACHE_DIR": "{jit_cache}/tilelang"
+  },
+  "proposal_entries": {
+    "TILELANG_CACHE_DIR": [
+      "tilelang"
+    ]
+  },
+  "verification": {
+    "tilelang": "verified"
+  },
+  "builds": {
+    "tilelang": {
+      "binaries_cold": 3,
+      "binaries_warm": 0,
+      "files_cold": 12,
+      "files_warm": 0
+    }
+  },
+  "relocation": {},
+  "readonly": {
+    "returncode": 0,
+    "write_attempts_into_ro_cache": {
+      "tilelang": 25
+    },
+    "failed_writes": 0
+  },
+  "outside": [],
+  "temporaries": [
+    {
+      "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp0mzd07ym.so",
+      "entry": "UNKNOWN",
+      "anchor": "TMPDIR",
+      "variable": null,
+      "files": 1,
+      "bytes": 16960,
+      "by_class": {
+        "temp": 1
+      },
+      "bytes_by_class": {
+        "temp": 16960
+      },
+      "path_baked": 0,
+      "path_baked_examples": [],
+      "write_pattern": "no live trace",
+      "ops": {},
+      "writers": {},
+      "failed_writes": []
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp8l2th3gg.so",
+      "entry": "UNKNOWN",
+      "anchor": "TMPDIR",
+      "variable": null,
+      "files": 1,
+      "bytes": 16960,
+      "by_class": {
+        "temp": 1
+      },
+      "bytes_by_class": {
+        "temp": 16960
+      },
+      "path_baked": 0,
+      "path_baked_examples": [],
+      "write_pattern": "no live trace",
+      "ops": {},
+      "writers": {},
+      "failed_writes": []
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmpcofz0w3p.so",
+      "entry": "UNKNOWN",
+      "anchor": "TMPDIR",
+      "variable": null,
+      "files": 1,
+      "bytes": 16960,
+      "by_class": {
+        "temp": 1
+      },
+      "bytes_by_class": {
+        "temp": 16960
+      },
+      "path_baked": 0,
+      "path_baked_examples": [],
+      "write_pattern": "no live trace",
+      "ops": {},
+      "writers": {},
+      "failed_writes": []
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp0mzd07ym.cpp",
+      "entry": "UNKNOWN",
+      "anchor": "TMPDIR",
+      "variable": null,
+      "files": 1,
+      "bytes": 759,
+      "by_class": {
+        "temp": 1
+      },
+      "bytes_by_class": {
+        "temp": 759
+      },
+      "path_baked": 0,
+      "path_baked_examples": [],
+      "write_pattern": "direct writes (1 opens, no rename)",
+      "ops": {
+        "tmp_create": 1,
+        "open_w": 1
+      },
+      "writers": {
+        "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+      },
+      "failed_writes": []
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp8l2th3gg.cpp",
+      "entry": "UNKNOWN",
+      "anchor": "TMPDIR",
+      "variable": null,
+      "files": 1,
+      "bytes": 759,
+      "by_class": {
+        "temp": 1
+      },
+      "bytes_by_class": {
+        "temp": 759
+      },
+      "path_baked": 0,
+      "path_baked_examples": [],
+      "write_pattern": "direct writes (1 opens, no rename)",
+      "ops": {
+        "tmp_create": 1,
+        "open_w": 1
+      },
+      "writers": {
+        "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+      },
+      "failed_writes": []
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmpcofz0w3p.cpp",
+      "entry": "UNKNOWN",
+      "anchor": "TMPDIR",
+      "variable": null,
+      "files": 1,
+      "bytes": 758,
+      "by_class": {
+        "temp": 1
+      },
+      "bytes_by_class": {
+        "temp": 758
+      },
+      "path_baked": 0,
+      "path_baked_examples": [],
+      "write_pattern": "direct writes (1 opens, no rename)",
+      "ops": {
+        "tmp_create": 1,
+        "open_w": 1
+      },
+      "writers": {
+        "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+      },
+      "failed_writes": []
+    }
+  ],
+  "runs": {
+    "cold": {
+      "returncode": 0,
+      "wall_s": 7.656,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {},
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/home/.tilelang/cache",
+          "entry": "tilelang",
+          "anchor": "HOME",
+          "variable": "TILELANG_CACHE_DIR",
+          "files": 12,
+          "bytes": 55050,
+          "by_class": {
+            "source": 6,
+            "binary": 3,
+            "serialized": 3
+          },
+          "bytes_by_class": {
+            "source": 3307,
+            "binary": 50880,
+            "serialized": 863
+          },
+          "path_baked": 3,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/home/.tilelang/cache/0.1.12/darwin-arm64/kernels/71a0064098fe8dd8d6459178da14279d91ee79ec2e59e26824ef6973e2b9cc64/kernel_lib.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/home/.tilelang/cache/0.1.12/darwin-arm64/kernels/9d469907ce1c93f9f04e8b7663c792c6f347a47310c419b8603edb28ddfea8c7/kernel_lib.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/home/.tilelang/cache/0.1.12/darwin-arm64/kernels/e8e5ab205dbe30b1f66df81d8d7260504771edab6953dfe18df6e3c6880cf742/kernel_lib.so"
+          ],
+          "write_pattern": "atomic publish (15 renames/links, 12 direct opens)",
+          "ops": {
+            "mkdir": 36,
+            "open_w": 12,
+            "rename_to": 15
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 42,
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:7": 21
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmp8vd7syqp.so",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 16960,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 16960
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpb0x65cnd.so",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 16960,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 16960
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpfi3rci9c.so",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 16960,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 16960
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmp8vd7syqp.cpp",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 759,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 759
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "direct writes (1 opens, no rename)",
+          "ops": {
+            "tmp_create": 1,
+            "open_w": 1
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpb0x65cnd.cpp",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 759,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 759
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "direct writes (1 opens, no rename)",
+          "ops": {
+            "tmp_create": 1,
+            "open_w": 1
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpfi3rci9c.cpp",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 758,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 758
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "direct writes (1 opens, no rename)",
+          "ops": {
+            "tmp_create": 1,
+            "open_w": 1
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/usr/bin/g++",
+            "-std=c++17",
+            "-fPIC",
+            "-shared",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpfi3rci9c.cpp",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-o",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpfi3rci9c.so"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/work",
+          "pid": 50662,
+          "t": 1794464183.0140328,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/usr/bin/g++",
+            "-std=c++17",
+            "-fPIC",
+            "-shared",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpb0x65cnd.cpp",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-o",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmpb0x65cnd.so"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/work",
+          "pid": 50662,
+          "t": 1794464183.889214,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/usr/bin/g++",
+            "-std=c++17",
+            "-fPIC",
+            "-shared",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmp8vd7syqp.cpp",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-o",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/tmp/tmp8vd7syqp.so"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/cold-19bab8/work",
+          "pid": 50662,
+          "t": 1794464184.5323489,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:34"
+          ]
+        }
+      ],
+      "log_tail": "2026-11-12 07:16:22  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:129): TileLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:16:23  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\n2026-11-12 07:16:23  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:129): TileLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:16:24  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\n2026-11-12 07:16:24  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:129): TileLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:16:25  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\ncompile_s=2.31 kernels=3"
+    },
+    "redirect": {
+      "returncode": 0,
+      "wall_s": 8.824,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TILELANG_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache/tilelang"
+      },
+      "roots": [
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache/tilelang",
+          "entry": "tilelang",
+          "anchor": "other",
+          "variable": "TILELANG_CACHE_DIR",
+          "files": 12,
+          "bytes": 55050,
+          "by_class": {
+            "source": 6,
+            "binary": 3,
+            "serialized": 3
+          },
+          "bytes_by_class": {
+            "source": 3307,
+            "binary": 50880,
+            "serialized": 863
+          },
+          "path_baked": 3,
+          "path_baked_examples": [
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache/tilelang/0.1.12/darwin-arm64/kernels/71a0064098fe8dd8d6459178da14279d91ee79ec2e59e26824ef6973e2b9cc64/kernel_lib.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache/tilelang/0.1.12/darwin-arm64/kernels/9d469907ce1c93f9f04e8b7663c792c6f347a47310c419b8603edb28ddfea8c7/kernel_lib.so",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache/tilelang/0.1.12/darwin-arm64/kernels/e8e5ab205dbe30b1f66df81d8d7260504771edab6953dfe18df6e3c6880cf742/kernel_lib.so"
+          ],
+          "write_pattern": "atomic publish (15 renames/links, 12 direct opens)",
+          "ops": {
+            "mkdir": 36,
+            "open_w": 12,
+            "rename_to": 15
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 42,
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:7": 21
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp0mzd07ym.so",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 16960,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 16960
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp8l2th3gg.so",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 16960,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 16960
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmpcofz0w3p.so",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 16960,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 16960
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "no live trace",
+          "ops": {},
+          "writers": {},
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp0mzd07ym.cpp",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 759,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 759
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "direct writes (1 opens, no rename)",
+          "ops": {
+            "tmp_create": 1,
+            "open_w": 1
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp8l2th3gg.cpp",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 759,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 759
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "direct writes (1 opens, no rename)",
+          "ops": {
+            "tmp_create": 1,
+            "open_w": 1
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+          },
+          "failed_writes": []
+        },
+        {
+          "path": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmpcofz0w3p.cpp",
+          "entry": "UNKNOWN",
+          "anchor": "TMPDIR",
+          "variable": null,
+          "files": 1,
+          "bytes": 758,
+          "by_class": {
+            "temp": 1
+          },
+          "bytes_by_class": {
+            "temp": 758
+          },
+          "path_baked": 0,
+          "path_baked_examples": [],
+          "write_pattern": "direct writes (1 opens, no rename)",
+          "ops": {
+            "tmp_create": 1,
+            "open_w": 1
+          },
+          "writers": {
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26": 2
+          },
+          "failed_writes": []
+        }
+      ],
+      "subprocesses": [
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/usr/bin/g++",
+            "-std=c++17",
+            "-fPIC",
+            "-shared",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmpcofz0w3p.cpp",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-o",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmpcofz0w3p.so"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/work",
+          "pid": 50674,
+          "t": 1794464190.872361,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/usr/bin/g++",
+            "-std=c++17",
+            "-fPIC",
+            "-shared",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp0mzd07ym.cpp",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-o",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp0mzd07ym.so"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/work",
+          "pid": 50674,
+          "t": 1794464191.8986611,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:34"
+          ]
+        },
+        {
+          "ev": "subprocess.Popen",
+          "args": [
+            "/usr/bin/g++",
+            "-std=c++17",
+            "-fPIC",
+            "-shared",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp8l2th3gg.cpp",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-I/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/.venv/lib/python3.12/site-packages/tilelang/3rdparty/../src",
+            "-o",
+            "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/tmp/tmp8l2th3gg.so"
+          ],
+          "cwd": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/work",
+          "pid": 50674,
+          "t": 1794464192.962871,
+          "by": [
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:26",
+            "/Users/koiios/Documents/Projects/swissai/opportunities/01-compile-caches-270/tests/workloads/tilelang_cpu.py:34"
+          ]
+        }
+      ],
+      "log_tail": "2026-11-12 07:16:30  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:129): TileLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:16:31  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\n2026-11-12 07:16:31  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:129): TileLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:16:32  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\n2026-11-12 07:16:32  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:129): TileLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:16:33  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\ncompile_s=3.11 kernels=3"
+    },
+    "warm": {
+      "returncode": 0,
+      "wall_s": 4.799,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TILELANG_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache/tilelang"
+      },
+      "roots": [],
+      "subprocesses": [],
+      "log_tail": "compile_s=0.43 kernels=3"
+    },
+    "relocate": {
+      "returncode": 0,
+      "wall_s": 4.375,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TILELANG_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache-moved/tilelang"
+      },
+      "roots": [],
+      "subprocesses": [],
+      "log_tail": "compile_s=0.41 kernels=3"
+    },
+    "readonly": {
+      "returncode": 0,
+      "wall_s": 4.119,
+      "tracers": [
+        "snapshot",
+        "audithook"
+      ],
+      "notes": [],
+      "env_set": {
+        "TILELANG_CACHE_DIR": "/private/tmp/claude-501/-Users-koiios-Documents-Projects-swissai/a94ca039-9dd7-4f72-9781-19ec1d4e1034/scratchpad/audit-tilelang3/redirect-0e1041/cache-ro/tilelang"
+      },
+      "roots": [],
+      "subprocesses": [],
+      "log_tail": "compile_s=0.40 kernels=3"
+    }
+  }
+}

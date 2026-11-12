@@ -1,0 +1,222 @@
+{
+  "passed": true,
+  "mode": "exact",
+  "failures": [],
+  "model_warning": null,
+  "weights_equal": true,
+  "weight_messages": [],
+  "diagnosis": [],
+  "info": [],
+  "stats": {
+    "max_z": 0.0,
+    "rms_z": 0.0,
+    "shift": -0.0,
+    "max_abs_delta": 0.0,
+    "n_tokens": 1141,
+    "flips": 0,
+    "flips_checked": 1123,
+    "greedy_unexplained": 0,
+    "greedy_explained": 0,
+    "bitwise_equal": true,
+    "worst_tokens": [
+      {
+        "prompt": "capital_of_france",
+        "position": 0,
+        "token": " capital",
+        "ref_logprob": -12.798580169677734,
+        "delta": 0.0,
+        "z": 0.0
+      },
+      {
+        "prompt": "capital_of_france",
+        "position": 1,
+        "token": " of",
+        "ref_logprob": -0.4639267921447754,
+        "delta": 0.0,
+        "z": 0.0
+      },
+      {
+        "prompt": "capital_of_france",
+        "position": 2,
+        "token": " France",
+        "ref_logprob": -4.018477916717529,
+        "delta": 0.0,
+        "z": 0.0
+      },
+      {
+        "prompt": "capital_of_france",
+        "position": 3,
+        "token": " is",
+        "ref_logprob": -0.27414941787719727,
+        "delta": 0.0,
+        "z": 0.0
+      },
+      {
+        "prompt": "fibonacci_code",
+        "position": 0,
+        "token": " fibonacci",
+        "ref_logprob": -9.324562072753906,
+        "delta": 0.0,
+        "z": 0.0
+      }
+    ],
+    "greedy": {
+      "capital_of_france": "ok",
+      "fibonacci_code": "ok",
+      "arithmetic": "ok",
+      "primes": "ok",
+      "thermodynamics": "ok",
+      "french": "ok",
+      "german": "ok",
+      "unicode": "ok"
+    },
+    "per_prompt": {
+      "capital_of_france": {
+        "n": 4,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "fibonacci_code": {
+        "n": 16,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "arithmetic": {
+        "n": 26,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "primes": {
+        "n": 22,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "thermodynamics": {
+        "n": 13,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "french": {
+        "n": 21,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "german": {
+        "n": 22,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "unicode": {
+        "n": 31,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "json_schema": {
+        "n": 21,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "sql": {
+        "n": 28,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "repetition": {
+        "n": 12,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "rare_tokens": {
+        "n": 28,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "dialogue": {
+        "n": 20,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "chess": {
+        "n": 47,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "numbers": {
+        "n": 61,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      },
+      "long_prose": {
+        "n": 769,
+        "max_abs_delta": 0.0,
+        "max_z": 0.0,
+        "nll_delta": -0.0
+      }
+    }
+  },
+  "noise_model": {
+    "scale": 0.1321971858340971,
+    "tail_shape": 0.03784944486689312,
+    "clip": 3.9878741752392894,
+    "margin_tau": 1.3859539031982422,
+    "abs_floor": 1e-07,
+    "alpha": 0.01,
+    "n_runs": 8,
+    "thresholds": {
+      "max_z": 8.554587279194845,
+      "rms_z": 0.7750949528075379,
+      "shift": 0.07876933570194619
+    },
+    "null": {
+      "max_z": [
+        4.461714195879658,
+        4.7213115160103465,
+        4.7213115160103465,
+        4.7213115160103465,
+        4.732114144408846,
+        6.578256546621648,
+        4.7213115160103465,
+        4.7213115160103465
+      ],
+      "rms_z": [
+        0.6258289839346558,
+        0.6681034246116953,
+        0.6736140983151756,
+        0.6681034246116953,
+        0.6742065882044829,
+        0.7159265557860294,
+        0.6681034246116953,
+        0.6681034246116953
+      ],
+      "shift": [
+        -0.03531983104383662,
+        -0.04638441022088749,
+        -0.047076765296069044,
+        -0.04638441022088749,
+        -0.05064370880846706,
+        0.033667842852957,
+        -0.04638441022088749,
+        -0.04638441022088749
+      ]
+    },
+    "deterministic": true,
+    "batch_invariant": false,
+    "calibration_max_abs_delta": 0.46198463439941406,
+    "warnings": []
+  }
+}

@@ -1,0 +1,22 @@
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.79s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.70s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.80s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.70s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.78s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.73s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.72s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.81s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.79s)
+=== RUN   TestRestartedReplicaRowOutranksItsPreviousIncarnation
+--- PASS: TestRestartedReplicaRowOutranksItsPreviousIncarnation (0.70s)
+PASS
+ok  	opentela/internal/protocol/go-ds-crdt	8.732s

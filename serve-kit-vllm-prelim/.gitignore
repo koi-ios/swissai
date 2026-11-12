@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# Per-run engine logs: large, and they hold machine paths. Commit a few by hand if a reviewer needs them.
+results/logs/

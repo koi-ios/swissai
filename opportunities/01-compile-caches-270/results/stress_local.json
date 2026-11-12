@@ -1,0 +1,144 @@
+{
+ "host": "macOS-15.6-arm64-arm-64bit",
+ "python": "3.12.13",
+ "n": 8,
+ "repeats": 3,
+ "libs": {
+  "inductor": {
+   "runs": [
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 45.7,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    },
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 50.56,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    },
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 50.43,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    }
+   ],
+   "writer_failures": 0,
+   "load_failures": 0,
+   "rebuilds_on_load": [
+    0,
+    0,
+    0
+   ],
+   "leftovers": 0
+  },
+  "tvm_ffi": {
+   "runs": [
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 7.29,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    },
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 6.69,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    },
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 6.0,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    }
+   ],
+   "writer_failures": 0,
+   "load_failures": 0,
+   "rebuilds_on_load": [
+    0,
+    0,
+    0
+   ],
+   "leftovers": 0
+  },
+  "tilelang": {
+   "runs": [
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 9.9,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    },
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 9.26,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    },
+    {
+     "writers": 8,
+     "writer_failures": 0,
+     "writer_errors": [],
+     "writers_wall_s": 10.4,
+     "leftover_temp_files": [],
+     "n_leftovers": 0,
+     "load_ok": true,
+     "load_error": "",
+     "rebuilds_on_load": 0
+    }
+   ],
+   "writer_failures": 0,
+   "load_failures": 0,
+   "rebuilds_on_load": [
+    0,
+    0,
+    0
+   ],
+   "leftovers": 0
+  }
+ },
+ "note": "macOS 15 arm64, APFS (local disk, not Lustre); torch 2.13.0, apache-tvm-ffi 0.1.11, tilelang 0.1.12; tilelang rerun after harness fix (source must be a file)"
+}

@@ -1,0 +1,70 @@
+{
+  "machine": "arm64 Darwin 24.6.0, torch 2.13.0, 8 threads",
+  "note": "CPU only; loads into CPU tensors. Measures servekit's own overhead, not GPU load time.",
+  "cases": [
+    {
+      "tensors": 4000,
+      "shape": [
+        64,
+        64
+      ],
+      "checkpoint_mb": 33.1,
+      "plain": {
+        "median_s": 0.034420792013406754,
+        "min_s": 0.03348891600035131,
+        "max_s": 0.05118420801591128
+      },
+      "record": {
+        "median_s": 0.297020832891576,
+        "min_s": 0.28961979201994836,
+        "max_s": 0.5498141659190878
+      },
+      "stored_mb": 8.2,
+      "replay": {
+        "median_s": 0.23640379204880446,
+        "min_s": 0.20187624997925013,
+        "max_s": 0.2540375830139965
+      },
+      "replay_nv": {
+        "median_s": 0.05238204204943031,
+        "min_s": 0.05195633298717439,
+        "max_s": 0.052606499986723065
+      },
+      "record_overhead_us_per_tensor": 65.7,
+      "replay_overhead_us_per_tensor": 50.5,
+      "replay_nv_overhead_us_per_tensor": 4.5
+    },
+    {
+      "tensors": 64,
+      "shape": [
+        4096,
+        2048
+      ],
+      "checkpoint_mb": 1073.7,
+      "plain": {
+        "median_s": 0.03801116696558893,
+        "min_s": 0.03548387496266514,
+        "max_s": 0.04529150004964322
+      },
+      "record": {
+        "median_s": 0.10362066596280783,
+        "min_s": 0.09792495798319578,
+        "max_s": 0.21298387495335191
+      },
+      "stored_mb": 268.4,
+      "replay": {
+        "median_s": 0.06207345798611641,
+        "min_s": 0.042963832966051996,
+        "max_s": 0.7374665830284357
+      },
+      "replay_nv": {
+        "median_s": 0.04043762502260506,
+        "min_s": 0.03691745805554092,
+        "max_s": 0.04652316600549966
+      },
+      "record_overhead_us_per_tensor": 1025.1,
+      "replay_overhead_us_per_tensor": 376.0,
+      "replay_nv_overhead_us_per_tensor": 37.9
+    }
+  ]
+}

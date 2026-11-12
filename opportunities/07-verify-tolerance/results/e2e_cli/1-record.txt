@@ -1,0 +1,13 @@
+[SERVEKIT] waiting up to 300s for http://127.0.0.1:18101 to serve
+[SERVEKIT] recording 16 prompts from http://127.0.0.1:18101
+[SERVEKIT] calibrating: 1 repeat + 8 perturbed captures
+[SERVEKIT] calibration run 1/8: concurrency 4, 0 filler streams
+[SERVEKIT] calibration run 2/8: concurrency 1, 4 filler streams
+[SERVEKIT] calibration run 3/8: concurrency 8, 2 filler streams
+[SERVEKIT] calibration run 4/8: concurrency 2, 8 filler streams
+[SERVEKIT] calibration run 5/8: concurrency 16, 0 filler streams
+[SERVEKIT] calibration run 6/8: concurrency 1, 1 filler streams
+[SERVEKIT] calibration run 7/8: concurrency 4, 6 filler streams
+[SERVEKIT] calibration run 8/8: concurrency 8, 8 filler streams
+[SERVEKIT] noise floor: max |delta logprob| 0.462 under perturbed load; reference schedule reproduces bitwise
+[SERVEKIT] reference written to results/e2e_cli/gold.json

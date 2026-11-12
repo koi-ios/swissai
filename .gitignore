@@ -1,0 +1,36 @@
+# swissai control plane. Local-only repository: no remote, never pushed.
+# Heavy or regenerable trees stay on disk but out of history.
+# Nothing listed here is deleted; see opportunities/README.md "Housekeeping".
+
+# Upstream clones, worktrees and build trees (each has its own .git).
+# The tracked record of a change is the patch series in <project>/patches/.
+vendor/
+
+# Per-folder environments and tool caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Folder-local toolchains (06: Go toolchain and module cache, about 4 GB)
+toolchain/
+
+# Model weights (07: small CPU test models, about 3.5 GB)
+/opportunities/*/models/
+*.safetensors
+*.gguf
+
+# Run logs and built binaries that a script regenerates
+# (06: about 500 MB of trial logs, three 70 MB otela builds)
+/opportunities/06-opentela-73/e2e/runs/
+/opportunities/06-opentela-73/e2e/bin/
+
+# Large derived data. Rebuild from Hugging Face eth-easl/swissai-serving-trace
+# (see data/swissai-trace.README.md).
+/data/swissai-trace.parquet
+
+# OS and editor noise
+.DS_Store
+*.swp

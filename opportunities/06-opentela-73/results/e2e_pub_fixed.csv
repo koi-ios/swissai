@@ -1,0 +1,10 @@
+binary,worker_public_addr,history,delay_s,run,initial_join_s,left_hidden_s,time_to_routable_s,outcome,worker_self_status,worker_self_services,after_post_s,guard_s
+fixed,True,0,0,1,0.0,0.0,15.56,routable,ready,1,,3.26
+fixed,True,0,0,2,0.0,0.0,15.29,routable,ready,1,,5.21
+fixed,True,0,0,3,0.0,0.0,15.54,routable,ready,1,,12.48
+fixed,True,0,20,1,0.0,0.0,19.91,routable,ready,1,,7.68
+fixed,True,0,20,2,0.0,0.0,19.87,routable,ready,1,,10.99
+fixed,True,0,20,3,0.0,0.0,20.01,routable,ready,1,,9.65
+fixed,True,0,70,1,0.0,0.0,20.13,routable,ready,1,,9.42
+fixed,True,0,70,2,0.26,0.0,20.0,routable,ready,1,,8.89
+fixed,True,0,70,3,0.26,0.0,19.85,routable,ready,1,,7.37

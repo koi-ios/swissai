@@ -1,0 +1,347 @@
+{
+ "torch": "2.15.0",
+ "world": 4,
+ "timeout_s": 1.0,
+ "results": [
+  {
+   "scenario": "ok",
+   "description": "all ranks finish together",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "passed",
+   "rank0_wait_s": 0.0,
+   "listed_failed_ranks": [],
+   "gloo_error": "",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.5864381790161133,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 1.5883331298828125
+    },
+    {
+     "rank": 1,
+     "t_enter": 1.58646821975708,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 1.5884132385253906
+    },
+    {
+     "rank": 2,
+     "t_enter": 1.586470127105713,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 1.588510274887085
+    },
+    {
+     "rank": 3,
+     "t_enter": 1.5864481925964355,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 1.5886023044586182
+    }
+   ]
+  },
+  {
+   "scenario": "under",
+   "description": "last rank 0.6x timeout behind: passes",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "passed",
+   "rank0_wait_s": 0.6,
+   "listed_failed_ranks": [],
+   "gloo_error": "",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.5535788536071777,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 2.154762029647827
+    },
+    {
+     "rank": 1,
+     "t_enter": 1.5538029670715332,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 2.154836893081665
+    },
+    {
+     "rank": 2,
+     "t_enter": 1.5561938285827637,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 2.1549429893493652
+    },
+    {
+     "rank": 3,
+     "t_enter": 2.154146671295166,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 2.1551318168640137
+    }
+   ]
+  },
+  {
+   "scenario": "one_slow",
+   "description": "last rank 1.5x timeout behind",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 1.01,
+   "listed_failed_ranks": [
+    3
+   ],
+   "gloo_error": "[Rank 0]: Ranks 3 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.5663478374481201,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 3 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 2.5777359008789062
+    }
+   ]
+  },
+  {
+   "scenario": "all_slow",
+   "description": "ranks 1..N-1 all 1.5x timeout behind rank 0",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 1.5,
+   "listed_failed_ranks": [
+    1
+   ],
+   "gloo_error": "[Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.5626239776611328,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 3.0600531101226807
+    }
+   ]
+  },
+  {
+   "scenario": "staggered",
+   "description": "rank k finishes 0.6k x timeout late: total spread > timeout",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "passed",
+   "rank0_wait_s": 1.79,
+   "listed_failed_ranks": [],
+   "gloo_error": "",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.9860060214996338,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 3.7809369564056396
+    },
+    {
+     "rank": 1,
+     "t_enter": 2.5839600563049316,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 3.780959129333496
+    },
+    {
+     "rank": 2,
+     "t_enter": 3.187291145324707,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 3.7810559272766113
+    },
+    {
+     "rank": 3,
+     "t_enter": 3.7805051803588867,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 3.781148910522461
+    }
+   ]
+  },
+  {
+   "scenario": "all_slow_long",
+   "description": "ranks 1..N-1 behind by more than (N-1) x timeout",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 3.01,
+   "listed_failed_ranks": [
+    1,
+    2,
+    3
+   ],
+   "gloo_error": "[Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.5757927894592285,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 4.587761878967285
+    }
+   ]
+  },
+  {
+   "scenario": "dead",
+   "description": "ranks 1..N-1 exit (e.g. OOM-killed) before the barrier",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 3.01,
+   "listed_failed_ranks": [
+    1,
+    2,
+    3
+   ],
+   "gloo_error": "[Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.8153066635131836,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 4.825876951217651
+    },
+    {
+     "rank": 1,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.815309762954712
+    },
+    {
+     "rank": 2,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.815302848815918
+    },
+    {
+     "rank": 3,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.815342664718628
+    }
+   ]
+  },
+  {
+   "scenario": "hang",
+   "description": "ranks 1..N-1 alive but never reach the barrier",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 3.03,
+   "listed_failed_ranks": [
+    1,
+    2,
+    3
+   ],
+   "gloo_error": "[Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.9932870864868164,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 5.019101142883301
+    },
+    {
+     "rank": 1,
+     "outcome": "hanging",
+     "t_enter": null,
+     "t_exit": null
+    },
+    {
+     "rank": 2,
+     "outcome": "hanging",
+     "t_enter": null,
+     "t_exit": null
+    },
+    {
+     "rank": 3,
+     "outcome": "hanging",
+     "t_enter": null,
+     "t_exit": null
+    }
+   ]
+  },
+  {
+   "scenario": "dist_timeout",
+   "description": "all_slow, with a 10x larger process-group timeout (--dist-timeout)",
+   "world": 4,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 1.5,
+   "listed_failed_ranks": [
+    1
+   ],
+   "gloo_error": "[Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.5359070301055908,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 3.0347740650177
+    }
+   ]
+  },
+  {
+   "scenario": "fixed",
+   "description": "all_slow, with the proposed env knob set to 3x timeout",
+   "world": 4,
+   "timeout_s": 3.0,
+   "rank0_outcome": "passed",
+   "rank0_wait_s": 1.5,
+   "listed_failed_ranks": [],
+   "gloo_error": "",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.536719799041748,
+     "timeout_s": 3.0,
+     "outcome": "passed",
+     "t_exit": 3.032197952270508
+    },
+    {
+     "rank": 1,
+     "t_enter": 3.0308399200439453,
+     "timeout_s": 3.0,
+     "outcome": "passed",
+     "t_exit": 3.0323479175567627
+    },
+    {
+     "rank": 2,
+     "t_enter": 3.0308618545532227,
+     "timeout_s": 3.0,
+     "outcome": "passed",
+     "t_exit": 3.032660961151123
+    },
+    {
+     "rank": 3,
+     "t_enter": 3.0308339595794678,
+     "timeout_s": 3.0,
+     "outcome": "passed",
+     "t_exit": 3.0326087474823
+    }
+   ]
+  }
+ ]
+}

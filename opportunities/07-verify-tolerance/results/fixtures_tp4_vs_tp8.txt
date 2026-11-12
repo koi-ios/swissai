@@ -1,0 +1,17 @@
+tokens: 1140; |delta logprob| median 4.00e-05, p90 0.0246, p99 0.109, max 0.155; exactly equal: 3.6%
+signed mean delta +2.03e-04 (sd 0.0206): no NLL bias
+
+|delta| / (1 - p) by the reference's -logprob (p = exp(logprob) of the observed token):
+    -logprob bin     n    median       p90
+( 0.000, 0.00]   511     0.030     0.132
+( 0.001, 0.01]   170     0.016     0.110
+( 0.010, 0.05]    69     0.014     0.118
+( 0.050, 0.20]    59     0.014     0.109
+( 0.200, 0.70]    68     0.013     0.120
+( 0.700, 1.50]    57     0.013     0.080
+( 1.500, 3.00]    67     0.014     0.108
+( 3.000, 6.00]    93     0.014     0.068
+( 6.000,30.00]    46     0.008     0.063
+
+first greedy divergence (TP4 vs TP8): french@2
+(the first bin is inflated by the fixtures' 6-decimal rounding: 5e-7 / 1e-5 = 0.05)

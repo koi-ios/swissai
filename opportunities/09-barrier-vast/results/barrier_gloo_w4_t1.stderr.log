@@ -1,0 +1,18 @@
+[rank0]:[E1112 01:30:24.461269000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:24.461340000 ProcessGroupGloo.cpp:69] [Rank 0]: Ranks 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:29.070094000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 1 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:30.557769000 ProcessGroupGloo.cpp:69] [Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:38.973541000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 1 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:39.978591000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 2 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:40.979114000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:40.979190000 ProcessGroupGloo.cpp:69] [Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:45.826095000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 1 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:46.831803000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 2 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:47.834112000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:47.834165000 ProcessGroupGloo.cpp:69] [Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:50.841968000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 1 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:51.849236000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 2 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:52.859352000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:52.859399000 ProcessGroupGloo.cpp:69] [Rank 0]: Ranks 1, 2, 3 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:54.421031000 ProcessGroupGloo.cpp:2949] [Rank 0]: Rank 1 failed to pass monitoredBarrier in 1000 ms
+[rank0]:[E1112 01:30:55.915080000 ProcessGroupGloo.cpp:69] [Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms

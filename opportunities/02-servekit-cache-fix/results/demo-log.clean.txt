@@ -1,0 +1,87 @@
+
+===== 1. after an image upgrade: the artifact's caches are for another environment =====
+[SERVEKIT] staging <demo>/llama70b-tp4 -> <demo>/shm/llama70b-tp4
+[SERVEKIT] staged 0.0 GB in 0.10 s (1.00 GB/s)
+[SERVEKIT] no JIT caches for this environment in <demo>/llama70b-tp4; the engine will JIT from cold
+[SERVEKIT]   this environment: sglang-0.5.20-sm90-aarch64-be8ab80fe4d6 (sglang 0.5.20, torch 2.13.0, flashinfer-python 0.6.18, GPU 9.0, aarch64)
+[SERVEKIT]   not staged: sglang-0.5.16-sm90-aarch64-698ceae9bd08 (sglang 0.5.16 -> 0.5.20; apache-tvm-ffi 0.1.8 -> 0.1.11; flashinfer-python 0.6.1 -> 0.6.18; torch 2.9.1 -> 2.13.0; cuda 12.9.1 -> 13.0.3)
+[SERVEKIT]   `servekit launch --only-prepare` with this command builds them
+[SERVEKIT] launching: python -m sglang.launch_server --model-path <demo>/shm/llama70b-tp4 --tp 4 --load-format sharded_state
+
+[SERVEKIT] Cold-start profile (framework=sglang)
+-------------------------
+phase  duration_s  source
+-------------------------
+stage        0.10  wall_clock
+-------------------------
+total  -1794444357.62  ready
+
+report written to <demo>/run1.json
+[SERVEKIT] freed 0.0 GB from <demo>/shm/llama70b-tp4
+
+===== 2. servekit launch --only-prepare: builds this environment's caches, no re-shard =====
+[SERVEKIT] <demo>/llama70b-tp4 has no JIT caches for sglang-0.5.20-sm90-aarch64-be8ab80fe4d6; building them
+[SERVEKIT] warming JIT caches for sglang-0.5.20-sm90-aarch64-be8ab80fe4d6 from <demo>/llama70b-tp4
+[SERVEKIT] compiled during this run into the node-local caches: sglang-jit 2.4 MB, triton 90.0 kB
+[SERVEKIT] kept 2 JIT cache files in <demo>/llama70b-tp4/servekit-caches/sglang-0.5.20-sm90-aarch64-be8ab80fe4d6
+
+===== 3. the next launch stages them =====
+[SERVEKIT] staging <demo>/llama70b-tp4 -> <demo>/shm/llama70b-tp4
+[SERVEKIT] staged 0.0 GB in 0.10 s (1.00 GB/s)
+[SERVEKIT] staged JIT caches from <demo>/llama70b-tp4/servekit-caches/sglang-0.5.20-sm90-aarch64-be8ab80fe4d6 (2 files)
+[SERVEKIT] launching: python -m sglang.launch_server --model-path <demo>/shm/llama70b-tp4 --tp 4 --load-format sharded_state
+
+[SERVEKIT] Cold-start profile (framework=sglang)
+-------------------------
+phase  duration_s  source
+-------------------------
+stage        0.10  wall_clock
+-------------------------
+total  -1794444357.65  ready
+
+report written to <demo>/run3.json
+[SERVEKIT] freed 0.0 GB from <demo>/shm/llama70b-tp4
+
+===== 4. an engine that compiles where servekit does not look (a renamed variable) =====
+[SERVEKIT] staging <demo>/llama70b-tp4 -> <demo>/shm/llama70b-tp4
+[SERVEKIT] staged 0.0 GB in 0.10 s (1.00 GB/s)
+[SERVEKIT] staged JIT caches from <demo>/llama70b-tp4/servekit-caches/sglang-0.5.20-sm90-aarch64-be8ab80fe4d6 (2 files)
+[SERVEKIT] launching: python -m sglang.launch_server --model-path <demo>/shm/llama70b-tp4 --tp 4 --load-format sharded_state
+[SERVEKIT] warning: the engine compiled into directories servekit does not keep:
+[SERVEKIT]      4.5 MB in     3 files  ~/.cache/sglang/jit  (servekit set SGLANG_JIT_CACHE_DIR, and the engine wrote to its default anyway)
+[SERVEKIT]    300.0 kB in     1 files  <demo>/tmp/symm_allocator  (no variable servekit knows moves this: add it to servekit.jit_cache.CACHES)
+
+[SERVEKIT] Cold-start profile (framework=sglang)
+-------------------------
+phase  duration_s  source
+-------------------------
+stage        0.10  wall_clock
+-------------------------
+total  -1794444357.66  ready
+
+report written to <demo>/run4.json
+[SERVEKIT] freed 0.0 GB from <demo>/shm/llama70b-tp4
+error: --jit-cache-strict: JIT output escaped the persisted caches (see above); stopping the server
+exit code 3
+report jit_cache section:
+{
+  "key": "sglang-0.5.20-sm90-aarch64-be8ab80fe4d6",
+  "source": "namespace",
+  "node_local": "<demo>/node-local/llama70b-tp4/sglang-0.5.20-sm90-aarch64-be8ab80fe4d6",
+  "drift": [
+    {
+      "path": "~/.cache/sglang/jit",
+      "files": 3,
+      "bytes": 4500000,
+      "variable": "SGLANG_JIT_CACHE_DIR"
+    },
+    {
+      "path": "<demo>/tmp/symm_allocator",
+      "files": 1,
+      "bytes": 300000,
+      "variable": null
+    }
+  ],
+  "compiled": {},
+  "truncated": false
+}

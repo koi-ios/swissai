@@ -1,0 +1,250 @@
+{
+  "passed": false,
+  "mode": "exact",
+  "failures": [
+    "weight checksums differ: rank 0: model.layers.4.mlp.down_proj.weight differs",
+    "capital_of_france: 4/4 logprobs differ; worst at token 2 by +0.364",
+    "fibonacci_code: 16/16 logprobs differ; worst at token 12 by +0.321",
+    "fibonacci_code: greedy continuation differs",
+    "arithmetic: 26/26 logprobs differ; worst at token 24 by +0.468",
+    "primes: 22/22 logprobs differ; worst at token 11 by -1.49",
+    "primes: greedy continuation differs",
+    "thermodynamics: 13/13 logprobs differ; worst at token 5 by -1.36",
+    "thermodynamics: greedy continuation differs",
+    "french: 21/21 logprobs differ; worst at token 16 by -0.512",
+    "french: greedy continuation differs",
+    "german: 22/22 logprobs differ; worst at token 3 by +0.406",
+    "german: greedy continuation differs",
+    "unicode: 31/31 logprobs differ; worst at token 3 by +1.68",
+    "unicode: greedy continuation differs",
+    "json_schema: 21/21 logprobs differ; worst at token 3 by -2.27",
+    "sql: 28/28 logprobs differ; worst at token 9 by -1.03",
+    "repetition: 12/12 logprobs differ; worst at token 1 by -0.526",
+    "rare_tokens: 28/28 logprobs differ; worst at token 5 by -20.3",
+    "dialogue: 20/20 logprobs differ; worst at token 19 by -0.593",
+    "chess: 47/47 logprobs differ; worst at token 35 by +0.885",
+    "numbers: 61/61 logprobs differ; worst at token 4 by +0.69",
+    "long_prose: 765/769 logprobs differ; worst at token 30 by -2.96"
+  ],
+  "model_warning": null,
+  "weights_equal": false,
+  "weight_messages": [
+    "rank 0: model.layers.4.mlp.down_proj.weight differs"
+  ],
+  "diagnosis": [
+    "not bitwise equal; the drift is beyond the calibrated noise of perturbed load (max_z 1.17e+04 vs 8.55). That is what a corrupted load looks like."
+  ],
+  "info": [],
+  "stats": {
+    "max_z": 1541.036094515544,
+    "rms_z": 50.681805242503934,
+    "shift": 2.7539110765212547,
+    "max_abs_delta": 20.27459104731679,
+    "n_tokens": 1141,
+    "flips": 30,
+    "flips_checked": 1123,
+    "greedy_unexplained": 5,
+    "greedy_explained": 1,
+    "bitwise_equal": false,
+    "worst_tokens": [
+      {
+        "prompt": "primes",
+        "position": 17,
+        "token": "5",
+        "ref_logprob": -0.0005889588501304388,
+        "delta": -0.9073396271560341,
+        "z": -1541.036094515544
+      },
+      {
+        "prompt": "primes",
+        "position": 20,
+        "token": "7",
+        "ref_logprob": -0.00012337400403339416,
+        "delta": -0.06277278826746624,
+        "z": -508.8321571796719
+      },
+      {
+        "prompt": "rare_tokens",
+        "position": 5,
+        "token": "icro",
+        "ref_logprob": -0.047050874680280685,
+        "delta": -20.27459104731679,
+        "z": -441.12463307235413
+      },
+      {
+        "prompt": "primes",
+        "position": 14,
+        "token": "3",
+        "ref_logprob": -0.0007857572636567056,
+        "delta": -0.2217479306855239,
+        "z": -282.3200909222008
+      },
+      {
+        "prompt": "primes",
+        "position": 11,
+        "token": "2",
+        "ref_logprob": -0.012965190224349499,
+        "delta": -1.4913381459191442,
+        "z": -115.77360238812783
+      }
+    ],
+    "greedy": {
+      "capital_of_france": "ok",
+      "fibonacci_code": "tie@18",
+      "arithmetic": "ok",
+      "primes": "23/32",
+      "thermodynamics": "13/32",
+      "french": "7/32",
+      "german": "11/32",
+      "unicode": "4/32"
+    },
+    "per_prompt": {
+      "capital_of_france": {
+        "n": 4,
+        "max_abs_delta": 0.3643176555633545,
+        "max_z": 0.37098813790279006,
+        "nll_delta": -0.09660792723298073
+      },
+      "fibonacci_code": {
+        "n": 16,
+        "max_abs_delta": 0.3212388753890991,
+        "max_z": 0.42388094416736355,
+        "nll_delta": -0.03995022489107214
+      },
+      "arithmetic": {
+        "n": 26,
+        "max_abs_delta": 0.4683101177215576,
+        "max_z": 0.47467347621255185,
+        "nll_delta": 0.0014945265765373523
+      },
+      "primes": {
+        "n": 22,
+        "max_abs_delta": 1.4913381459191442,
+        "max_z": 1541.036094515544,
+        "nll_delta": 0.14610181044885062
+      },
+      "thermodynamics": {
+        "n": 13,
+        "max_abs_delta": 1.3562867641448975,
+        "max_z": 1.6713630220628979,
+        "nll_delta": 0.13478143520366687
+      },
+      "french": {
+        "n": 21,
+        "max_abs_delta": 0.5120742321014404,
+        "max_z": 2.58495119401344,
+        "nll_delta": 0.09432885816689425
+      },
+      "german": {
+        "n": 22,
+        "max_abs_delta": 0.40644216537475586,
+        "max_z": 6.542650030194967,
+        "nll_delta": 0.0057352991795844655
+      },
+      "unicode": {
+        "n": 31,
+        "max_abs_delta": 1.6807174682617188,
+        "max_z": 3.639858578919045,
+        "nll_delta": 0.08604593823979338
+      },
+      "json_schema": {
+        "n": 21,
+        "max_abs_delta": 2.2712340354919434,
+        "max_z": 2.2779051932851546,
+        "nll_delta": 0.1702285865100012
+      },
+      "sql": {
+        "n": 28,
+        "max_abs_delta": 1.0266733169555664,
+        "max_z": 1.071486907889263,
+        "nll_delta": 0.024133545604334877
+      },
+      "repetition": {
+        "n": 12,
+        "max_abs_delta": 0.5256257057189941,
+        "max_z": 0.5282688768227047,
+        "nll_delta": 0.09418595892687638
+      },
+      "rare_tokens": {
+        "n": 28,
+        "max_abs_delta": 20.27459104731679,
+        "max_z": 441.12463307235413,
+        "nll_delta": 1.0257854939721125
+      },
+      "dialogue": {
+        "n": 20,
+        "max_abs_delta": 0.593233585357666,
+        "max_z": 0.5954047048671146,
+        "nll_delta": 0.03520255599869415
+      },
+      "chess": {
+        "n": 47,
+        "max_abs_delta": 0.8852400779724121,
+        "max_z": 1.535199816391221,
+        "nll_delta": 0.020043263439723152
+      },
+      "numbers": {
+        "n": 61,
+        "max_abs_delta": 0.6904788017272949,
+        "max_z": 0.6963389405574437,
+        "nll_delta": -0.04831607504599903
+      },
+      "long_prose": {
+        "n": 769,
+        "max_abs_delta": 2.9607399702072144,
+        "max_z": 3.5582526103417367,
+        "nll_delta": 0.004280751323072532
+      }
+    }
+  },
+  "noise_model": {
+    "scale": 0.1321971858340971,
+    "tail_shape": 0.03784944486689312,
+    "clip": 3.9878741752392894,
+    "margin_tau": 1.3859539031982422,
+    "abs_floor": 1e-07,
+    "alpha": 0.01,
+    "n_runs": 8,
+    "thresholds": {
+      "max_z": 8.554587279194845,
+      "rms_z": 0.7750949528075379,
+      "shift": 0.07876933570194619
+    },
+    "null": {
+      "max_z": [
+        4.461714195879658,
+        4.7213115160103465,
+        4.7213115160103465,
+        4.7213115160103465,
+        4.732114144408846,
+        6.578256546621648,
+        4.7213115160103465,
+        4.7213115160103465
+      ],
+      "rms_z": [
+        0.6258289839346558,
+        0.6681034246116953,
+        0.6736140983151756,
+        0.6681034246116953,
+        0.6742065882044829,
+        0.7159265557860294,
+        0.6681034246116953,
+        0.6681034246116953
+      ],
+      "shift": [
+        -0.03531983104383662,
+        -0.04638441022088749,
+        -0.047076765296069044,
+        -0.04638441022088749,
+        -0.05064370880846706,
+        0.033667842852957,
+        -0.04638441022088749,
+        -0.04638441022088749
+      ]
+    },
+    "deterministic": true,
+    "batch_invariant": false,
+    "calibration_max_abs_delta": 0.46198463439941406,
+    "warnings": []
+  }
+}

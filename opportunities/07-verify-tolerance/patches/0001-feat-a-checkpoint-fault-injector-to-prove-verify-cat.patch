@@ -1,0 +1,1211 @@
+From 07c9e397aad6c7a37089cae1fc241627050551ad Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 07:03:05 +0100
+Subject: [PATCH 1/3] feat: a checkpoint fault injector, to prove verify
+ catches what it must
+
+`servekit verify` exists because sharded_state has corrupted models
+silently (#14 / sglang#34448, #35702), but nothing shows it would catch
+the next such bug. `python -m servekit.faults` writes a corrupted copy of
+a safetensors checkpoint at a chosen magnitude, so a check can be tested
+against known-bad loads as well as known-good ones:
+
+  zero_slice / dup_slice / permute_shards / transpose   TP shard layout
+  bitflip                       any bit position, any dtype (BF16, FP8, F32)
+  drop_tensor                   a tensor missing from files and index
+  scale_blocks                  FP8 weight_scale_inv rolled, set to 1,
+                                jittered, transposed, from the other shard
+  mxfp4_scales                  E8M0 exponents shifted, rolled, zeroed
+  swap_experts                  per-expert or fused (gpt-oss) MoE tensors
+  noise / scale                 smooth magnitude knobs
+
+It works on raw bytes through numpy views (BF16 as uint16, FP8 as
+uint8), so every dtype round-trips exactly and torch is not needed;
+only the shards it touches are rewritten, the rest are hard-linked, and
+servekit-fault.json records the ground truth. `validate` checks a fault
+against names and shapes alone, e.g. a remote checkpoint's headers.
+numpy is an optional extra (`servekit[faults]`).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pyproject.toml         |   4 +
+ src/servekit/faults.py | 871 +++++++++++++++++++++++++++++++++++++++++
+ tests/test_faults.py   | 273 +++++++++++++
+ 3 files changed, 1148 insertions(+)
+ create mode 100644 src/servekit/faults.py
+ create mode 100644 tests/test_faults.py
+
+diff --git a/pyproject.toml b/pyproject.toml
+index e8a2007..c583d8b 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -5,6 +5,10 @@ description = "Plug-and-play cold-start profiling and optimization for LLM infer
+ readme = "README.md"
+ requires-python = ">=3.9"
+ 
++[project.optional-dependencies]
++# `python -m servekit.faults`, the checkpoint fault injector; the rest of servekit is stdlib only.
++faults = ["numpy"]
++
+ [project.urls]
+ Repository = "https://github.com/eth-easl/servekit"
+ 
+diff --git a/src/servekit/faults.py b/src/servekit/faults.py
+new file mode 100644
+index 0000000..96d91f0
+--- /dev/null
++++ b/src/servekit/faults.py
+@@ -0,0 +1,871 @@
++"""Inject realistic faults into a safetensors checkpoint, to prove `servekit verify` catches them.
++
++`verify` only earns its keep if a corrupted load fails it. These faults are the
++ways weights have gone, or could go, silently wrong between a trusted checkpoint
++and what a server computes with -- each at a magnitude you choose, so detection
++power can be measured as a curve rather than asserted:
++
++  zero_slice      a slice of a tensor reads back as zeros: one TP shard, or a
++                  fraction of it (sglang#34448 dropped mxfp4 expert weights so)
++  dup_slice       one TP rank's slice lands in another rank's place
++  permute_shards  a tensor's TP shards are reassembled in the wrong order
++  transpose       a square tensor or shard is stored transposed; no shape check
++                  can see it
++  bitflip         n random bits flipped at one bit position (storage or memory
++                  corruption; exponent bits are catastrophic, mantissa bits mild)
++  drop_tensor     a tensor is missing from the files (sglang#35702 left the
++                  canonical kv_b_proj out of every shard)
++  scale_blocks    FP8 block scales (`*weight_scale_inv`, `*weight_scale`) that do
++                  not follow their weights: rolled by a block, set to 1, jittered,
++                  transposed, or taken from another TP shard
++  mxfp4_scales    MXFP4 E8M0 block exponents shifted by k on a fraction of
++                  blocks, rolled by a block, or zeroed
++  swap_experts    two MoE experts exchanged within a layer, per-expert tensors
++                  (`experts.<i>.`) or fused ones (`experts.gate_up_proj*`)
++  noise           relative Gaussian noise: a smooth magnitude knob
++  scale           a tensor multiplied by a factor
++
++Faults work on raw tensor bytes through numpy views, so torch is not needed and
++every dtype round-trips exactly: BF16 is handled as uint16 and FP8 as uint8.
++`inject` writes a corrupted copy of a checkpoint directory -- only the files it
++touches are rewritten, the rest are hard-linked -- plus `servekit-fault.json`,
++the ground truth of what changed. `apply` does the same to tensors in memory.
++
++    python -m servekit.faults inject --src ckpt/ --dst bad/ --kind bitflip \
++        --match 'layers\\.7\\..*down_proj\\.weight$' --n 4 --bit exp_msb --seed 0
++    python -m servekit.faults diff ckpt/ bad/
++
++Needs numpy (`pip install numpy`); the rest of servekit does not.
++"""
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import re
++import shutil
++import struct
++import sys
++from dataclasses import asdict, dataclass, field
++from pathlib import Path
++from typing import Dict, Iterable, List, Optional, Sequence, Tuple
++
++import numpy as np
++
++FAULT_REPORT = "servekit-fault.json"
++
++# safetensors dtype -> numpy dtype holding the raw bits
++_RAW = {
++    "F64": np.float64,
++    "F32": np.float32,
++    "F16": np.float16,
++    "BF16": np.uint16,
++    "F8_E4M3": np.uint8,
++    "F8_E5M2": np.uint8,
++    "F8_E8M0": np.uint8,
++    "I64": np.int64,
++    "I32": np.int32,
++    "I16": np.int16,
++    "I8": np.int8,
++    "U64": np.uint64,
++    "U32": np.uint32,
++    "U16": np.uint16,
++    "U8": np.uint8,
++    "BOOL": np.bool_,
++}
++FLOAT_DTYPES = ("F64", "F32", "F16", "BF16", "F8_E4M3", "F8_E5M2")
++
++# Named bit positions per float dtype, so `--bit exp_msb` means the same thing
++# for every format: the top exponent bit is the one that turns 0.01 into 1e36.
++_BITS = {
++    "BF16": {"sign": 15, "exp_msb": 14, "exp_lsb": 7, "mant_msb": 6, "mant_lsb": 0, "width": 16},
++    "F16": {"sign": 15, "exp_msb": 14, "exp_lsb": 10, "mant_msb": 9, "mant_lsb": 0, "width": 16},
++    "F32": {"sign": 31, "exp_msb": 30, "exp_lsb": 23, "mant_msb": 22, "mant_lsb": 0, "width": 32},
++    "F8_E4M3": {"sign": 7, "exp_msb": 6, "exp_lsb": 3, "mant_msb": 2, "mant_lsb": 0, "width": 8},
++    "F8_E5M2": {"sign": 7, "exp_msb": 6, "exp_lsb": 2, "mant_msb": 1, "mant_lsb": 0, "width": 8},
++    "U8": {"exp_msb": 7, "exp_lsb": 0, "width": 8},  # E8M0 scales stored as U8
++    "F8_E8M0": {"exp_msb": 7, "exp_lsb": 0, "width": 8},
++}
++
++
++# --------------------------------------------------------------------------
++# dtype conversion (raw bits <-> float32)
++
++
++def _bf16_to_f32(raw: np.ndarray) -> np.ndarray:
++    return (raw.astype(np.uint32) << 16).view(np.float32)
++
++
++def _f32_to_bf16(x: np.ndarray) -> np.ndarray:
++    """Round-to-nearest-even, the way torch's .to(torch.bfloat16) does."""
++    x = np.ascontiguousarray(x, dtype=np.float32)
++    u = x.view(np.uint32).astype(np.uint64)
++    rounded = ((u + 0x7FFF + ((u >> 16) & 1)) >> 16).astype(np.uint16)
++    nan = np.isnan(x)
++    if nan.any():
++        rounded[nan] = 0x7FC0
++    return rounded
++
++
++def _e4m3_table() -> np.ndarray:
++    """All 256 float8_e4m3fn values (bias 7, no infinities, S.1111.111 is NaN)."""
++    out = np.empty(256, dtype=np.float32)
++    for b in range(256):
++        s, e, m = b >> 7, (b >> 3) & 0xF, b & 0x7
++        if e == 0xF and m == 0x7:
++            v = np.nan
++        elif e == 0:
++            v = (m / 8.0) * 2.0 ** (-6)
++        else:
++            v = (1.0 + m / 8.0) * 2.0 ** (e - 7)
++        out[b] = -v if s else v
++    return out
++
++
++def _e5m2_table() -> np.ndarray:
++    out = np.empty(256, dtype=np.float32)
++    for b in range(256):
++        s, e, m = b >> 7, (b >> 2) & 0x1F, b & 0x3
++        if e == 0x1F:
++            v = np.inf if m == 0 else np.nan
++        elif e == 0:
++            v = (m / 4.0) * 2.0 ** (-14)
++        else:
++            v = (1.0 + m / 4.0) * 2.0 ** (e - 15)
++        out[b] = -v if s else v
++    return out
++
++
++_E4M3 = _e4m3_table()
++_E5M2 = _e5m2_table()
++
++
++def _encode_lut(x: np.ndarray, table: np.ndarray) -> np.ndarray:
++    """Nearest representable value (saturating), for re-encoding perturbed FP8."""
++    finite = np.where(np.isfinite(table))[0]
++    vals = table[finite]
++    order = np.argsort(vals, kind="stable")
++    svals, scodes = vals[order], finite[order].astype(np.uint8)
++    flat = np.clip(np.nan_to_num(x.astype(np.float32).ravel()), svals[0], svals[-1])
++    idx = np.clip(np.searchsorted(svals, flat), 1, len(svals) - 1)
++    left, right = svals[idx - 1], svals[idx]
++    pick = np.where(np.abs(flat - left) <= np.abs(right - flat), idx - 1, idx)
++    return scodes[pick].reshape(x.shape)
++
++
++def to_float32(raw: np.ndarray, dtype: str) -> np.ndarray:
++    if dtype == "BF16":
++        return _bf16_to_f32(raw)
++    if dtype == "F8_E4M3":
++        return _E4M3[raw]
++    if dtype == "F8_E5M2":
++        return _E5M2[raw]
++    if dtype == "F8_E8M0":
++        return np.where(raw == 255, np.nan, np.exp2(raw.astype(np.float32) - 127.0)).astype(np.float32)
++    if dtype in ("F16", "F32", "F64"):
++        return raw.astype(np.float32)
++    raise ValueError(f"{dtype} is not a float dtype")
++
++
++def from_float32(x: np.ndarray, dtype: str) -> np.ndarray:
++    if dtype == "BF16":
++        return _f32_to_bf16(x)
++    if dtype == "F8_E4M3":
++        return _encode_lut(x, _E4M3)
++    if dtype == "F8_E5M2":
++        return _encode_lut(x, _E5M2)
++    if dtype in ("F16", "F32", "F64"):
++        return x.astype(_RAW[dtype])
++    raise ValueError(f"{dtype} is not a float dtype")
++
++
++# --------------------------------------------------------------------------
++# safetensors I/O on raw bytes
++
++
++@dataclass
++class Tensor:
++    """A tensor as stored: its safetensors dtype, shape, and raw-bit array."""
++
++    dtype: str
++    shape: Tuple[int, ...]
++    data: np.ndarray  # raw bits, reshaped to `shape`
++
++    def copy(self) -> "Tensor":
++        return Tensor(self.dtype, tuple(self.shape), np.array(self.data, copy=True))
++
++
++def read_header(path: Path) -> Tuple[dict, dict, int]:
++    """(tensor entries, __metadata__, byte offset of the data section)."""
++    with open(path, "rb") as fh:
++        (n,) = struct.unpack("<Q", fh.read(8))
++        header = json.loads(fh.read(n))
++    meta = header.pop("__metadata__", None) or {}
++    return header, meta, 8 + n
++
++
++def read_file(path: Path, names: Optional[Iterable[str]] = None) -> Tuple[Dict[str, Tensor], dict]:
++    """Tensors in `path` (all, or just `names`), memory-mapped read-only."""
++    header, meta, base = read_header(path)
++    wanted = set(header) if names is None else set(names) & set(header)
++    mm = np.memmap(path, dtype=np.uint8, mode="r")
++    out: Dict[str, Tensor] = {}
++    for name in sorted(wanted):
++        entry = header[name]
++        dtype = entry["dtype"]
++        if dtype not in _RAW:
++            raise ValueError(f"{path}: {name} has dtype {dtype}, which faults.py does not know")
++        begin, end = entry["data_offsets"]
++        raw = mm[base + begin : base + end].view(_RAW[dtype])
++        shape = tuple(entry["shape"])
++        out[name] = Tensor(dtype, shape, raw.reshape(shape) if shape else raw.reshape(()))
++    return out, meta
++
++
++def write_file(path: Path, tensors: Dict[str, Tensor], meta: Optional[dict] = None) -> None:
++    """A safetensors file in name order; the header is padded to 8 bytes."""
++    entries, offset = {}, 0
++    names = sorted(tensors)
++    for name in names:
++        t = tensors[name]
++        nbytes = int(np.asarray(t.data).nbytes)
++        entries[name] = {"dtype": t.dtype, "shape": list(t.shape), "data_offsets": [offset, offset + nbytes]}
++        offset += nbytes
++    if meta:
++        entries = {"__metadata__": meta, **entries}
++    blob = json.dumps(entries, separators=(",", ":")).encode()
++    blob += b" " * (-len(blob) % 8)
++    tmp = path.with_name(path.name + ".tmp")
++    with open(tmp, "wb") as fh:
++        fh.write(struct.pack("<Q", len(blob)))
++        fh.write(blob)
++        for name in names:
++            fh.write(np.ascontiguousarray(tensors[name].data).tobytes())
++    os.replace(tmp, path)
++
++
++def checkpoint_files(directory: Path) -> List[Path]:
++    return sorted(Path(directory).glob("*.safetensors"))
++
++
++def tensor_index(directory: Path) -> Dict[str, Tuple[Path, str, Tuple[int, ...]]]:
++    """name -> (file, dtype, shape) over every safetensors file in `directory`."""
++    index = {}
++    for path in checkpoint_files(directory):
++        header, _, _ = read_header(path)
++        for name, entry in header.items():
++            if name in index:
++                raise ValueError(f"{name} is in both {index[name][0].name} and {path.name}")
++            index[name] = (path, entry["dtype"], tuple(entry["shape"]))
++    return index
++
++
++# --------------------------------------------------------------------------
++# fault specs
++
++
++KINDS = (
++    "zero_slice",
++    "dup_slice",
++    "permute_shards",
++    "transpose",
++    "bitflip",
++    "drop_tensor",
++    "scale_blocks",
++    "mxfp4_scales",
++    "swap_experts",
++    "noise",
++    "scale",
++)
++
++# Which dim tensor parallelism splits, by the name of the projection.
++# Column-parallel layers split their output rows (dim 0), row-parallel ones
++# their input columns (dim 1); vocab-parallel embeddings split rows.
++_ROW_PARALLEL = re.compile(r"(o_proj|out_proj|down_proj|dense_4h_to_h|wo|w2|c_proj)")
++
++
++def tp_dim(name: str, ndim: int) -> int:
++    if ndim < 2:
++        return 0
++    if name.endswith("_blocks") and ndim >= 3:
++        # packed MXFP4 [..., out, n_blocks, 16]: out for column-, n_blocks for row-parallel
++        return ndim - 2 if _ROW_PARALLEL.search(name) else ndim - 3
++    if "experts" in name and ndim == 3:
++        # fused experts [E, out, in]; gate_up is column-, down is row-parallel
++        return 2 if _ROW_PARALLEL.search(name) else 1
++    return ndim - 1 if _ROW_PARALLEL.search(name) else ndim - 2
++
++
++@dataclass
++class FaultSpec:
++    kind: str
++    match: str = r".*"  # regex on tensor names (re.search)
++    count: int = 1  # matching tensors to corrupt; 0 means all of them
++    seed: int = 0
++    # slice faults
++    tp: int = 4
++    shard: int = 0
++    src_shard: int = 0
++    dst_shard: int = 1
++    dim: Optional[int] = None  # None: the TP dim of the tensor's name
++    fraction: Optional[float] = None  # zero_slice / scale_blocks / mxfp4_scales: part of the tensor
++    perm: str = "reverse"  # permute_shards: reverse | rotate
++    # bit faults
++    n: int = 1
++    bit: str = "exp_msb"
++    # scale faults
++    mode: str = "roll"  # scale_blocks: roll|ones|jitter|factor|transpose|swap_tp; mxfp4: shift|roll|zero
++    factor: float = 2.0
++    k: int = 1
++    # moe
++    layer: Optional[int] = None
++    experts: Optional[Tuple[int, int]] = None
++    # noise
++    sigma: float = 1e-2
++
++    def __post_init__(self):
++        if self.kind not in KINDS:
++            raise ValueError(f"unknown fault kind {self.kind!r}; one of {', '.join(KINDS)}")
++        if self.experts is not None:
++            self.experts = tuple(int(e) for e in self.experts)
++
++    @classmethod
++    def from_dict(cls, d: dict) -> "FaultSpec":
++        known = {f for f in cls.__dataclass_fields__}
++        extra = set(d) - known
++        if extra:
++            raise ValueError(f"unknown fault fields: {sorted(extra)}")
++        return cls(**d)
++
++    def to_dict(self) -> dict:
++        return {k: v for k, v in asdict(self).items()}
++
++
++@dataclass
++class TensorChange:
++    name: str
++    dtype: str
++    shape: List[int]
++    elements_changed: int
++    rel_change: Optional[float]  # ||new - old|| / ||old||, in float32; None for non-float
++    detail: str = ""
++
++
++@dataclass
++class FaultReport:
++    spec: dict
++    changes: List[TensorChange] = field(default_factory=list)
++    dropped: List[str] = field(default_factory=list)
++    source: Optional[str] = None
++
++    def to_dict(self) -> dict:
++        return {
++            "spec": self.spec,
++            "source": self.source,
++            "dropped": self.dropped,
++            "changes": [asdict(c) for c in self.changes],
++        }
++
++
++# --------------------------------------------------------------------------
++# the faults themselves, on raw arrays
++
++
++def _bit_index(spec_bit, dtype: str) -> int:
++    table = _BITS.get(dtype)
++    if table is None:
++        raise ValueError(f"bitflip does not handle {dtype}")
++    if isinstance(spec_bit, int) or str(spec_bit).isdigit():
++        bit = int(spec_bit)
++    elif spec_bit in table:
++        bit = table[spec_bit]
++    else:
++        raise ValueError(f"unknown bit {spec_bit!r} for {dtype}; one of {sorted(k for k in table if k != 'width')}")
++    if not 0 <= bit < table["width"]:
++        raise ValueError(f"bit {bit} outside a {table['width']}-bit {dtype}")
++    return bit
++
++
++def _shard_bounds(length: int, tp: int, shard: int) -> Tuple[int, int]:
++    if tp < 1 or length % tp:
++        raise ValueError(f"cannot split a dim of {length} into {tp} equal shards")
++    if not 0 <= shard < tp:
++        raise ValueError(f"shard {shard} outside tp={tp}")
++    step = length // tp
++    return shard * step, (shard + 1) * step
++
++
++def _take(arr: np.ndarray, dim: int, lo: int, hi: int) -> Tuple:
++    idx = [slice(None)] * arr.ndim
++    idx[dim] = slice(lo, hi)
++    return tuple(idx)
++
++
++def _resolve_dim(spec: FaultSpec, name: str, t: Tensor) -> int:
++    dim = tp_dim(name, len(t.shape)) if spec.dim is None else spec.dim
++    if not -len(t.shape) <= dim < len(t.shape):
++        raise ValueError(f"{name}: dim {dim} out of range for shape {t.shape}")
++    return dim % len(t.shape)
++
++
++def _rel_change(old: Tensor, new: Tensor) -> Optional[float]:
++    if old.dtype not in FLOAT_DTYPES or old.shape != new.shape:
++        return None
++    a = to_float32(np.asarray(old.data), old.dtype).astype(np.float64)
++    b = to_float32(np.asarray(new.data), new.dtype).astype(np.float64)
++    with np.errstate(invalid="ignore", over="ignore"):
++        denom = float(np.sqrt(np.nansum(a * a)))
++        num = float(np.sqrt(np.nansum((b - a) ** 2)))
++    if not np.isfinite(num) or np.isnan(b).any() or np.isinf(b).any():
++        return float("inf")
++    return num / denom if denom > 0 else (0.0 if num == 0 else float("inf"))
++
++
++def _fault_one(spec: FaultSpec, name: str, t: Tensor, rng: np.random.Generator) -> Tuple[Tensor, str]:
++    """A corrupted copy of `t`, and a one-line description of what was done."""
++    new = t.copy()
++    d = new.data
++    k = spec.kind
++
++    if k == "zero_slice":
++        dim = _resolve_dim(spec, name, t)
++        length = t.shape[dim]
++        if spec.fraction is not None:
++            width = max(1, int(round(spec.fraction * length)))
++            lo = int(rng.integers(0, length - width + 1))
++            hi = lo + width
++        else:
++            lo, hi = _shard_bounds(length, spec.tp, spec.shard)
++        d[_take(d, dim, lo, hi)] = 0
++        return new, f"zeroed [{lo}:{hi}) of dim {dim}"
++
++    if k == "dup_slice":
++        dim = _resolve_dim(spec, name, t)
++        slo, shi = _shard_bounds(t.shape[dim], spec.tp, spec.src_shard)
++        dlo, dhi = _shard_bounds(t.shape[dim], spec.tp, spec.dst_shard)
++        d[_take(d, dim, dlo, dhi)] = t.data[_take(t.data, dim, slo, shi)]
++        return new, f"tp={spec.tp} shard {spec.src_shard} copied over shard {spec.dst_shard} along dim {dim}"
++
++    if k == "permute_shards":
++        dim = _resolve_dim(spec, name, t)
++        tp = spec.tp
++        order = list(range(tp))[::-1] if spec.perm == "reverse" else list(range(1, tp)) + [0]
++        parts = [t.data[_take(t.data, dim, *_shard_bounds(t.shape[dim], tp, s))] for s in order]
++        new.data = np.concatenate(parts, axis=dim)
++        return new, f"tp={tp} shards along dim {dim} reassembled as {order}"
++
++    if k == "transpose":
++        if len(t.shape) != 2:
++            raise ValueError(f"{name}: transpose needs a 2-D tensor, got {t.shape}")
++        rows, cols = t.shape
++        if rows == cols:
++            new.data = np.ascontiguousarray(t.data.T)
++            return new, "whole square tensor transposed"
++        dim = _resolve_dim(spec, name, t)
++        lo, hi = _shard_bounds(t.shape[dim], spec.tp, spec.shard)
++        block = t.data[_take(t.data, dim, lo, hi)]
++        if block.shape[0] != block.shape[1]:
++            raise ValueError(
++                f"{name}: neither the tensor {t.shape} nor tp={spec.tp} shard {block.shape} is square; "
++                f"a transpose would change the shape, which every loader catches"
++            )
++        d[_take(d, dim, lo, hi)] = np.ascontiguousarray(block.T)
++        return new, f"tp={spec.tp} shard {spec.shard} (square {block.shape}) transposed"
++
++    if k == "bitflip":
++        bit = _bit_index(spec.bit, t.dtype)
++        flat = d.reshape(-1)
++        n = min(spec.n, flat.size)
++        idx = rng.choice(flat.size, size=n, replace=False)
++        # F16/F32 are held as native floats: flip through an unsigned view of the same bytes
++        ints = flat if flat.dtype.kind == "u" else flat.view({1: np.uint8, 2: np.uint16, 4: np.uint32, 8: np.uint64}[flat.dtype.itemsize])
++        ints[idx] ^= ints.dtype.type(1 << bit)
++        return new, f"flipped bit {bit} ({spec.bit}) of {n} elements"
++
++    if k == "scale_blocks":
++        x = to_float32(np.asarray(t.data), t.dtype)
++        mode = spec.mode
++        if mode == "roll":
++            dim = 0 if spec.dim is None else spec.dim
++            y = np.roll(x, 1, axis=dim)
++            desc = f"block scales rolled by one block along dim {dim}"
++        elif mode == "ones":
++            y = np.ones_like(x)
++            desc = "block scales set to 1 (as if the scales were never loaded)"
++        elif mode == "jitter":
++            sel = rng.random(x.shape) < (1.0 if spec.fraction is None else spec.fraction)
++            y = np.where(sel, x * np.exp(rng.normal(0.0, np.log1p(spec.sigma), size=x.shape)), x)
++            desc = f"{int(sel.sum())}/{x.size} block scales jittered by ~{spec.sigma:g} (log-normal)"
++        elif mode == "factor":
++            sel = rng.random(x.shape) < (1.0 if spec.fraction is None else spec.fraction)
++            y = np.where(sel, x * spec.factor, x)
++            desc = f"{int(sel.sum())}/{x.size} block scales multiplied by {spec.factor:g}"
++        elif mode == "transpose":
++            if x.ndim != 2 or x.shape[0] != x.shape[1]:
++                raise ValueError(f"{name}: scale grid {x.shape} is not square")
++            y = x.T.copy()
++            desc = "square block-scale grid transposed"
++        elif mode == "swap_tp":
++            dim = _resolve_dim(spec, name.replace("_scale_inv", "").replace("_scale", ""), t)
++            lo, hi = _shard_bounds(x.shape[dim], spec.tp, 0)
++            y = np.roll(x, hi - lo, axis=dim)
++            desc = f"block scales taken from the neighbouring tp={spec.tp} shard along dim {dim}"
++        else:
++            raise ValueError(f"scale_blocks mode {mode!r}: roll|ones|jitter|factor|transpose|swap_tp")
++        new.data = from_float32(y.astype(np.float32), t.dtype).reshape(t.shape)
++        return new, desc
++
++    if k == "mxfp4_scales":
++        if t.dtype not in ("U8", "F8_E8M0"):
++            raise ValueError(f"{name}: MXFP4 scales are E8M0 bytes (U8), got {t.dtype}")
++        mode = spec.mode
++        frac = 1.0 if spec.fraction is None else spec.fraction
++        if mode == "shift":
++            sel = rng.random(d.shape) < frac
++            shifted = np.clip(d.astype(np.int32) + spec.k, 0, 254).astype(np.uint8)
++            new.data = np.where(sel, shifted, d)
++            return new, f"{int(sel.sum())}/{d.size} E8M0 exponents shifted by {spec.k:+d} (x2^{spec.k})"
++        if mode == "roll":
++            new.data = np.roll(d, 1, axis=-1)
++            return new, "E8M0 scales rolled by one block along the last dim"
++        if mode == "zero":
++            sel = rng.random(d.shape) < frac
++            new.data = np.where(sel, np.uint8(0), d)
++            return new, f"{int(sel.sum())}/{d.size} E8M0 scales set to 2^-127"
++        raise ValueError(f"mxfp4_scales mode {mode!r}: shift|roll|zero")
++
++    if k == "noise":
++        if t.dtype not in FLOAT_DTYPES:
++            raise ValueError(f"{name}: noise needs a float tensor, got {t.dtype}")
++        x = to_float32(np.asarray(t.data), t.dtype)
++        rms = float(np.sqrt(np.mean(np.square(x, dtype=np.float64))))
++        y = x + rng.normal(0.0, spec.sigma * rms, size=x.shape).astype(np.float32)
++        new.data = from_float32(y, t.dtype).reshape(t.shape)
++        return new, f"gaussian noise at {spec.sigma:g} x rms ({rms:.3g})"
++
++    if k == "scale":
++        if t.dtype not in FLOAT_DTYPES:
++            raise ValueError(f"{name}: scale needs a float tensor, got {t.dtype}")
++        x = to_float32(np.asarray(t.data), t.dtype)
++        new.data = from_float32(x * np.float32(spec.factor), t.dtype).reshape(t.shape)
++        return new, f"multiplied by {spec.factor:g}"
++
++    raise AssertionError(k)
++
++
++# --------------------------------------------------------------------------
++# selecting tensors, MoE experts
++
++
++_EXPERT = re.compile(r"^(?P<pre>.*\.layers\.(?P<layer>\d+)\..*experts)\.(?P<e>\d+)\.(?P<post>.+)$")
++_FUSED = re.compile(r"^(?P<pre>.*\.layers\.(?P<layer>\d+)\..*experts)\.(?P<post>[^.]+(\.[^.]+)?)$")
++
++
++def _select(names: Sequence[str], spec: FaultSpec, rng: np.random.Generator) -> List[str]:
++    pattern = re.compile(spec.match)
++    hits = sorted(n for n in names if pattern.search(n))
++    if not hits:
++        raise ValueError(f"no tensor matches {spec.match!r}")
++    if spec.count <= 0 or spec.count >= len(hits):
++        return hits
++    return sorted(rng.choice(hits, size=spec.count, replace=False).tolist())
++
++
++def _expert_plan(shapes: Dict[str, Tuple[int, ...]], spec: FaultSpec, rng: np.random.Generator):
++    """[(name_a, name_b)] per-expert pairs, or [(name, None)] fused tensors to swap along dim 0."""
++    pattern = re.compile(spec.match)
++    per_expert: Dict[Tuple[str, int], Dict[int, List[str]]] = {}
++    fused: Dict[int, List[str]] = {}
++    for name in shapes:
++        if not pattern.search(name):
++            continue
++        m = _EXPERT.match(name)
++        if m:
++            key = (m["pre"], int(m["layer"]))
++            per_expert.setdefault(key, {}).setdefault(int(m["e"]), []).append(name)
++            continue
++        m = _FUSED.match(name)
++        if m and shapes[name] and shapes[name][0] > 1:
++            fused.setdefault(int(m["layer"]), []).append(name)
++    layers = sorted({l for (_, l) in per_expert} | set(fused))
++    if not layers:
++        raise ValueError(f"no MoE expert tensors match {spec.match!r}")
++    layer = spec.layer if spec.layer is not None else int(rng.choice(layers))
++    if layer not in layers:
++        raise ValueError(f"layer {layer} has no expert tensors; layers with experts: {layers}")
++    plan = []
++    groups = [(pre, experts) for (pre, l), experts in per_expert.items() if l == layer]
++    if groups:
++        for pre, experts in groups:
++            ids = sorted(experts)
++            a, b = spec.experts if spec.experts else tuple(int(x) for x in rng.choice(ids, size=2, replace=False))
++            prefix_a, prefix_b = f"{pre}.{a}.", f"{pre}.{b}."
++            for name in sorted(experts[a]):
++                twin = prefix_b + name[len(prefix_a):]
++                if twin not in shapes:
++                    raise ValueError(f"{name} has no counterpart {twin}")
++                plan.append((name, twin))
++        return layer, (a, b), plan
++    names = sorted(fused[layer])
++    n_experts = shapes[names[0]][0]
++    a, b = spec.experts if spec.experts else tuple(int(x) for x in rng.choice(n_experts, size=2, replace=False))
++    for name in names:
++        if shapes[name][0] != n_experts:
++            raise ValueError(f"{name} leads with {shapes[name][0]}, not the {n_experts} experts of its layer")
++        plan.append((name, None))
++    return layer, (a, b), plan
++
++
++def apply(tensors: Dict[str, Tensor], spec: FaultSpec) -> FaultReport:
++    """Corrupt `tensors` in place (replacing entries, never mutating source arrays)."""
++    rng = np.random.default_rng(spec.seed)
++    report = FaultReport(spec=spec.to_dict())
++
++    if spec.kind == "drop_tensor":
++        for name in _select(list(tensors), spec, rng):
++            del tensors[name]
++            report.dropped.append(name)
++        return report
++
++    if spec.kind == "swap_experts":
++        shapes = {n: t.shape for n, t in tensors.items()}
++        layer, (a, b), plan = _expert_plan(shapes, spec, rng)
++        for name, twin in plan:
++            if twin is not None:
++                ta, tb = tensors[name], tensors[twin]
++                if ta.shape != tb.shape or ta.dtype != tb.dtype:
++                    raise ValueError(f"{name} and {twin} differ in shape or dtype")
++                tensors[name], tensors[twin] = tb.copy(), ta.copy()
++                for n_, old, new in ((name, ta, tensors[name]), (twin, tb, tensors[twin])):
++                    changed = int(np.count_nonzero(np.asarray(old.data) != np.asarray(new.data)))
++                    report.changes.append(TensorChange(n_, old.dtype, list(old.shape), changed, _rel_change(old, new),
++                                                       f"layer {layer}: experts {a} and {b} swapped"))
++            else:
++                old = tensors[name]
++                new = old.copy()
++                new.data[[a, b]] = old.data[[b, a]]
++                changed = int(np.count_nonzero(np.asarray(old.data) != np.asarray(new.data)))
++                tensors[name] = new
++                report.changes.append(TensorChange(name, old.dtype, list(old.shape), changed, _rel_change(old, new),
++                                                   f"layer {layer}: fused experts {a} and {b} swapped along dim 0"))
++        return report
++
++    for name in _select(list(tensors), spec, rng):
++        old = tensors[name]
++        new, desc = _fault_one(spec, name, old, rng)
++        tensors[name] = new
++        if np.asarray(old.data).shape == np.asarray(new.data).shape:
++            changed = int(np.count_nonzero(np.asarray(old.data) != np.asarray(new.data)))
++        else:
++            changed = int(np.asarray(new.data).size)
++        report.changes.append(TensorChange(name, old.dtype, list(old.shape), changed, _rel_change(old, new), desc))
++    return report
++
++
++def validate(spec: FaultSpec, meta: Dict[str, Tuple[str, Tuple[int, ...]]]) -> List[str]:
++    """The tensors `spec` would touch, from names, dtypes and shapes alone (no data).
++
++    `meta` maps name -> (safetensors dtype, shape), as a header or
++    huggingface_hub.get_safetensors_metadata gives it. Raises ValueError where
++    `inject` would, so a fault grid can be checked against a remote checkpoint
++    before any GPU time is spent on it.
++    """
++    rng = np.random.default_rng(spec.seed)
++    if spec.kind == "swap_experts":
++        _, _, plan = _expert_plan({n: tuple(s) for n, (_, s) in meta.items()}, spec, rng)
++        return sorted({n for pair in plan for n in pair if n})
++    names = _select(list(meta), spec, rng)
++    for name in names:
++        dtype, shape = meta[name][0], tuple(meta[name][1])
++        k = spec.kind
++        if k in ("zero_slice", "dup_slice", "permute_shards") and not (k == "zero_slice" and spec.fraction):
++            dim = tp_dim(name, len(shape)) if spec.dim is None else spec.dim % len(shape)
++            if shape[dim] % spec.tp:
++                raise ValueError(f"{name}: dim {dim} of {list(shape)} does not split into {spec.tp} shards")
++        if k == "transpose":
++            if len(shape) != 2:
++                raise ValueError(f"{name}: transpose needs a 2-D tensor")
++            if shape[0] != shape[1]:
++                dim = tp_dim(name, 2) if spec.dim is None else spec.dim
++                other = shape[1 - dim]
++                if shape[dim] % spec.tp or shape[dim] // spec.tp != other:
++                    raise ValueError(f"{name}: neither {list(shape)} nor its tp={spec.tp} shard is square")
++        if k == "bitflip":
++            _bit_index(spec.bit, dtype)
++        if k in ("noise", "scale", "scale_blocks") and dtype not in FLOAT_DTYPES:
++            raise ValueError(f"{name}: {k} needs a float tensor, got {dtype}")
++        if k == "mxfp4_scales" and dtype not in ("U8", "F8_E8M0"):
++            raise ValueError(f"{name}: MXFP4 scales are E8M0 bytes (U8), got {dtype}")
++    return names
++
++
++# --------------------------------------------------------------------------
++# checkpoint directories
++
++
++def _link_or_copy(src: Path, dst: Path) -> None:
++    try:
++        os.link(src, dst)
++    except OSError:
++        shutil.copy2(src, dst)
++
++
++def inject(src: Path, dst: Path, spec: FaultSpec) -> FaultReport:
++    """Write a corrupted copy of checkpoint `src` to `dst`, which must not exist yet.
++
++    Only the safetensors files holding a corrupted tensor are rewritten; every
++    other file is hard-linked (or copied across file systems), so a 100 GB
++    checkpoint costs the size of the shards it touches.
++    """
++    src, dst = Path(src), Path(dst)
++    if dst.exists() and any(dst.iterdir()):
++        raise FileExistsError(f"{dst} exists and is not empty")
++    index = tensor_index(src)
++    if not index:
++        raise ValueError(f"no .safetensors files in {src}")
++
++    # Plan against shapes only, then load just the tensors the plan touches.
++    rng = np.random.default_rng(spec.seed)
++    if spec.kind == "swap_experts":
++        _, _, plan = _expert_plan({n: v[2] for n, v in index.items()}, spec, rng)
++        touched = sorted({n for pair in plan for n in pair if n})
++    else:
++        touched = _select(list(index), spec, rng)
++
++    tensors: Dict[str, Tensor] = {}
++    for path in sorted({index[n][0] for n in touched}):
++        loaded, _ = read_file(path, [n for n in touched if index[n][0] == path])
++        tensors.update(loaded)
++    report = apply(tensors, spec)
++    report.source = str(src)
++
++    dst.mkdir(parents=True, exist_ok=True)
++    rewrite = {index[n][0] for n in touched}
++    for item in sorted(src.iterdir()):
++        if item.is_dir() or item.name == FAULT_REPORT:
++            continue
++        target = dst / item.name
++        if item in rewrite:
++            everything, meta = read_file(item)
++            for name in list(everything):
++                if name in report.dropped:
++                    del everything[name]
++                elif name in tensors:
++                    everything[name] = tensors[name]
++            write_file(target, everything, meta)
++        elif item.name.endswith(".index.json") and report.dropped:
++            idx = json.loads(item.read_text())
++            for name in report.dropped:
++                idx.get("weight_map", {}).pop(name, None)
++            target.write_text(json.dumps(idx, indent=2))
++        else:
++            _link_or_copy(item, target)
++    (dst / FAULT_REPORT).write_text(json.dumps(report.to_dict(), indent=2) + "\n")
++    return report
++
++
++def diff(a: Path, b: Path) -> List[dict]:
++    """Tensors that differ between two checkpoint directories, and by how much."""
++    ia, ib = tensor_index(a), tensor_index(b)
++    rows = []
++    for name in sorted(set(ia) | set(ib)):
++        if name not in ib:
++            rows.append({"name": name, "status": "missing in b"})
++            continue
++        if name not in ia:
++            rows.append({"name": name, "status": "only in b"})
++            continue
++        (ta,), (tb,) = read_file(ia[name][0], [name])[0].values(), read_file(ib[name][0], [name])[0].values()
++        if ta.dtype != tb.dtype or ta.shape != tb.shape:
++            rows.append({"name": name, "status": f"{ta.dtype}{list(ta.shape)} vs {tb.dtype}{list(tb.shape)}"})
++            continue
++        changed = int(np.count_nonzero(np.asarray(ta.data) != np.asarray(tb.data)))
++        if changed:
++            rows.append({"name": name, "status": "changed", "elements_changed": changed,
++                         "rel_change": _rel_change(ta, tb)})
++    return rows
++
++
++# --------------------------------------------------------------------------
++# CLI
++
++
++def _spec_from_args(args) -> FaultSpec:
++    if args.spec:
++        return FaultSpec.from_dict(json.loads(args.spec))
++    fields = {}
++    for key in ("kind", "match", "count", "seed", "tp", "shard", "src_shard", "dst_shard", "dim", "fraction",
++                "perm", "n", "bit", "mode", "factor", "k", "layer", "sigma"):
++        val = getattr(args, key, None)
++        if val is not None:
++            fields[key] = val
++    if args.experts:
++        fields["experts"] = tuple(int(x) for x in args.experts.split(","))
++    return FaultSpec(**fields)
++
++
++def main(argv: Optional[List[str]] = None) -> int:
++    parser = argparse.ArgumentParser(prog="python -m servekit.faults", description=__doc__.split("\n\n")[0])
++    sub = parser.add_subparsers(dest="cmd", required=True)
++
++    p_inj = sub.add_parser("inject", help="write a corrupted copy of a checkpoint")
++    p_inj.add_argument("--src", type=Path, required=True)
++    p_inj.add_argument("--dst", type=Path, required=True)
++    p_inj.add_argument("--spec", help="the whole fault as JSON; overrides the flags below")
++    p_inj.add_argument("--kind", choices=KINDS)
++    p_inj.add_argument("--match")
++    p_inj.add_argument("--count", type=int)
++    p_inj.add_argument("--seed", type=int)
++    p_inj.add_argument("--tp", type=int)
++    p_inj.add_argument("--shard", type=int)
++    p_inj.add_argument("--src-shard", dest="src_shard", type=int)
++    p_inj.add_argument("--dst-shard", dest="dst_shard", type=int)
++    p_inj.add_argument("--dim", type=int)
++    p_inj.add_argument("--fraction", type=float)
++    p_inj.add_argument("--perm", choices=("reverse", "rotate"))
++    p_inj.add_argument("--n", type=int)
++    p_inj.add_argument("--bit")
++    p_inj.add_argument("--mode")
++    p_inj.add_argument("--factor", type=float)
++    p_inj.add_argument("--k", type=int)
++    p_inj.add_argument("--layer", type=int)
++    p_inj.add_argument("--experts", help="two expert ids, e.g. 3,17")
++    p_inj.add_argument("--sigma", type=float)
++
++    p_ls = sub.add_parser("list", help="list a checkpoint's tensors")
++    p_ls.add_argument("--src", type=Path, required=True)
++    p_ls.add_argument("--match", default=".*")
++
++    p_diff = sub.add_parser("diff", help="tensors that differ between two checkpoints")
++    p_diff.add_argument("a", type=Path)
++    p_diff.add_argument("b", type=Path)
++
++    args = parser.parse_args(argv)
++    if args.cmd == "list":
++        pattern = re.compile(args.match)
++        for name, (path, dtype, shape) in sorted(tensor_index(args.src).items()):
++            if pattern.search(name):
++                print(f"{name}\t{dtype}\t{list(shape)}\t{path.name}")
++        return 0
++    if args.cmd == "diff":
++        rows = diff(args.a, args.b)
++        print(json.dumps(rows, indent=1))
++        return 0 if not rows else 1
++    if not args.spec and not args.kind:
++        parser.error("inject needs --kind or --spec")
++    try:
++        report = inject(args.src, args.dst, _spec_from_args(args))
++    except (ValueError, FileExistsError) as e:
++        print(f"error: {e}", file=sys.stderr)
++        return 2
++    for c in report.changes:
++        rel = "n/a" if c.rel_change is None else f"{c.rel_change:.3g}"
++        print(f"{c.name}: {c.detail}; {c.elements_changed} elements changed, relative change {rel}")
++    for name in report.dropped:
++        print(f"{name}: dropped")
++    print(f"wrote {args.dst} ({FAULT_REPORT} records the ground truth)")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/test_faults.py b/tests/test_faults.py
+new file mode 100644
+index 0000000..a088dd6
+--- /dev/null
++++ b/tests/test_faults.py
+@@ -0,0 +1,273 @@
++"""Tests for the checkpoint fault injector, on small real safetensors files."""
++import json
++import os
++from pathlib import Path
++
++import numpy as np
++import pytest
++
++from servekit import faults
++from servekit.faults import FaultSpec, Tensor
++
++
++def _bf16(x):
++    return Tensor("BF16", tuple(x.shape), faults.from_float32(np.asarray(x, np.float32), "BF16").reshape(x.shape))
++
++
++@pytest.fixture
++def ckpt(tmp_path):
++    """A two-file checkpoint with BF16, FP8 + block scales, MXFP4 and MoE tensors."""
++    rng = np.random.default_rng(0)
++    a = {
++        "model.layers.0.self_attn.q_proj.weight": _bf16(rng.normal(0, 0.02, (64, 32))),
++        "model.layers.0.self_attn.k_proj.weight": _bf16(rng.normal(0, 0.02, (32, 32))),
++        "model.layers.0.self_attn.o_proj.weight": _bf16(rng.normal(0, 0.02, (32, 64))),
++        "model.layers.0.input_layernorm.weight": _bf16(np.ones(32)),
++        "model.layers.1.mlp.down_proj.weight": Tensor(
++            "F8_E4M3", (32, 256), faults.from_float32(rng.normal(0, 50, (32, 256)).astype(np.float32), "F8_E4M3")),
++        "model.layers.1.mlp.down_proj.weight_scale_inv": Tensor("F32", (1, 2), np.array([[1e-3, 2e-3]], np.float32)),
++        "model.layers.1.mlp.up_proj.weight_blocks": Tensor("U8", (8, 2, 16), rng.integers(0, 256, (8, 2, 16)).astype(np.uint8)),
++        "model.layers.1.mlp.up_proj.weight_scales": Tensor("U8", (8, 2), np.full((8, 2), 120, np.uint8)),
++    }
++    b = {}
++    for e in range(4):
++        for proj in ("gate_proj", "up_proj", "down_proj"):
++            b[f"model.layers.2.mlp.experts.{e}.{proj}.weight"] = _bf16(rng.normal(e, 0.1, (16, 8)))
++    b["model.layers.3.mlp.experts.gate_up_proj_blocks"] = Tensor("U8", (4, 16, 1, 16), rng.integers(0, 256, (4, 16, 1, 16)).astype(np.uint8))
++    b["model.layers.3.mlp.experts.gate_up_proj_scales"] = Tensor("U8", (4, 16, 1), rng.integers(110, 130, (4, 16, 1)).astype(np.uint8))
++    b["model.layers.3.mlp.router.weight"] = _bf16(rng.normal(0, 1, (4, 8)))
++    faults.write_file(tmp_path / "model-00001-of-00002.safetensors", a, {"format": "pt"})
++    faults.write_file(tmp_path / "model-00002-of-00002.safetensors", b, {"format": "pt"})
++    weight_map = {n: "model-00001-of-00002.safetensors" for n in a}
++    weight_map.update({n: "model-00002-of-00002.safetensors" for n in b})
++    (tmp_path / "model.safetensors.index.json").write_text(json.dumps({"weight_map": weight_map}))
++    (tmp_path / "config.json").write_text("{}")
++    return tmp_path
++
++
++def _load(d):
++    out = {}
++    for f in faults.checkpoint_files(d):
++        out.update(faults.read_file(f)[0])
++    return out
++
++
++def test_bf16_round_trip_is_exact_for_every_finite_pattern():
++    raw = np.arange(65536, dtype=np.uint32).astype(np.uint16)
++    x = faults.to_float32(raw, "BF16")
++    finite = np.isfinite(x)
++    back = faults.from_float32(x[finite], "BF16")
++    assert np.array_equal(back, raw[finite])
++
++
++def test_e4m3_table():
++    t = faults._E4M3
++    assert np.nanmax(t) == 448.0 and np.nanmin(t) == -448.0
++    assert np.isnan(t[0x7F]) and np.isnan(t[0xFF])
++    assert t[0x38] == 1.0
++
++
++def test_write_read_round_trip_and_safetensors_compat(ckpt):
++    safetensors_numpy = pytest.importorskip("safetensors.numpy")
++    loaded = _load(ckpt)
++    assert len(loaded) == 8 + 12 + 3
++    # The reference implementation reads what we write.
++    with __import__("safetensors").safe_open(str(ckpt / "model-00001-of-00002.safetensors"), "np") as fh:
++        scale = fh.get_tensor("model.layers.1.mlp.down_proj.weight_scale_inv")
++    assert np.array_equal(scale, loaded["model.layers.1.mlp.down_proj.weight_scale_inv"].data)
++    assert safetensors_numpy is not None
++
++
++def test_zero_slice_zeroes_exactly_one_tp_shard(ckpt):
++    t = _load(ckpt)
++    name = "model.layers.0.self_attn.q_proj.weight"  # column-parallel: rows split
++    rep = faults.apply(t, FaultSpec(kind="zero_slice", match=r"q_proj", tp=4, shard=2))
++    new, old = t[name].data, _load(ckpt)[name].data
++    assert np.all(new[32:48] == 0)
++    assert np.array_equal(new[:32], old[:32]) and np.array_equal(new[48:], old[48:])
++    assert rep.changes[0].elements_changed == np.count_nonzero(old[32:48])
++
++
++def test_zero_slice_row_parallel_splits_columns(ckpt):
++    t = _load(ckpt)
++    faults.apply(t, FaultSpec(kind="zero_slice", match=r"o_proj", tp=2, shard=1))
++    w = t["model.layers.0.self_attn.o_proj.weight"].data
++    assert np.all(w[:, 32:] == 0) and np.any(w[:, :32] != 0)
++
++
++def test_dup_and_permute_shards(ckpt):
++    t = _load(ckpt)
++    old = t["model.layers.0.self_attn.q_proj.weight"].data.copy()
++    faults.apply(t, FaultSpec(kind="dup_slice", match=r"q_proj", tp=4, src_shard=0, dst_shard=3))
++    new = t["model.layers.0.self_attn.q_proj.weight"].data
++    assert np.array_equal(new[48:], old[:16]) and np.array_equal(new[:48], old[:48])
++
++    t = _load(ckpt)
++    faults.apply(t, FaultSpec(kind="permute_shards", match=r"q_proj", tp=2, perm="reverse"))
++    new = t["model.layers.0.self_attn.q_proj.weight"].data
++    assert np.array_equal(new[:32], old[32:]) and np.array_equal(new[32:], old[:32])
++
++
++def test_transpose_square_only(ckpt):
++    t = _load(ckpt)
++    old = t["model.layers.0.self_attn.k_proj.weight"].data.copy()
++    faults.apply(t, FaultSpec(kind="transpose", match=r"k_proj"))
++    assert np.array_equal(t["model.layers.0.self_attn.k_proj.weight"].data, old.T)
++    with pytest.raises(ValueError, match="square"):
++        faults.apply(_load(ckpt), FaultSpec(kind="transpose", match=r"q_proj", tp=4))
++    # a square tp shard of a non-square tensor is fair game: (64, 32) at tp=2 is two 32x32 shards
++    t = _load(ckpt)
++    old = t["model.layers.0.self_attn.q_proj.weight"].data.copy()
++    faults.apply(t, FaultSpec(kind="transpose", match=r"q_proj", tp=2, shard=1))
++    assert np.array_equal(t["model.layers.0.self_attn.q_proj.weight"].data[32:], old[32:].T)
++
++
++@pytest.mark.parametrize("bit,pos", [("exp_msb", 14), ("exp_lsb", 7), ("mant_msb", 6), ("sign", 15)])
++def test_bitflip_flips_exactly_n_bits(ckpt, bit, pos):
++    t = _load(ckpt)
++    name = "model.layers.0.self_attn.q_proj.weight"
++    old = t[name].data.copy()
++    rep = faults.apply(t, FaultSpec(kind="bitflip", match=r"q_proj", bit=bit, n=7, seed=3))
++    xor = (t[name].data ^ old).ravel()
++    assert np.count_nonzero(xor) == 7
++    assert set(xor[xor != 0].tolist()) == {1 << pos}
++    assert rep.changes[0].elements_changed == 7
++    again = _load(ckpt)
++    faults.apply(again, FaultSpec(kind="bitflip", match=r"q_proj", bit=bit, n=7, seed=3))
++    assert np.array_equal(again[name].data, t[name].data)  # seeded
++
++
++def test_bitflip_on_fp8_and_f32(ckpt):
++    t = _load(ckpt)
++    old = t["model.layers.1.mlp.down_proj.weight"].data.copy()
++    faults.apply(t, FaultSpec(kind="bitflip", match=r"layers\.1\.mlp\.down_proj\.weight$", bit="exp_msb", n=3))
++    xor = (t["model.layers.1.mlp.down_proj.weight"].data ^ old).ravel()
++    assert set(xor[xor != 0].tolist()) == {1 << 6}
++    t = _load(ckpt)
++    faults.apply(t, FaultSpec(kind="bitflip", match=r"scale_inv$", bit="exp_lsb", n=1))
++    s = t["model.layers.1.mlp.down_proj.weight_scale_inv"].data
++    ratio = s / np.array([[1e-3, 2e-3]], np.float32)
++    assert sorted(np.round(ratio.ravel(), 6).tolist()) in ([0.5, 1.0], [1.0, 2.0])
++
++
++def test_scale_blocks_modes(ckpt):
++    name = "model.layers.1.mlp.down_proj.weight_scale_inv"
++    for mode, expect in (("roll", None), ("ones", np.ones((1, 2))), ("factor", np.array([[2e-3, 4e-3]]))):
++        t = _load(ckpt)
++        faults.apply(t, FaultSpec(kind="scale_blocks", mode=mode, match=r"scale_inv$", dim=1, factor=2.0))
++        got = t[name].data
++        if expect is None:
++            assert np.allclose(got, [[2e-3, 1e-3]])
++        else:
++            assert np.allclose(got, expect)
++    t = _load(ckpt)
++    faults.apply(t, FaultSpec(kind="scale_blocks", mode="jitter", sigma=0.1, match=r"scale_inv$", seed=1))
++    r = t[name].data / np.array([[1e-3, 2e-3]])
++    assert np.all(r != 1.0) and np.all(np.abs(np.log(r)) < 0.6)
++
++
++def test_mxfp4_scale_shift_and_roll(ckpt):
++    name = "model.layers.1.mlp.up_proj.weight_scales"
++    t = _load(ckpt)
++    faults.apply(t, FaultSpec(kind="mxfp4_scales", mode="shift", k=1, fraction=1.0, match=r"up_proj\.weight_scales$"))
++    assert np.all(t[name].data == 121)
++    t = _load(ckpt)
++    faults.apply(t, FaultSpec(kind="mxfp4_scales", mode="shift", k=-2, fraction=0.5, seed=0, match=r"up_proj\.weight_scales$"))
++    vals = set(np.unique(t[name].data).tolist())
++    assert vals <= {118, 120} and 118 in vals
++    with pytest.raises(ValueError, match="E8M0"):
++        faults.apply(_load(ckpt), FaultSpec(kind="mxfp4_scales", match=r"q_proj"))
++
++
++def test_swap_experts_per_expert_names(ckpt):
++    t = _load(ckpt)
++    rep = faults.apply(t, FaultSpec(kind="swap_experts", match=r"layers\.2\.", experts=(1, 3)))
++    orig = _load(ckpt)
++    for proj in ("gate_proj", "up_proj", "down_proj"):
++        a = f"model.layers.2.mlp.experts.1.{proj}.weight"
++        b = f"model.layers.2.mlp.experts.3.{proj}.weight"
++        assert np.array_equal(t[a].data, orig[b].data) and np.array_equal(t[b].data, orig[a].data)
++    assert len(rep.changes) == 6
++
++
++def test_swap_experts_fused_names(ckpt):
++    t = _load(ckpt)
++    faults.apply(t, FaultSpec(kind="swap_experts", match=r"layers\.3\.mlp\.experts", experts=(0, 2)))
++    orig = _load(ckpt)
++    for n in ("model.layers.3.mlp.experts.gate_up_proj_blocks", "model.layers.3.mlp.experts.gate_up_proj_scales"):
++        assert np.array_equal(t[n].data[0], orig[n].data[2]) and np.array_equal(t[n].data[2], orig[n].data[0])
++        assert np.array_equal(t[n].data[1], orig[n].data[1])
++    # the router is not an expert: untouched
++    assert np.array_equal(t["model.layers.3.mlp.router.weight"].data, orig["model.layers.3.mlp.router.weight"].data)
++
++
++def test_noise_has_the_requested_relative_size(ckpt):
++    t = _load(ckpt)
++    rep = faults.apply(t, FaultSpec(kind="noise", match=r"q_proj", sigma=0.05, seed=0))
++    assert 0.03 < rep.changes[0].rel_change < 0.07
++
++
++def test_inject_rewrites_only_touched_files(ckpt, tmp_path):
++    dst = tmp_path / "bad"
++    rep = faults.inject(ckpt, dst, FaultSpec(kind="bitflip", match=r"router", n=1, bit="exp_lsb"))
++    assert rep.changes[0].name == "model.layers.3.mlp.router.weight"
++    untouched = "model-00001-of-00002.safetensors"
++    assert os.stat(dst / untouched).st_ino == os.stat(ckpt / untouched).st_ino or \
++        (dst / untouched).read_bytes() == (ckpt / untouched).read_bytes()
++    report = json.loads((dst / faults.FAULT_REPORT).read_text())
++    assert report["changes"][0]["elements_changed"] == 1
++    rows = faults.diff(ckpt, dst)
++    assert [r["name"] for r in rows] == ["model.layers.3.mlp.router.weight"]
++    with pytest.raises(FileExistsError):
++        faults.inject(ckpt, dst, FaultSpec(kind="noise"))
++
++
++def test_inject_drop_tensor_updates_the_index(ckpt, tmp_path):
++    dst = tmp_path / "dropped"
++    faults.inject(ckpt, dst, FaultSpec(kind="drop_tensor", match=r"layers\.0\.input_layernorm"))
++    assert "model.layers.0.input_layernorm.weight" not in faults.tensor_index(dst)
++    idx = json.loads((dst / "model.safetensors.index.json").read_text())
++    assert "model.layers.0.input_layernorm.weight" not in idx["weight_map"]
++    assert faults.diff(ckpt, dst) == [{"name": "model.layers.0.input_layernorm.weight", "status": "missing in b"}]
++
++
++def test_inject_matches_apply(ckpt, tmp_path):
++    spec = FaultSpec(kind="zero_slice", match=r"(q|k)_proj", count=0, tp=4, shard=1)
++    faults.inject(ckpt, tmp_path / "f", spec)
++    on_disk = _load(tmp_path / "f")
++    in_mem = _load(ckpt)
++    faults.apply(in_mem, spec)
++    assert set(on_disk) == set(in_mem)
++    for n in on_disk:
++        assert np.array_equal(on_disk[n].data, in_mem[n].data), n
++
++
++def test_cli(ckpt, tmp_path, capsys):
++    rc = faults.main(["inject", "--src", str(ckpt), "--dst", str(tmp_path / "c"), "--kind", "zero_slice",
++                      "--match", "k_proj", "--tp", "2", "--shard", "0"])
++    assert rc == 0
++    assert "elements changed" in capsys.readouterr().out
++    assert faults.main(["diff", str(ckpt), str(tmp_path / "c")]) == 1
++    assert faults.main(["inject", "--src", str(ckpt), "--dst", str(tmp_path / "d"), "--kind", "transpose",
++                        "--match", "q_proj"]) == 2
++    assert faults.main(["list", "--src", str(ckpt), "--match", "router"]) == 0
++
++
++def test_validate_agrees_with_inject_without_reading_data(ckpt, tmp_path):
++    meta = {n: (d, s) for n, (_, d, s) in faults.tensor_index(ckpt).items()}
++    specs = [
++        FaultSpec(kind="zero_slice", match=r"(q|k)_proj", count=0, tp=4, shard=1),
++        FaultSpec(kind="bitflip", match=r"router", n=1, bit="exp_lsb"),
++        FaultSpec(kind="swap_experts", match=r"layers\.3\.mlp\.experts", experts=(0, 2)),
++        FaultSpec(kind="mxfp4_scales", mode="shift", match=r"up_proj\.weight_scales$"),
++    ]
++    for i, spec in enumerate(specs):
++        touched = faults.validate(spec, meta)
++        rep = faults.inject(ckpt, tmp_path / f"v{i}", spec)
++        assert sorted(touched) == sorted({c.name for c in rep.changes} | set(rep.dropped))
++    with pytest.raises(ValueError, match="square"):
++        faults.validate(FaultSpec(kind="transpose", match=r"q_proj", tp=4), meta)
++    with pytest.raises(ValueError, match="split"):
++        faults.validate(FaultSpec(kind="zero_slice", match=r"k_proj", tp=3), meta)
++    with pytest.raises(ValueError, match="E8M0"):
++        faults.validate(FaultSpec(kind="mxfp4_scales", match=r"q_proj"), meta)
+-- 
+2.50.1 (Apple Git-155)
+

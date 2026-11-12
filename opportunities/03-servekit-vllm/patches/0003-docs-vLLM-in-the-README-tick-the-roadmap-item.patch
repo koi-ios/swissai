@@ -1,0 +1,77 @@
+From 6ce495df3b6ce94d17c2f823314efceef5185a7e Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:37:00 +0100
+Subject: [PATCH 3/3] docs: vLLM in the README; tick the roadmap item
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ README.md | 40 +++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/README.md b/README.md
+index b381a0f..f280195 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Servekit 🧊 → 🔥
+ 
+-Servekit is a kit of optimizations for serving large language models (LLMs) with minimal cold-start latency 🥶. It wraps sglang calls and implements some optimizations.
++Servekit is a kit of optimizations for serving large language models (LLMs) with minimal cold-start latency 🥶. It wraps SGLang and vLLM launch commands and implements some optimizations.
+ 
+ Currently, it supports fast weight loading for **lustre** storages like CSCS's `capstor` and `iopsstor` ⚡.
+ 
+@@ -57,7 +57,41 @@ falls back to the engine's own loader rather than failing the job.
+ sglang >= 0.5.14 (`sglang.srt.runtime_context`, for pp_rank/pp_size).
+ 
+ `--overlap` starts the engine while the stage is still running, hiding it behind
+-engine startup; sglang only.
++engine startup.
++
++#### vLLM
++
++```bash
++servekit launch --servekit-artifact-path <dir> [--overlap] \
++  -- vllm serve <model> --tensor-parallel-size 4 ...
++```
++
++The same command shape, with vLLM's own `sharded_state` format (`vllm serve
++MODEL` or `--model MODEL`). What differs from SGLang:
++
++* The `--overlap` barrier is a vLLM plugin (`vllm.general_plugins`, installed
++  with servekit, inert unless `servekit launch` started the engine). It also
++  refuses a load that vLLM would narrow or cast tensors in, which is what a
++  checkpoint presharded for another TP size looks like, and it records every
++  rank's load time: vLLM logs `Model loading took` on local rank 0 only.
++* The model keeps its API name: `--served-model-name` is pinned to the original
++  path unless the command sets one.
++* Multi-node uses vLLM's multiprocessing backend: the same `servekit launch`
++  on every node, with `--nnodes / --node-rank / --master-addr` (and
++  `--headless` on the others). Each node stages its own ranks' shards and frees
++  them once all of its ranks have read them. Ray-placed ranks
++  (`--distributed-executor-backend ray`) run on vLLM's own loader, since
++  servekit cannot tell which node runs which rank.
++* vLLM's `sharded_state` stores weights after `process_weights_after_loading`
++  and runs that hook again on reload, so servekit does not preshard what this
++  cannot round-trip: quantized checkpoints, MLA models, expert parallelism, LoRA
++  and speculative decoding run on vLLM's own loader, with a log line saying why.
++  Check every new model with `servekit verify` before trusting it.
++* Compile caches (`VLLM_CACHE_ROOT`, Triton, TileLang, TVM-FFI, FlashInfer)
++  live in a node-local copy and are written back beside the checkpoint after
++  the first launch, so later launches skip torch.compile and JIT. vLLM's cache
++  key includes the served model path, which servekit keeps the same on every
++  launch.
+ 
+ 
+ ### `servekit profile`
+@@ -100,7 +134,7 @@ otherwise. `--out` writes the per-prompt result as JSON.
+ 
+ - [x] Support Multi-Node fast weight loading
+ - [x] Support Pipeline parallelism (needs sglang >= 0.5.14)
+-- [ ] Support vllm fast weight loading
++- [x] Support vllm fast weight loading (bf16 / unquantized, non-MLA; multiprocessing-backend multi-node)
+ 
+ ## Tests
+ 
+-- 
+2.50.1 (Apple Git-155)
+

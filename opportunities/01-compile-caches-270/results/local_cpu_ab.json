@@ -1,0 +1,171 @@
+{
+ "host": "macOS-15.6-arm64-arm-64bit",
+ "python": "3.12.13",
+ "workloads": {
+  "torch_compile_cpu": {
+   "cold": [
+    {
+     "tag": "cold0",
+     "ok": true,
+     "wall_s": 18.167,
+     "binaries_written": 15,
+     "stdout": "compile_s=11.46 inductor={'fxgraph_cache_miss': 2} aot_autograd={'autograd_cache_miss': 2, 'autograd_cache_saved': 2}"
+    },
+    {
+     "tag": "cold1",
+     "ok": true,
+     "wall_s": 19.237,
+     "binaries_written": 15,
+     "stdout": "compile_s=11.99 inductor={'fxgraph_cache_miss': 2} aot_autograd={'autograd_cache_miss': 2, 'autograd_cache_saved': 2}"
+    },
+    {
+     "tag": "cold2",
+     "ok": true,
+     "wall_s": 19.317,
+     "binaries_written": 15,
+     "stdout": "compile_s=12.17 inductor={'fxgraph_cache_miss': 2} aot_autograd={'autograd_cache_miss': 2, 'autograd_cache_saved': 2}"
+    }
+   ],
+   "populate": {
+    "tag": "populate",
+    "ok": true,
+    "wall_s": 22.513,
+    "binaries_written": 15,
+    "stdout": "compile_s=14.54 inductor={'fxgraph_cache_miss': 2} aot_autograd={'autograd_cache_miss': 2, 'autograd_cache_saved': 2}"
+   },
+   "warm": [
+    {
+     "tag": "warm0",
+     "ok": true,
+     "wall_s": 14.745,
+     "binaries_written": 0,
+     "stdout": "compile_s=7.38 inductor={'fxgraph_cache_hit': 2} aot_autograd={'autograd_cache_hit': 2}"
+    },
+    {
+     "tag": "warm1",
+     "ok": true,
+     "wall_s": 14.934,
+     "binaries_written": 0,
+     "stdout": "compile_s=7.55 inductor={'fxgraph_cache_hit': 2} aot_autograd={'autograd_cache_hit': 2}"
+    },
+    {
+     "tag": "warm2",
+     "ok": true,
+     "wall_s": 16.619,
+     "binaries_written": 0,
+     "stdout": "compile_s=8.10 inductor={'fxgraph_cache_hit': 2} aot_autograd={'autograd_cache_hit': 2}"
+    }
+   ]
+  },
+  "tvm_ffi_jit": {
+   "cold": [
+    {
+     "tag": "cold0",
+     "ok": true,
+     "wall_s": 5.679,
+     "binaries_written": 3,
+     "stdout": "build_s=3.14 kernels=3"
+    },
+    {
+     "tag": "cold1",
+     "ok": true,
+     "wall_s": 5.306,
+     "binaries_written": 3,
+     "stdout": "build_s=2.90 kernels=3"
+    },
+    {
+     "tag": "cold2",
+     "ok": true,
+     "wall_s": 5.264,
+     "binaries_written": 3,
+     "stdout": "build_s=3.07 kernels=3"
+    }
+   ],
+   "populate": {
+    "tag": "populate",
+    "ok": true,
+    "wall_s": 5.304,
+    "binaries_written": 3,
+    "stdout": "build_s=3.00 kernels=3"
+   },
+   "warm": [
+    {
+     "tag": "warm0",
+     "ok": true,
+     "wall_s": 2.337,
+     "binaries_written": 0,
+     "stdout": "build_s=0.04 kernels=3"
+    },
+    {
+     "tag": "warm1",
+     "ok": true,
+     "wall_s": 2.374,
+     "binaries_written": 0,
+     "stdout": "build_s=0.14 kernels=3"
+    },
+    {
+     "tag": "warm2",
+     "ok": true,
+     "wall_s": 2.482,
+     "binaries_written": 0,
+     "stdout": "build_s=0.05 kernels=3"
+    }
+   ]
+  },
+  "tilelang_cpu": {
+   "cold": [
+    {
+     "tag": "cold0",
+     "ok": true,
+     "wall_s": 7.393,
+     "binaries_written": 3,
+     "stdout": "leLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:15:25  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\ncompile_s=2.68 kernels=3"
+    },
+    {
+     "tag": "cold1",
+     "ok": true,
+     "wall_s": 5.716,
+     "binaries_written": 3,
+     "stdout": "leLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:15:31  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\ncompile_s=2.03 kernels=3"
+    },
+    {
+     "tag": "cold2",
+     "ok": true,
+     "wall_s": 6.215,
+     "binaries_written": 3,
+     "stdout": "leLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:15:37  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\ncompile_s=2.33 kernels=3"
+    }
+   ],
+   "populate": {
+    "tag": "populate",
+    "ok": true,
+    "wall_s": 5.474,
+    "binaries_written": 3,
+    "stdout": "leLang begins to compile kernel `main` with `out_idx=[1]`\n2026-11-12 07:15:43  [TileLang:tilelang.jit.kernel:INFO] (kernel.py:137): TileLang completes to compile kernel `main`\ncompile_s=2.18 kernels=3"
+   },
+   "warm": [
+    {
+     "tag": "warm0",
+     "ok": true,
+     "wall_s": 3.68,
+     "binaries_written": 0,
+     "stdout": "compile_s=0.36 kernels=3"
+    },
+    {
+     "tag": "warm1",
+     "ok": true,
+     "wall_s": 3.06,
+     "binaries_written": 0,
+     "stdout": "compile_s=0.01 kernels=3"
+    },
+    {
+     "tag": "warm2",
+     "ok": true,
+     "wall_s": 3.212,
+     "binaries_written": 0,
+     "stdout": "compile_s=0.01 kernels=3"
+    }
+   ]
+  }
+ }
+}

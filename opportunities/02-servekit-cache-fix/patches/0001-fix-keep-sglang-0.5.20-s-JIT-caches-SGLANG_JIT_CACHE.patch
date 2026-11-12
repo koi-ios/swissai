@@ -1,0 +1,344 @@
+From a951d6b31b54b4cd1cb8b1ad17ae222621791a1a Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:39:51 +0100
+Subject: [PATCH 1/3] fix: keep sglang 0.5.20's JIT caches
+ (SGLANG_JIT_CACHE_DIR and the rest)
+
+sglang 0.5.20 moved load_jit's build cache from TVM_FFI_CACHE_DIR to
+SGLANG_JIT_CACHE_DIR (python/sglang/kernels/jit/utils/compile/cache.py:302),
+which defaults to ~/.cache/sglang/jit and does not follow SGLANG_CACHE_DIR.
+servekit set only TRITON_CACHE_DIR, TVM_FFI_CACHE_DIR and
+FLASHINFER_WORKSPACE_BASE, so on 0.5.20 the custom all-reduce kernels built
+during torch.distributed init (17 s of 19.5 s at TP4 in the 0.5.16 A/B) went
+into the job's ephemeral $HOME and were rebuilt on every launch.
+
+CACHES now lists every variable that moves a compile cache in sglang 0.5.16
+and 0.5.20 and the kernel libraries they ship with, and all of them are set
+every time: a version that does not read one ignores it.
+
+tests/test_jit_cache.py resolves, per release, every location the engine
+compiles into and checks it lands under servekit's root;
+tests/test_jit_cache_regression.py reproduces the miss end to end and fails
+on cd8f0b8.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ README.md                          |  7 +++
+ src/servekit/jit_cache.py          | 60 ++++++++++++++++----
+ tests/test_jit_cache.py            | 84 ++++++++++++++++++++++++++++
+ tests/test_jit_cache_regression.py | 88 ++++++++++++++++++++++++++++++
+ tests/test_prepare.py              |  3 +-
+ 5 files changed, 231 insertions(+), 11 deletions(-)
+ create mode 100644 tests/test_jit_cache.py
+ create mode 100644 tests/test_jit_cache_regression.py
+
+diff --git a/README.md b/README.md
+index b381a0f..883e566 100644
+--- a/README.md
++++ b/README.md
+@@ -56,6 +56,13 @@ falls back to the engine's own loader rather than failing the job.
+ `--only-prepare` writes the artifact and stops. Pipeline parallelism needs
+ sglang >= 0.5.14 (`sglang.srt.runtime_context`, for pp_rank/pp_size).
+ 
++#### JIT caches
++
++`prepare` also keeps what the engine JIT-compiles (Triton, FlashInfer, sglang's
++own `load_jit` kernels such as the custom all-reduce, DeepGEMM, TileLang, ...)
++in `<dir>/servekit-caches/`, and a launch gives the engine a node-local copy of
++them to read and write.
++
+ `--overlap` starts the engine while the stage is still running, hiding it behind
+ engine startup; sglang only.
+ 
+diff --git a/src/servekit/jit_cache.py b/src/servekit/jit_cache.py
+index 3d01c04..e659487 100644
+--- a/src/servekit/jit_cache.py
++++ b/src/servekit/jit_cache.py
+@@ -1,9 +1,19 @@
+-"""Where the engine's JIT caches live, so they outlive the job."""
++"""Where the engine's JIT caches live, so they outlive the job.
++
++`CACHES` holds every variable that moves a compile cache, for every engine
++version servekit has read, and all of them are set every time: a version that
++does not read one ignores it, and a version check would be one more list to keep
++in step with the engine's release branches. The list already went stale once:
++sglang 0.5.20 moved `load_jit`'s build cache from TVM_FFI_CACHE_DIR to
++SGLANG_JIT_CACHE_DIR, so the custom all-reduce kernels it builds during
++torch.distributed init (~17 s at TP4 without a cache) stopped being kept.
++"""
+ from __future__ import annotations
+ 
+ import shutil
++from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Dict, Optional
++from typing import Dict, Optional, Tuple
+ 
+ CACHE_DIR_NAME = "servekit-caches"
+ 
+@@ -13,13 +23,43 @@ CACHE_DIR_NAME = "servekit-caches"
+ # built rebuilds itself.
+ NODE_LOCAL_ROOT = Path("/tmp/servekit/caches")
+ 
+-CACHES: Dict[str, str] = {
+-    "TRITON_CACHE_DIR": "triton",
+-    "TVM_FFI_CACHE_DIR": "tvm-ffi",
++
++@dataclass(frozen=True)
++class Cache:
++    var: str
++    subdir: str
++    # Where the engine puts it when `var` is unset: "~" is $HOME, "<tmp>" the
++    # temp dir, "<user>" the user name.
++    defaults: Tuple[str, ...]
++
++
++# Read off sglang v0.5.16 and v0.5.20. A release that adds a cache belongs here.
++CACHES: Tuple[Cache, ...] = (
++    # sglang 0.5.20 defaults Triton, Inductor, the CUDA PTX cache and FlashInfer
++    # under SGLANG_CACHE_DIR, but with setdefault, so the values here win.
++    Cache("TRITON_CACHE_DIR", "triton", ("~/.cache/sglang/triton", "~/.triton/cache")),
++    # tvm-ffi's own cache; sglang's load_jit built into it up to 0.5.16.
++    Cache("TVM_FFI_CACHE_DIR", "tvm-ffi", ("~/.cache/tvm-ffi",)),
+     # FlashInfer has no cache-path variable; this stands in for $HOME and it
+     # appends .cache/flashinfer itself.
+-    "FLASHINFER_WORKSPACE_BASE": "flashinfer",
+-}
++    Cache("FLASHINFER_WORKSPACE_BASE", "flashinfer", ("~/.cache/sglang/.cache/flashinfer", "~/.cache/flashinfer")),
++    # sglang's own: torch.compile (which repoints Inductor and Triton under it),
++    # FlashInfer autotune, the GPU P2P check, and from 0.5.20 CuTe DSL AOT objects.
++    Cache("SGLANG_CACHE_DIR", "sglang", ("~/.cache/sglang",)),
++    # load_jit from 0.5.20, custom all-reduce included. Does not follow SGLANG_CACHE_DIR.
++    Cache("SGLANG_JIT_CACHE_DIR", "sglang-jit", ("~/.cache/sglang/jit",)),
++    # DeepGEMM: sglang points DG_JIT_CACHE_DIR at this.
++    Cache("SGLANG_DG_CACHE_DIR", "deep-gemm", ("~/.cache/sglang/deep_gemm", "~/.cache/deep_gemm")),
++    Cache("TORCHINDUCTOR_CACHE_DIR", "inductor", ("~/.cache/sglang/inductor", "<tmp>/torchinductor_<user>")),
++    # The CUDA driver's PTX JIT.
++    Cache("CUDA_CACHE_PATH", "nv", ("~/.cache/sglang/nv", "~/.nv/ComputeCache")),
++    # torch.utils.cpp_extension.load without a build_directory; sglang 0.5.20's
++    # KDA prefill kernel is one.
++    Cache("TORCH_EXTENSIONS_DIR", "torch-extensions", ("~/.cache/torch_extensions",)),
++    # TileLang and the CuTe DSL (FlashAttention 4, quack): sglang 0.5.20 dependencies.
++    Cache("TILELANG_CACHE_DIR", "tilelang", ("~/.tilelang/cache",)),
++    Cache("CUTE_DSL_CACHE_DIR", "cute-dsl", ("<tmp>/<user>/cutlass_python_cache",)),
++)
+ 
+ 
+ def node_local(root: Path, name: str) -> Path:
+@@ -27,12 +67,12 @@ def node_local(root: Path, name: str) -> Path:
+ 
+ 
+ def env_for(root: Path) -> Dict[str, str]:
+-    return {var: str(root / subdir) for var, subdir in CACHES.items()}
++    return {c.var: str(root / c.subdir) for c in CACHES}
+ 
+ 
+ def create(root: Path) -> Dict[str, str]:
+-    for subdir in CACHES.values():
+-        (root / subdir).mkdir(parents=True, exist_ok=True)
++    for c in CACHES:
++        (root / c.subdir).mkdir(parents=True, exist_ok=True)
+     return env_for(root)
+ 
+ 
+diff --git a/tests/test_jit_cache.py b/tests/test_jit_cache.py
+new file mode 100644
+index 0000000..ccc60e3
+--- /dev/null
++++ b/tests/test_jit_cache.py
+@@ -0,0 +1,84 @@
++"""Tests for where the JIT caches go: every cache each engine release compiles
++must land where servekit keeps it."""
++from pathlib import Path
++
++import pytest
++
++from servekit import jit_cache
++
++# --- every cache each sglang release compiles lands where servekit keeps it ------------------------
++
++
++def _expand(path: str, env: dict) -> Path:
++    return Path(env["HOME"] + path[1:]) if path.startswith("~") else Path(path)
++
++
++def _sglang_cache_dir(env: dict) -> Path:
++    # srt/environ.py: SGLANG_CACHE_DIR = EnvStr(os.path.expanduser("~/.cache/sglang"))
++    return _expand(env.get("SGLANG_CACHE_DIR", "~/.cache/sglang"), env)
++
++
++def _after_import_0_5_20(env: dict) -> dict:
++    """`import sglang` runs redirect_third_party_caches (srt/environ.py:1923-1946): setdefault."""
++    base = _sglang_cache_dir(env)
++    defaults = {
++        "TRITON_CACHE_DIR": base / "triton",
++        "TORCHINDUCTOR_CACHE_DIR": base / "inductor",
++        "CUDA_CACHE_PATH": base / "nv",
++        "FLASHINFER_WORKSPACE_BASE": base,
++    }
++    return {**{k: str(v) for k, v in defaults.items()}, **env}
++
++
++# Where each release puts each cache, given the engine's environment. Each line
++# mirrors the cited source at that tag; a new release gets a new block.
++WHERE = {
++    "0.5.16": {
++        # python/sglang/jit_kernel/utils/compile.py:244
++        "load_jit (custom all-reduce)": lambda env: _expand(env.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi"), env),
++        # srt/layers/deep_gemm_wrapper/compile_utils.py:39
++        "DeepGEMM": lambda env: _expand(env.get("SGLANG_DG_CACHE_DIR", "~/.cache/deep_gemm"), env),
++        # srt/compilation/backend.py:405, custom_all_reduce_utils.py:266
++        "torch.compile, P2P check": _sglang_cache_dir,
++        "Triton": lambda env: _expand(env.get("TRITON_CACHE_DIR", "~/.triton/cache"), env),
++        "FlashInfer": lambda env: _expand(env.get("FLASHINFER_WORKSPACE_BASE", "~"), env) / ".cache" / "flashinfer",
++    },
++    "0.5.20": {
++        # python/sglang/kernels/jit/utils/compile/cache.py:302
++        "load_jit (custom all-reduce)": lambda env: _expand(env.get("SGLANG_JIT_CACHE_DIR") or "~/.cache/sglang/jit", env),
++        # srt/environ.py:1168
++        "CuTe DSL AOT": lambda env: _expand(env.get("SGLANG_CUTE_AOT_CACHE_DIR") or str(_sglang_cache_dir(env) / "cute_aot"), env),
++        # srt/environ.py:1154
++        "DeepGEMM": lambda env: _expand(env.get("SGLANG_DG_CACHE_DIR") or str(_sglang_cache_dir(env) / "deep_gemm"), env),
++        # srt/compilation/backend.py:403, custom_all_reduce_utils.py:267
++        "torch.compile, P2P check": _sglang_cache_dir,
++        "Triton": lambda env: Path(_after_import_0_5_20(env)["TRITON_CACHE_DIR"]),
++        "Inductor": lambda env: Path(_after_import_0_5_20(env)["TORCHINDUCTOR_CACHE_DIR"]),
++        "CUDA PTX": lambda env: Path(_after_import_0_5_20(env)["CUDA_CACHE_PATH"]),
++        "FlashInfer": lambda env: Path(_after_import_0_5_20(env)["FLASHINFER_WORKSPACE_BASE"]) / ".cache" / "flashinfer",
++        # tilelang 0.1.12, tilelang/env.py:337 (a sglang 0.5.20 dependency)
++        "TileLang": lambda env: _expand(env.get("TILELANG_CACHE_DIR", "~/.tilelang/cache"), env),
++        # kernels/ops/attention/linear/kda_ptx_prefill/__init__.py:42: torch.utils.cpp_extension.load
++        "torch extensions": lambda env: _expand(env.get("TORCH_EXTENSIONS_DIR", "~/.cache/torch_extensions"), env),
++    },
++}
++
++
++@pytest.mark.parametrize("version, cache", [(v, c) for v, caches in WHERE.items() for c in caches])
++def test_every_cache_a_release_compiles_lands_where_servekit_keeps_it(tmp_path, version, cache):
++    kept = tmp_path / "node-local" / "llama70b-tp4"
++    env = {"HOME": str(tmp_path / "home"), **jit_cache.env_for(kept)}
++
++    assert kept in WHERE[version][cache](env).parents
++
++
++# servekit's list before keys (jit_cache.py:16-22 at cd8f0b8).
++BEFORE = {"TRITON_CACHE_DIR": "triton", "TVM_FFI_CACHE_DIR": "tvm-ffi", "FLASHINFER_WORKSPACE_BASE": "flashinfer"}
++
++
++@pytest.mark.parametrize("version, kept", [("0.5.16", True), ("0.5.20", False)])
++def test_the_old_list_kept_the_all_reduce_kernel_only_up_to_0_5_16(tmp_path, version, kept):
++    root = tmp_path / "node-local"
++    env = {"HOME": str(tmp_path / "home"), **{var: str(root / sub) for var, sub in BEFORE.items()}}
++
++    assert (root in WHERE[version]["load_jit (custom all-reduce)"](env).parents) is kept
+diff --git a/tests/test_jit_cache_regression.py b/tests/test_jit_cache_regression.py
+new file mode 100644
+index 0000000..3e0c98f
+--- /dev/null
++++ b/tests/test_jit_cache_regression.py
+@@ -0,0 +1,88 @@
++"""The regression: sglang 0.5.20 builds its custom all-reduce (with every
++other `load_jit` kernel) under SGLANG_JIT_CACHE_DIR, which servekit did not
++set. `prepare` JITted it into the job's ephemeral $HOME, kept nothing, and
++every later launch built it again during torch.distributed init (~17 s at TP4
++on 0.5.16, where it was still kept).
++
++Uses only what servekit had before the fix (prepare, `launch`, the fake-engine
++seams), so the same file runs against cd8f0b8 and fails there.
++"""
++import os
++from pathlib import Path
++
++from servekit.cli import main
++from servekit.prepare import prepare
++from servekit.profile import ProfileReport
++from servekit.stage import StageResult
++
++MODULE = "sgl_kernel_jit_communicator"
++
++# The part of a sglang 0.5.20 sharding run this is about: torch.distributed init
++# builds the custom all-reduce through load_jit, which caches under
++# `envs.SGLANG_JIT_CACHE_DIR.get() or "~/.cache/sglang/jit"`
++# (python/sglang/kernels/jit/utils/compile/cache.py:302 at v0.5.20).
++FAKE_SGLANG_0_5_20 = f'''
++import json, os, shutil, sys
++from pathlib import Path
++args = sys.argv[1:]
++def arg(name):
++    return args[len(args) - 1 - args[::-1].index(name) + 1]
++out, model, tp = arg("--output"), arg("--model-path"), int(arg("--tensor-parallel-size"))
++if "--servekit-warm-only" not in args:
++    for rank in range(tp):
++        open(f"{{out}}/model-rank-{{rank}}-part-0.safetensors", "wb").write(b"weights")
++    shutil.copy(os.path.join(model, "config.json"), out)
++    resolved = {{"engine": "sglang", "engine_version": "0.5.20", "tp_size": tp, "pp_size": 1,
++                "dp_size": 1, "dtype": "bfloat16", "quantization": None}}
++    json.dump(resolved, open(arg("--servekit-resolved-out"), "w"))
++root = Path(os.environ.get("SGLANG_JIT_CACHE_DIR") or os.path.expanduser("~/.cache/sglang/jit"))
++leaf = root / "sm90" / "{MODULE}" / "build-0" / "deps-0"
++leaf.mkdir(parents=True, exist_ok=True)
++(leaf / "{MODULE}.so").write_bytes(b"\\x7fELF" + bytes(4096))
++'''
++
++
++def _built(env: dict) -> bool:
++    """Whether a 0.5.20 engine started with `env` finds the module already built."""
++    root = Path(env.get("SGLANG_JIT_CACHE_DIR") or os.path.join(env["HOME"], ".cache", "sglang", "jit"))
++    return any(p.name == f"{MODULE}.so" for p in root.rglob("*")) if root.is_dir() else False
++
++
++def test_a_later_job_finds_the_all_reduce_kernel_prepare_built(tmp_path, monkeypatch):
++    model = tmp_path / "Apertus-8B-Instruct-2509"
++    model.mkdir()
++    (model / "config.json").write_text("{}")
++    artifact = tmp_path / "apertus8b-tp2"
++    sharder = tmp_path / "fake_sglang_0_5_20.py"
++    sharder.write_text(FAKE_SGLANG_0_5_20)
++    monkeypatch.setattr("servekit.prepare.SAVE_SCRIPT", sharder)
++    monkeypatch.delenv("SGLANG_JIT_CACHE_DIR", raising=False)
++
++    # Job 1 prepares on node 1, with that job's own $HOME and /tmp.
++    monkeypatch.setenv("HOME", str(tmp_path / "job1-home"))
++    assert prepare(model, artifact, tp=2, cache_root=tmp_path / "node1-tmp") == 0
++
++    # Job 2 serves on node 2: a fresh $HOME and /tmp, only the artifact carries over.
++    monkeypatch.setenv("HOME", str(tmp_path / "job2-home"))
++    seen = {}
++
++    def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
++        seen["built"] = _built({**os.environ, **(env or {})})
++        return ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="sglang")
++
++    def fake_stage(src, dest, slices=64, file_pattern="*"):
++        return StageResult(dest=dest, wall_s=0.1, gbps=1.0, bytes=1)
++
++    monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
++    monkeypatch.setattr("servekit.launch.stage", fake_stage)
++    monkeypatch.setattr("servekit.launch.DEFAULT_ROOT", tmp_path / "node2-shm")
++    monkeypatch.setattr("servekit.launch.DEFAULT_CACHE_ROOT", tmp_path / "node2-tmp")
++    rc = main([
++        "launch", "--servekit-artifact-path", str(artifact), "--out", str(tmp_path / "run.json"),
++        "--", "python", "-m", "sglang.launch_server",
++        "--model-path", str(model), "--tensor-parallel-size", "2",
++    ])
++
++    assert rc == 0
++    assert seen["built"], "job 2 rebuilds the custom all-reduce: prepare did not keep sglang 0.5.20's load_jit cache"
++    assert not (tmp_path / "job1-home" / ".cache" / "sglang" / "jit").exists(), "prepare JITted into $HOME"
+diff --git a/tests/test_prepare.py b/tests/test_prepare.py
+index 448b52a..097c91b 100644
+--- a/tests/test_prepare.py
++++ b/tests/test_prepare.py
+@@ -91,7 +91,8 @@ def test_the_sharding_run_jits_where_launch_will_read(tmp_path, model, fake_shar
+ 
+     assert rc == 0
+     child_env = json.loads(dumped.read_text())
+-    assert {k: child_env.get(k) for k in jit_cache.CACHES} == jit_cache.env_for(cache_root / out.name)
++    expected = jit_cache.env_for(cache_root / out.name)
++    assert {var: child_env.get(var) for var in expected} == expected
+ 
+ 
+ def test_what_the_sharding_run_jitted_is_kept_with_the_checkpoint(tmp_path, model, fake_sharder):
+-- 
+2.50.1 (Apple Git-155)
+

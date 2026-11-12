@@ -1,0 +1,2 @@
+{"binary": "base", "worker_public_addr": false, "history": 20000, "delay_s": 0, "run": 1, "initial_join_s": 0.0, "left_hidden_s": 0.0, "time_to_routable_s": 19.83, "outcome": "routable", "worker_self_status": "ready", "worker_self_services": 1, "after_post_s": "", "guard_s": ""}
+{"binary": "base", "worker_public_addr": false, "history": 20000, "delay_s": 0, "run": 2, "initial_join_s": 0.0, "left_hidden_s": 0.0, "time_to_routable_s": 19.88, "outcome": "routable", "worker_self_status": "ready", "worker_self_services": 1, "after_post_s": "", "guard_s": ""}

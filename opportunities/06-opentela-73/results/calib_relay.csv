@@ -1,0 +1,2 @@
+binary,worker_public_addr,history,delay_s,run,initial_join_s,left_hidden_s,time_to_routable_s,outcome,worker_self_status,worker_self_services,after_post_s,guard_s
+base,False,20000,0,1,0.0,0.0,,not routable after 180s,ready,1,10.88,

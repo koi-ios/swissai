@@ -1,0 +1,75 @@
+{
+ "torch": "2.15.0",
+ "world": 8,
+ "timeout_s": 1.0,
+ "results": [
+  {
+   "scenario": "staggered",
+   "description": "rank k finishes 0.6k x timeout late: total spread > timeout",
+   "world": 8,
+   "timeout_s": 1.0,
+   "rank0_outcome": "passed",
+   "rank0_wait_s": 4.21,
+   "listed_failed_ranks": [],
+   "gloo_error": "",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 2.275170087814331,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.482396125793457
+    },
+    {
+     "rank": 1,
+     "t_enter": 2.8772132396698,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.482022047042847
+    },
+    {
+     "rank": 2,
+     "t_enter": 3.4787421226501465,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.482121229171753
+    },
+    {
+     "rank": 3,
+     "t_enter": 4.0791990756988525,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.4823081493377686
+    },
+    {
+     "rank": 4,
+     "t_enter": 4.677630186080933,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.482496976852417
+    },
+    {
+     "rank": 5,
+     "t_enter": 5.277810096740723,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.482567071914673
+    },
+    {
+     "rank": 6,
+     "t_enter": 5.87122917175293,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.4826819896698
+    },
+    {
+     "rank": 7,
+     "t_enter": 6.48078727722168,
+     "timeout_s": 1.0,
+     "outcome": "passed",
+     "t_exit": 6.482802152633667
+    }
+   ]
+  }
+ ]
+}

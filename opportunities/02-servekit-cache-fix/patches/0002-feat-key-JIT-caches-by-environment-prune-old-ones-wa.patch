@@ -1,0 +1,1359 @@
+From e981e4acc47370f93094211750a859fb08e393cc Mon Sep 17 00:00:00 2001
+From: snarayana <snarayana@student.ethz.ch>
+Date: Thu, 12 Nov 2026 01:42:12 +0100
+Subject: [PATCH 2/3] feat: key JIT caches by environment, prune old ones, warm
+ a new image's
+
+The caches were kept per checkpoint, but whether a compiled kernel still
+applies depends on the environment that built it. Five Llama-70B TP4
+launches in the cold-start experiments staged caches from an artifact most
+likely prepared with another image and still spent 19-22 s in
+torch.distributed init, against 2.7 s with matching caches, and nothing in
+the log said why.
+
+- jit_cache.validity_key(): engine and kernel-library versions (package
+  metadata, no import), GPU compute capability (nvidia-smi, else libcuda in a
+  child process), CPU arch, Python, CUDA toolkit (its version.json), and the
+  image tag when the image sets one. It names a namespace such as
+  sglang-0.5.20-sm90-aarch64-3f2a9c1b7d4e under <artifact>/servekit-caches/.
+- launch stages only its own key's namespace, still to a fixed node-local
+  path (/tmp/servekit/caches/<artifact>/<key>, since ninja and Triton record
+  absolute paths), and logs the namespaces it skipped with what differs. An
+  artifact from before keys is staged as before. With no caches the engine
+  still JITs into the node-local copy rather than $HOME. A cache variable
+  the environment already sets is left alone.
+- prepare keeps its run's caches as this key's namespace: copied after the
+  engine has exited, published by rename, without the node-specific GPU P2P
+  check or the debris of interrupted writes; then prunes to the newest
+  --jit-cache-keep (default 3). A launch never writes the artifact.
+- --only-prepare on a prepared artifact without this key's caches runs one
+  warmup off the presharded checkpoint (save_sharded_state.py
+  --servekit-warm-only) instead of re-sharding.
+- The launch report records the key and whether its caches were staged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ README.md                                     |  12 +-
+ src/servekit/_prepare/save_sharded_state.py   |  14 +
+ src/servekit/cli.py                           |  16 +-
+ src/servekit/jit_cache.py                     | 398 +++++++++++++++++-
+ src/servekit/launch.py                        |  90 +++-
+ src/servekit/prepare.py                       |  91 +++-
+ tests/conftest.py                             |  28 ++
+ .../scripts/prepare-serve-apertus8b.sbatch    |   5 +-
+ tests/e2e/test_prepare_serve_e2e.py           |   7 +-
+ tests/test_jit_cache.py                       | 282 ++++++++++++-
+ tests/test_launch.py                          |   5 +-
+ tests/test_prepare.py                         |   8 +-
+ 12 files changed, 897 insertions(+), 59 deletions(-)
+ create mode 100644 tests/conftest.py
+
+diff --git a/README.md b/README.md
+index 883e566..7e82633 100644
+--- a/README.md
++++ b/README.md
+@@ -60,8 +60,16 @@ sglang >= 0.5.14 (`sglang.srt.runtime_context`, for pp_rank/pp_size).
+ 
+ `prepare` also keeps what the engine JIT-compiles (Triton, FlashInfer, sglang's
+ own `load_jit` kernels such as the custom all-reduce, DeepGEMM, TileLang, ...)
+-in `<dir>/servekit-caches/`, and a launch gives the engine a node-local copy of
+-them to read and write.
++in `<dir>/servekit-caches/<key>/`. The key names what a compiled kernel is
++valid for: engine and kernel-library versions, GPU compute capability, CPU
++arch, e.g. `sglang-0.5.20-sm90-aarch64-3f2a9c1b7d4e`. A launch stages only the
++caches of its own key, into a node-local copy the engine writes to; caches
++another image built are named in the log with what differs, never staged.
++
++After an image upgrade, `--only-prepare` on an already prepared artifact builds
++the new key's caches without re-sharding, and drops all but the newest
++`--jit-cache-keep` (default 3). A cache variable your environment already sets
++(a shared per-image cache, say) is left alone.
+ 
+ `--overlap` starts the engine while the stage is still running, hiding it behind
+ engine startup; sglang only.
+diff --git a/src/servekit/_prepare/save_sharded_state.py b/src/servekit/_prepare/save_sharded_state.py
+index 5d8ee6e..48eedec 100644
+--- a/src/servekit/_prepare/save_sharded_state.py
++++ b/src/servekit/_prepare/save_sharded_state.py
+@@ -41,6 +41,9 @@ parser.add_argument(
+     help="max size (in bytes) of each safetensors file",
+ )
+ parser.add_argument("--servekit-resolved-out", type=str, default=None)
++# Load an already prepared checkpoint and only run the warmup, so a new image's
++# JIT caches can be built without re-sharding.
++parser.add_argument("--servekit-warm-only", action="store_true")
+ 
+ 
+ def resolved(llm, engine_args) -> dict:
+@@ -97,6 +100,14 @@ def main(args):
+         print(quant_guard.refusal(unsupported, model_path), file=sys.stderr)
+         raise SystemExit(2)
+ 
++    if args.servekit_warm_only:
++        llm = Engine(**dataclasses.asdict(engine_args))
++        if node_rank != 0:
++            print(f"node_rank={node_rank}: engine constructor returned; nothing to issue here")
++            return
++        warm(llm)
++        return
++
+     Path(args.output).mkdir(parents=True, exist_ok=True)
+ 
+     llm = Engine(**dataclasses.asdict(engine_args))
+@@ -142,7 +153,10 @@ def main(args):
+             json.dump(resolved(llm, engine_args), f)
+ 
+     print(f"saved sharded checkpoint to {args.output}")
++    warm(llm)
++
+ 
++def warm(llm):
+     # The warmup `launch_server` runs and an Engine does not: FlashInfer JITs
+     # only on a served request. The checkpoint is already written, so failing
+     # here costs a colder start, not the prepare.
+diff --git a/src/servekit/cli.py b/src/servekit/cli.py
+index 1f73c5c..2144075 100644
+--- a/src/servekit/cli.py
++++ b/src/servekit/cli.py
+@@ -7,6 +7,7 @@ import time
+ from pathlib import Path
+ from typing import List, Optional, Tuple
+ 
++from . import jit_cache
+ from .bench import BenchConfig, run_benchmark, render_bench
+ from .launch import launch
+ from .profile import ProfileReport, detect_framework, render_table, run_profile, save_json
+@@ -16,7 +17,7 @@ from .verify import capture, compare, discover_model, load_prompt_set, render_ve
+ 
+ USAGE = """usage:
+   servekit launch --servekit-artifact-path PATH [--only-prepare] [--out PATH]
+-                  [--slices N] [--overlap] -- <command...>
++                  [--slices N] [--overlap] [--jit-cache-keep N] -- <command...>
+   servekit profile [--out PATH] [--timeout SECONDS] -- <command...>
+   servekit bench --url URL (--into PATH | --out PATH) [--wait-ready SECONDS] [...]
+   servekit verify --url URL (--record PATH | --reference PATH) [--wait-ready SECONDS] [...]
+@@ -28,7 +29,9 @@ reports ready -- returning the RAM to the running job while it serves. It
+ behaves like the command it wraps, so removing the wrapper gives the baseline
+ back. An artifact that does not match the command is a warning, not a failure:
+ servekit names the mismatch and runs the command on the engine's own loader.
+-`--only-prepare` writes the artifact and stops, for an offline build step.
++`--only-prepare` writes the artifact and stops, for an offline build step; on an
++artifact that is already prepared, it builds the JIT caches this environment
++(engine and kernel versions, GPU and CPU arch) is missing.
+ `profile` is `launch` without any of that. `bench` loads any live server over
+ the OpenAI protocol, whether or not servekit launched it. `verify` checks that a
+ served model produces the same per-token logprobs it did before: `--record`
+@@ -142,7 +145,15 @@ def _launch(argv: List[str]) -> int:
+         action="store_true",
+         help="start the engine concurrently with the stage; sglang only",
+     )
++    parser.add_argument(
++        "--jit-cache-keep",
++        type=int,
++        default=jit_cache.DEFAULT_KEEP,
++        help="JIT cache namespaces (one per environment) an artifact keeps when servekit writes one",
++    )
+     args = parser.parse_args(options)
++    if args.jit_cache_keep < 1:
++        parser.error("--jit-cache-keep must be at least 1")
+ 
+     try:
+         return launch(
+@@ -153,6 +164,7 @@ def _launch(argv: List[str]) -> int:
+             timeout=args.timeout,
+             overlap=args.overlap,
+             only_prepare=args.only_prepare,
++            cache_keep=args.jit_cache_keep,
+         )
+     except ValueError as e:
+         print(f"error: {e}", file=sys.stderr)
+diff --git a/src/servekit/jit_cache.py b/src/servekit/jit_cache.py
+index e659487..c8d4b26 100644
+--- a/src/servekit/jit_cache.py
++++ b/src/servekit/jit_cache.py
+@@ -1,19 +1,33 @@
+ """Where the engine's JIT caches live, so they outlive the job.
+ 
+-`CACHES` holds every variable that moves a compile cache, for every engine
+-version servekit has read, and all of them are set every time: a version that
+-does not read one ignores it, and a version check would be one more list to keep
+-in step with the engine's release branches. The list already went stale once:
+-sglang 0.5.20 moved `load_jit`'s build cache from TVM_FFI_CACHE_DIR to
+-SGLANG_JIT_CACHE_DIR, so the custom all-reduce kernels it builds during
+-torch.distributed init (~17 s at TP4 without a cache) stopped being kept.
++The list of cache directories already rotted once: sglang 0.5.20 moved
++`load_jit`'s build cache from TVM_FFI_CACHE_DIR to SGLANG_JIT_CACHE_DIR, so the
++custom all-reduce kernels it builds during torch.distributed init (~17 s at TP4
++without a cache) stopped being kept. So:
++
++- `CACHES` holds every variable that moves a compile cache, for every engine
++  version servekit has read, and all of them are set every time. A version that
++  does not read one ignores it; a version check would be one more list to rot.
++- Caches are kept per validity key (engine and kernel-library versions, GPU
++  compute capability, CPU arch), not per checkpoint alone. Caches another image
++  built are never staged: the log names them and says what differs.
+ """
+ from __future__ import annotations
+ 
++import hashlib
++import json
++import os
++import platform
++import re
+ import shutil
+-from dataclasses import dataclass
++import subprocess
++import sys
++import time
++import uuid
++from dataclasses import dataclass, field
++from importlib import metadata
+ from pathlib import Path
+-from typing import Dict, Optional, Tuple
++from typing import Dict, List, Mapping, Optional, Tuple
+ 
+ CACHE_DIR_NAME = "servekit-caches"
+ 
+@@ -23,6 +37,19 @@ CACHE_DIR_NAME = "servekit-caches"
+ # built rebuilds itself.
+ NODE_LOCAL_ROOT = Path("/tmp/servekit/caches")
+ 
++# In each namespace; a directory without one is not a namespace.
++KEY_FILE = "servekit-cache-key.json"
++
++# Bumped when the layout inside a namespace changes, so old ones stop matching.
++LAYOUT_VERSION = 1
++
++# Namespaces an artifact keeps when servekit writes one: this environment's and
++# two more, e.g. a second cluster sharing the artifact and the previous image.
++DEFAULT_KEEP = 3
++
++# A .tmp-/.trash- directory this old belongs to a writer that died.
++_STALE_TMP_S = 24 * 3600
++
+ 
+ @dataclass(frozen=True)
+ class Cache:
+@@ -61,23 +88,354 @@ CACHES: Tuple[Cache, ...] = (
+     Cache("CUTE_DSL_CACHE_DIR", "cute-dsl", ("<tmp>/<user>/cutlass_python_cache",)),
+ )
+ 
++# Never persisted. The P2P check describes this node's topology, not the image:
++# copied to a node without NVLink it would switch on a custom all-reduce the
++# hardware cannot run. The rest are locks and the leftovers of interrupted
++# writes: sglang's and TileLang's .staging dirs, Triton's tmp.pid_* dirs,
++# Inductor's .<pid>.<tid>.tmp files, TileLang's tmp dir.
++_NOT_PERSISTED = re.compile(
++    r"(^|/)(gpu_p2p_access_cache_for_[^/]*\.json|\.?lock|[^/]*\.lock|\.[^/]*\.tmp"
++    r"|(\.staging[^/]*|tmp\.pid_[^/]*|tilelang/tmp)(/.*)?)$"
++)
++
++# The unkeyed layout servekit wrote before keys: <artifact>/servekit-caches/<subdir>.
++_LEGACY_SUBDIRS = ("triton", "tvm-ffi", "flashinfer")
++
+ 
+ def node_local(root: Path, name: str) -> Path:
+     return root / name
+ 
+ 
+-def env_for(root: Path) -> Dict[str, str]:
+-    return {c.var: str(root / c.subdir) for c in CACHES}
++def env_for(root: Path, environ: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
++    """The variables that put every cache under `root`.
++
++    One `environ` already sets is left out: whoever set it chose where that
++    cache lives (a shared per-image cache, say), and servekit does not move it.
++    """
++    environ = environ or {}
++    return {c.var: str(root / c.subdir) for c in CACHES if c.var not in environ}
++
++
++def left_to_environment(environ: Mapping[str, str]) -> Dict[str, str]:
++    return {c.var: environ[c.var] for c in CACHES if c.var in environ}
++
++
++def create(root: Path, environ: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
++    env = env_for(root, environ)
++    for path in env.values():
++        Path(path).mkdir(parents=True, exist_ok=True)
++    return env
++
++
++# --- the validity key -----------------------------------------------------------
++
++# Packages whose version decides whether a compiled kernel still applies. Absent
++# ones are left out, so one list serves every image.
++KEY_PACKAGES = (
++    "sglang", "sglang-kernel", "sgl-kernel", "vllm", "torch", "triton", "apache-tvm-ffi",
++    "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache", "nvidia-cutlass-dsl",
++    "flash-attn-4", "quack-kernels", "sgl-deep-gemm", "deep-gemm", "nvidia-mathdx", "tilelang",
++)
++
++# The upstream sglang images set these (docker/Dockerfile): free precision when present.
++_IMAGE_VARS = ("SGLANG_IMAGE_TAG", "SGLANG_BUILD_COMMIT")
++
++# Fallback when nvidia-smi is missing; run in a child so servekit's own process
++# never initializes CUDA. 75/76: CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR/MINOR.
++_LIBCUDA_PROBE = """
++import ctypes, sys
++cuda = ctypes.CDLL("libcuda.so.1")
++n = ctypes.c_int()
++if cuda.cuInit(0) or cuda.cuDeviceGetCount(ctypes.byref(n)):
++    sys.exit(1)
++for i in range(n.value):
++    dev, major, minor = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
++    if not cuda.cuDeviceGet(ctypes.byref(dev), i):
++        cuda.cuDeviceGetAttribute(ctypes.byref(major), 75, dev)
++        cuda.cuDeviceGetAttribute(ctypes.byref(minor), 76, dev)
++        print(f"{major.value}.{minor.value}")
++"""
++
++
++@dataclass(frozen=True)
++class CacheKey:
++    """What a compiled cache is valid for, and the namespace it is kept under."""
++
++    material: Mapping[str, object]
++
++    @property
++    def name(self) -> str:
++        """Readable first, exact last: sglang-0.5.20-sm90-aarch64-<sha256[:12]>."""
++        m = self.material
++        engine = str(m.get("engine"))
++        version = m.get("packages", {}).get(engine, "unknown")
++        gpu = "+".join("sm" + cap.replace(".", "") for cap in m.get("gpu") or []) or "nogpu"
++        digest = hashlib.sha256(json.dumps(m, sort_keys=True).encode()).hexdigest()[:12]
++        return "-".join(re.sub(r"[^\w.+]", "_", str(p)) for p in (engine, version, gpu, m.get("cpu"), digest))
++
++    def summary(self) -> str:
++        m = self.material
++        pkgs = m.get("packages", {})
++        shown = [f"{p} {pkgs[p]}" for p in ("sglang", "vllm", "torch", "flashinfer-python") if p in pkgs]
++        return ", ".join(shown + [f"GPU {','.join(m.get('gpu') or ['none'])}", f"{m.get('cpu')}"])
++
++
++def gpu_capabilities() -> Tuple[str, ...]:
++    """Compute capabilities of this node's GPUs, e.g. ("9.0",); empty if unreadable.
++
++    Never imports torch, which alone costs seconds.
++    """
++    probes = [[sys.executable, "-I", "-c", _LIBCUDA_PROBE]]
++    smi = shutil.which("nvidia-smi")
++    if smi:
++        probes.insert(0, [smi, "--query-gpu=compute_cap", "--format=csv,noheader"])
++    for probe in probes:
++        try:
++            out = subprocess.run(probe, capture_output=True, text=True, timeout=60)
++        except (OSError, subprocess.SubprocessError):
++            continue
++        caps = {line.strip() for line in out.stdout.splitlines() if re.fullmatch(r"\d+\.\d+", line.strip())}
++        if out.returncode == 0 and caps:
++            return tuple(sorted(caps))
++    return ()
++
++
++def _package_versions() -> Dict[str, str]:
++    versions = {}
++    for name in KEY_PACKAGES:
++        try:
++            versions[name] = metadata.version(name)
++        except metadata.PackageNotFoundError:
++            continue
++    return versions
++
++
++def _cuda_toolkit(environ: Mapping[str, str]) -> Optional[str]:
++    """The toolkit nvcc builds with, off its version.json: a file read, not a subprocess."""
++    for home in (environ.get("CUDA_HOME"), environ.get("CUDA_PATH"), "/usr/local/cuda"):
++        try:
++            return str(json.loads((Path(home) / "version.json").read_text())["cuda"]["version"])
++        except (TypeError, OSError, ValueError, KeyError):
++            continue
++    return None
++
++
++def validity_key(engine: str, environ: Optional[Mapping[str, str]] = None) -> CacheKey:
++    """The key this environment's compiled caches are valid under.
++
++    Cheap enough for every launch: package metadata, one nvidia-smi query, a
++    file read. Imports no engine.
++    """
++    environ = os.environ if environ is None else environ
++    material: Dict[str, object] = {
++        "layout": LAYOUT_VERSION,
++        "engine": engine,
++        "packages": _package_versions(),
++        "gpu": list(gpu_capabilities()),
++        "cpu": platform.machine(),
++        "python": "%d.%d" % sys.version_info[:2],
++        "cuda": _cuda_toolkit(environ),
++        "image": {var: environ[var] for var in _IMAGE_VARS if environ.get(var)},
++    }
++    return CacheKey(material)
++
++
++def key_differences(ours: Mapping[str, object], theirs: Mapping[str, object]) -> List[str]:
++    """What separates two keys, in words, the engine's own version first: why
++    another environment's caches were not staged."""
++    a, b = theirs.get("packages") or {}, ours.get("packages") or {}
++    engine = str(ours.get("engine"))
++    packages = sorted(set(a) | set(b), key=lambda p: (p != engine, p))
++    diffs = [f"{p} {a.get(p, 'absent')} -> {b.get(p, 'absent')}" for p in packages if a.get(p) != b.get(p)]
++    for name in ("gpu", "cpu", "python", "cuda", "image", "engine", "layout"):
++        if theirs.get(name) != ours.get(name):
++            diffs.append(f"{name} {theirs.get(name)} -> {ours.get(name)}")
++    return diffs
++
++
++# --- namespaces in the artifact -------------------------------------------------
++
++@dataclass
++class Namespace:
++    path: Path
++    material: Optional[Mapping[str, object]]  # None: the unkeyed layout from before keys
++    created: float
++
++    @property
++    def legacy(self) -> bool:
++        return self.material is None
++
++
++def namespaces(artifact: Path) -> List[Namespace]:
++    """The artifact's caches, newest first; the unkeyed layout, if any, last."""
++    root = Path(artifact) / CACHE_DIR_NAME
++    found: List[Namespace] = []
++    if not root.is_dir():
++        return found
++    for entry in root.iterdir():
++        if entry.name.startswith(".") or not (entry / KEY_FILE).is_file():
++            continue
++        try:
++            data = json.loads((entry / KEY_FILE).read_text())
++            found.append(Namespace(entry, data["material"], float(data["created"])))
++        except (OSError, ValueError, KeyError, TypeError):
++            continue
++    found.sort(key=lambda ns: ns.created, reverse=True)
++    if any((root / sub).is_dir() for sub in _LEGACY_SUBDIRS):
++        found.append(Namespace(root, None, 0.0))
++    return found
++
++
++def has_namespace(artifact: Path, key: CacheKey) -> bool:
++    return (Path(artifact) / CACHE_DIR_NAME / key.name / KEY_FILE).is_file()
++
++
++@dataclass
++class Staged:
++    source: str  # "namespace", "legacy" or "none"
++    root: Path  # node-local directory every cache variable points under
++    env: Dict[str, str]
++    left_alone: Dict[str, str]
++    others: List[Namespace] = field(default_factory=list)
++    files: int = 0
++    error: Optional[str] = None
++
++
++def stage(artifact: Path, cache_root: Path, key: CacheKey, environ: Optional[Mapping[str, str]] = None) -> Staged:
++    """Give the engine a node-local, writable copy of the artifact's caches for `key`.
++
++    The copy, not the artifact, is what the engine writes to, so a read-only
++    artifact serves and concurrent jobs share nothing. With no namespace for
++    this key, an artifact from before keys is staged the way it always was (its
++    kernels' own hashes still decide what is reused). With neither, the engine
++    JITs from cold into the same node-local directory, where a later
++    --only-prepare can see it.
++    """
++    environ = os.environ if environ is None else environ
++    artifact = Path(artifact)
++    base = node_local(cache_root, artifact.name)
++    present = namespaces(artifact)
++    ours = artifact / CACHE_DIR_NAME / key.name
++    staged = Staged(
++        source="none", root=base / key.name, env={}, left_alone=left_to_environment(environ),
++        others=[ns for ns in present if ns.path != ours],
++    )
++    copy = dict(symlinks=True, dirs_exist_ok=True, copy_function=_copy_atomically)
++    try:
++        if has_namespace(artifact, key):
++            staged.source = "namespace"
++            shutil.copytree(ours, staged.root, ignore=shutil.ignore_patterns(KEY_FILE), **copy)
++        elif any(ns.legacy for ns in present):
++            # Only the directories it ever had: namespaces of other
++            # environments sit beside them and are not ours to stage.
++            staged.source, staged.root = "legacy", base
++            for sub in _LEGACY_SUBDIRS:
++                if (ours.parent / sub).is_dir():
++                    shutil.copytree(ours.parent / sub, base / sub, **copy)
++    except (OSError, shutil.Error) as e:
++        # A prune racing the copy, or /tmp filling up. Every file that made it
++        # is whole, and each cache rebuilds what it is missing: slower, not wrong.
++        staged.error = str(e)
++    if staged.source != "none":
++        staged.files = sum(1 for p in staged.root.rglob("*") if p.is_file())
++    staged.env = create(staged.root, environ)
++    return staged
++
++
++def _copy_atomically(src: str, dst: str) -> str:
++    """copy2, except that a copy cut short never leaves a truncated file under a cache's name."""
++    tmp = f"{dst}.servekit-{uuid.uuid4().hex[:8]}"
++    shutil.copy2(src, tmp)
++    os.replace(tmp, dst)
++    return dst
++
++
++def _copy_persistable(src: Path, dest: Path) -> int:
++    n = 0
++    for directory, dirnames, filenames in os.walk(src):
++        links = [d for d in dirnames if os.path.islink(os.path.join(directory, d))]
++        for name in filenames + links:
++            path = Path(directory) / name
++            rel = path.relative_to(src).as_posix()
++            if _NOT_PERSISTED.search(rel):
++                continue
++            target = dest / rel
++            target.parent.mkdir(parents=True, exist_ok=True)
++            if path.is_symlink():
++                os.symlink(os.readlink(path), target)
++            else:
++                shutil.copy2(path, target)
++            n += 1
++    return n
++
++
++def persist(build_root: Path, artifact: Path, key: CacheKey, keep: int = DEFAULT_KEEP) -> Tuple[Path, int, List[str]]:
++    """Publish `build_root` as the artifact's namespace for `key`, then prune.
++
++    Only after the engine that filled `build_root` has exited, so no file is
++    copied mid-write. Readers never see a half-written namespace: it is copied
++    beside the others and renamed into place, and one it replaces is renamed
++    away before it is deleted.
++
++    Returns (the namespace, files kept, namespaces pruned).
++    """
++    root = Path(artifact) / CACHE_DIR_NAME
++    final = root / key.name
++    tmp = root / f".tmp-{key.name}-{uuid.uuid4().hex[:8]}"
++    try:
++        tmp.mkdir(parents=True)
++        n = _copy_persistable(build_root, tmp) if build_root.is_dir() else 0
++        record = {"name": key.name, "created": time.time(), "material": key.material}
++        (tmp / KEY_FILE).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
++        if final.exists():
++            _discard(final)
++        try:
++            os.rename(tmp, final)
++        except OSError:
++            if not final.is_dir():
++                raise
++            # Another writer published this key between the discard and here.
++    finally:
++        shutil.rmtree(tmp, ignore_errors=True)
++    return final, n, prune(artifact, keep=keep, current=key)
++
+ 
++def _discard(path: Path) -> None:
++    trash = path.with_name(f".trash-{path.name}-{uuid.uuid4().hex[:8]}")
++    os.rename(path, trash)
++    shutil.rmtree(trash, ignore_errors=True)
+ 
+-def create(root: Path) -> Dict[str, str]:
+-    for c in CACHES:
+-        (root / c.subdir).mkdir(parents=True, exist_ok=True)
+-    return env_for(root)
+ 
++def prune(artifact: Path, keep: int = DEFAULT_KEEP, current: Optional[CacheKey] = None) -> List[str]:
++    """Delete all but the `keep` newest namespaces; the current key's always stays.
+ 
+-def copy_into(src_root: Path, dest_root: Path) -> Optional[Path]:
+-    if not src_root.is_dir():
+-        return None
+-    shutil.copytree(src_root, dest_root, dirs_exist_ok=True)
+-    return dest_root
++    The unkeyed layout counts as the oldest. Only a writer (prepare,
++    --only-prepare) calls this: a launch never deletes from the artifact.
++    """
++    root = Path(artifact) / CACHE_DIR_NAME
++    present = namespaces(artifact)
++    kept = {ns.path for ns in present[: max(keep, 1)]}
++    if current is not None:
++        kept.add(root / current.name)
++    removed: List[str] = []
++    for ns in present:
++        if ns.path in kept:
++            continue
++        try:
++            if ns.legacy:
++                for sub in _LEGACY_SUBDIRS:
++                    if (root / sub).is_dir():
++                        _discard(root / sub)
++                removed.append(f"unkeyed {'/'.join(_LEGACY_SUBDIRS)}")
++            else:
++                _discard(ns.path)
++                removed.append(ns.path.name)
++        except OSError:
++            continue  # another writer got there first
++    for leftover in root.glob(".*"):
++        try:
++            if leftover.name.startswith((".tmp-", ".trash-")) and time.time() - leftover.stat().st_mtime > _STALE_TMP_S:
++                shutil.rmtree(leftover, ignore_errors=True)
++        except OSError:
++            continue
++    return removed
+diff --git a/src/servekit/launch.py b/src/servekit/launch.py
+index aa87aa5..1946300 100644
+--- a/src/servekit/launch.py
++++ b/src/servekit/launch.py
+@@ -13,6 +13,12 @@ startup: an sglang plugin blocks each scheduler at the weight read until this
+ node's stage has published done, so a scheduler never opens a file the stage
+ has not finished writing.
+ 
++JIT caches are kept in the artifact per validity key (engine and kernel
++versions, GPU arch, CPU arch); see jit_cache. A launch stages the ones that
++match this environment and never writes the artifact's caches.
++`--only-prepare` on an artifact with no caches for this environment builds them
++without re-sharding.
++
+ Multi-node is the same command on every node, under one srun task per node, with
+ the engine's own `--nnodes / --node-rank / --dist-init-addr` set. Each node
+ stages only the shards its own ranks read, profiles itself, and frees its own
+@@ -20,6 +26,7 @@ copy; the nodes never talk to each other and each writes its own report.
+ """
+ from __future__ import annotations
+ 
++import json
+ import os
+ import shutil
+ import sys
+@@ -34,7 +41,7 @@ from . import manifest as manifest_mod
+ from . import quant_guard
+ from ._patches import apply_all
+ from .engine_args import check_manifest, find_model_path, replace_model_path
+-from .prepare import prepare
++from .prepare import prepare, warm
+ from .profile import Phase, ProfileReport, detect_framework, render_table, run_profile, save_json
+ from .stage import DEFAULT_SLICES, stage
+ from .topology import SHARDED_FORMAT, Topology, read_topology, shard_glob, wants_sharded_state
+@@ -112,7 +119,7 @@ def _writable(path: Path) -> bool:
+     return probe.is_dir() and os.access(probe, os.W_OK | os.X_OK)
+ 
+ 
+-def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact: Path) -> int:
++def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact: Path, **caches) -> int:
+     print(f"[SERVEKIT] no prepared checkpoint in {artifact}; preparing one now", flush=True)
+     return prepare(
+         model,
+@@ -123,9 +130,48 @@ def _prepare_artifact(command: List[str], topo: Topology, model: Path, artifact:
+         nnodes=topo.nnodes,
+         node_rank=topo.node_rank,
+         dist_init_addr=topo.dist_init_addr,
++        **caches,
++    )
++
++
++def _warm_artifact(command: List[str], topo: Topology, artifact: Path, **caches) -> int:
++    return warm(
++        artifact,
++        topo.tp_size,
++        engine_args=_sharder_args(command),
++        pp=topo.pp_size,
++        nnodes=topo.nnodes,
++        node_rank=topo.node_rank,
++        dist_init_addr=topo.dist_init_addr,
++        **caches,
+     )
+ 
+ 
++def _report_staged(staged: jit_cache.Staged, key: jit_cache.CacheKey, artifact: Path) -> None:
++    caches = artifact / jit_cache.CACHE_DIR_NAME
++    if staged.error:
++        print(f"[SERVEKIT] warning: could not stage JIT caches ({staged.error}); JIT from cold", flush=True)
++    if staged.source == "namespace":
++        print(f"[SERVEKIT] staged JIT caches from {caches / key.name} ({staged.files} files)", flush=True)
++    elif staged.source == "legacy":
++        print(
++            f"[SERVEKIT] staged JIT caches from {caches}, written before servekit keyed them by "
++            f"environment, so whether they fit this one is unknown; --only-prepare builds keyed ones",
++            flush=True,
++        )
++    else:
++        print(f"[SERVEKIT] no JIT caches for this environment in {artifact}; the engine will JIT from cold", flush=True)
++        print(f"[SERVEKIT]   this environment: {key.name} ({key.summary()})", flush=True)
++        for ns in staged.others:
++            if ns.legacy:
++                continue
++            diffs = jit_cache.key_differences(key.material, ns.material)
++            print(f"[SERVEKIT]   not staged: {ns.path.name} ({'; '.join(diffs) or 'same key'})", flush=True)
++        print("[SERVEKIT]   `servekit launch --only-prepare` with this command builds them", flush=True)
++    for var, value in staged.left_alone.items():
++        print(f"[SERVEKIT] {var} is set by the environment ({value}); servekit leaves that cache alone", flush=True)
++
++
+ def _out_path(out: Optional[Path], t0: float, topo: Topology) -> Path:
+     """Where this node writes its report.
+ 
+@@ -149,6 +195,7 @@ def launch(
+     timeout: float = 1800.0,
+     overlap: bool = False,
+     only_prepare: bool = False,
++    cache_keep: int = jit_cache.DEFAULT_KEEP,
+ ) -> int:
+     # Backports go on disk before anything imports sglang; a misfit is a log line, not a refusal.
+     apply_all()
+@@ -177,8 +224,12 @@ def launch(
+     artifact = Path(artifact)
+     prepared = manifest_mod.read(artifact)
+     problems = check_manifest(command, spec, prepared) if prepared is not None else []
++    # Once per run, so a prepare below and the stage after it agree on it.
++    key = jit_cache.validity_key(spec.name)
++    caches = {"cache_root": cache_root, "key": key, "keep": cache_keep}
+ 
+     unwritable = False
++    prepared_now = False
+     if prepared is None or (only_prepare and problems):
+         if not _writable(artifact):
+             unwritable = True
+@@ -187,9 +238,10 @@ def launch(
+                 print("error: --only-prepare had nowhere to write", file=sys.stderr)
+                 return 1
+         else:
+-            rc = _prepare_artifact(command, topo, src_path, artifact)
++            rc = _prepare_artifact(command, topo, src_path, artifact, **caches)
+             if rc != 0:
+                 return rc
++            prepared_now = True
+             # A worker returns from prepare before the head has written the
+             # manifest, so an absent one here is the head still gating, not a
+             # failure.
+@@ -197,7 +249,15 @@ def launch(
+             problems = check_manifest(command, spec, prepared) if prepared is not None else []
+ 
+     if only_prepare:
+-        return 0
++        if prepared_now or jit_cache.has_namespace(artifact, key):
++            return 0
++        # The checkpoint fits but its caches were built by another image (or
++        # before servekit kept any): build this one's without re-sharding.
++        if not _writable(artifact / jit_cache.CACHE_DIR_NAME):
++            print(f"error: --only-prepare cannot write JIT caches into {artifact}", file=sys.stderr)
++            return 1
++        print(f"[SERVEKIT] {artifact} has no JIT caches for {key.name}; building them", flush=True)
++        return _warm_artifact(command, topo, artifact, **caches)
+ 
+     plain = unwritable or bool(problems)
+     if plain:
+@@ -314,13 +374,9 @@ def launch(
+         # Synchronous even under --overlap: the engine reads these before it
+         # serves anything, and it is a few MB. The copy is what the engine writes
+         # to, so a read-only checkpoint serves and concurrent jobs share nothing.
+-        cache_src = src_path / jit_cache.CACHE_DIR_NAME
+-        cache_dest = jit_cache.copy_into(cache_src, jit_cache.node_local(cache_root, src_path.name))
+-        if cache_dest is None:
+-            print(f"[SERVEKIT] no JIT caches in {src}; the engine will JIT from cold", flush=True)
+-        else:
+-            cache_env = jit_cache.env_for(cache_dest)
+-            print(f"[SERVEKIT] staged JIT caches from {cache_src}", flush=True)
++        staged_caches = jit_cache.stage(src_path, cache_root, key)
++        cache_env = staged_caches.env
++        _report_staged(staged_caches, key, src_path)
+ 
+     print(f"[SERVEKIT] launching: {' '.join(engine_command)}", flush=True)
+ 
+@@ -336,7 +392,7 @@ def launch(
+             if "result" in staged:
+                 report_stage()
+ 
+-    def emit(report: ProfileReport) -> None:
++    def emit(report: ProfileReport, jit: Optional[dict] = None) -> None:
+         report.command = " ".join(command)
+         if topo.is_multinode:
+             report.node_rank = topo.node_rank
+@@ -349,7 +405,12 @@ def launch(
+         print()
+         print(render_table(report))
+         out_path = _out_path(out, t0, topo)
+-        save_json(report, out_path)
++        if jit is None:
++            save_json(report, out_path)
++        else:
++            # One write, so a `servekit bench --into` waiting on this file
++            # never merges into a report that is about to be rewritten.
++            out_path.write_text(json.dumps({**report.to_dict(), "jit_cache": jit}, indent=2))
+         print(f"\nreport written to {out_path}", flush=True)
+ 
+     def on_ready(report: ProfileReport) -> None:
+@@ -358,7 +419,8 @@ def launch(
+         # the shards its own ranks read.
+         emitted["done"] = True
+         join_stage()
+-        emit(report)
++        jit = None if plain else {"key": key.name, "source": staged_caches.source, "node_local": str(staged_caches.root)}
++        emit(report, jit)
+         if not plain:
+             freed = free(dest)
+             print(f"[SERVEKIT] freed {freed / 1e9:.1f} GB from {dest}", flush=True)
+diff --git a/src/servekit/prepare.py b/src/servekit/prepare.py
+index 2a8d8a6..4aaef05 100644
+--- a/src/servekit/prepare.py
++++ b/src/servekit/prepare.py
+@@ -5,6 +5,7 @@ from __future__ import annotations
+ import importlib.util
+ import json
+ import os
++import shutil
+ import subprocess
+ import sys
+ import tempfile
+@@ -46,6 +47,12 @@ def _plugins_available() -> bool:
+     return (root / "srt" / "plugins" / "hook_registry.py").is_file()
+ 
+ 
++def _dist_args(nnodes: int, node_rank: int, dist_init_addr: Optional[str]) -> List[str]:
++    if nnodes == 1:
++        return []
++    return ["--nnodes", str(nnodes), "--node-rank", str(node_rank), "--dist-init-addr", str(dist_init_addr)]
++
++
+ def _missing_shards(out: Path, tp_size: int, pp_size: int = 1) -> List[str]:
+     pattern = PP_PATTERN if pp_size > 1 else TP_PATTERN
+     names = [
+@@ -67,6 +74,8 @@ def prepare(
+     dist_init_addr: Optional[str] = None,
+     pp: int = 1,
+     cache_root: Path = jit_cache.NODE_LOCAL_ROOT,
++    key: Optional[jit_cache.CacheKey] = None,
++    keep: int = jit_cache.DEFAULT_KEEP,
+ ) -> int:
+     if not model.is_dir():
+         print(f"error: model path {model} is not a directory", file=sys.stderr)
+@@ -82,18 +91,13 @@ def prepare(
+             print(f"error: --node-rank {node_rank} is outside the {nnodes} nodes asked for", file=sys.stderr)
+             return 2
+     out.mkdir(parents=True, exist_ok=True)
++    key = key or jit_cache.validity_key("sglang")
+     # Built where `launch` will read them: the engine bakes this path into its
+     # ninja build dirs, so a cache compiled elsewhere rebuilds and buys nothing.
+-    cache_build = jit_cache.node_local(cache_root, out.name)
+-    env = {**os.environ, **jit_cache.create(cache_build)}
++    cache_build = jit_cache.node_local(cache_root, out.name) / key.name
++    env = {**os.environ, **jit_cache.create(cache_build, os.environ)}
+ 
+-    dist_args: List[str] = []
+-    if nnodes > 1:
+-        dist_args = [
+-            "--nnodes", str(nnodes),
+-            "--node-rank", str(node_rank),
+-            "--dist-init-addr", str(dist_init_addr),
+-        ]
++    dist_args = _dist_args(nnodes, node_rank, dist_init_addr)
+ 
+     with tempfile.TemporaryDirectory() as tmp:
+         resolved_path = Path(tmp) / "resolved.json"
+@@ -135,10 +139,7 @@ def prepare(
+         print(f"error: stale weight index left in {out}: {', '.join(stale)}", file=sys.stderr)
+         return 1
+ 
+-    cached = jit_cache.copy_into(cache_build, out / jit_cache.CACHE_DIR_NAME)
+-    if cached is not None:
+-        n = sum(1 for p in cached.rglob("*") if p.is_file())
+-        print(f"[SERVEKIT] kept {n} JIT cache files in {cached}", flush=True)
++    keep_caches(cache_build, out, key, keep)
+ 
+     manifest = Manifest(format=FORMAT, source=str(model), **resolved)
+     path = manifest.write(out)
+@@ -150,3 +151,67 @@ def prepare(
+         flush=True,
+     )
+     return 0
++
++
++def warm(
++    artifact: Path,
++    tp: int,
++    engine_args: Sequence[str] = (),
++    python: Optional[str] = None,
++    nnodes: int = 1,
++    node_rank: int = 0,
++    dist_init_addr: Optional[str] = None,
++    pp: int = 1,
++    cache_root: Path = jit_cache.NODE_LOCAL_ROOT,
++    key: Optional[jit_cache.CacheKey] = None,
++    keep: int = jit_cache.DEFAULT_KEEP,
++) -> int:
++    """JIT this environment's caches for an already prepared artifact, and keep them in it.
++
++    For an artifact whose checkpoint still fits but whose caches were built by
++    another image: one engine run off the presharded checkpoint, with the same
++    warmup request as `prepare`, instead of a full re-shard.
++    """
++    key = key or jit_cache.validity_key("sglang")
++    cache_build = jit_cache.node_local(cache_root, artifact.name) / key.name
++    env = {**os.environ, **jit_cache.create(cache_build, os.environ)}
++
++    command = [
++        python or sys.executable,
++        str(SAVE_SCRIPT),
++        "--output", str(artifact),
++        "--tensor-parallel-size", str(tp),
++        "--pipeline-parallel-size", str(pp),
++        "--servekit-warm-only",
++        *_dist_args(nnodes, node_rank, dist_init_addr),
++        *engine_args,
++        # Last, so they win over the source path the serve command carries.
++        "--model-path", str(artifact),
++        "--load-format", FORMAT,
++    ]
++    print(f"[SERVEKIT] warming JIT caches for {key.name} from {artifact}", flush=True)
++    rc = subprocess.call(command, env=env)
++    if node_rank != 0:
++        print(f"[SERVEKIT] node {node_rank}: done; the head keeps the caches", flush=True)
++        return 0
++    if rc != 0:
++        print(f"error: the warmup run failed (rc={rc}); no caches kept", file=sys.stderr)
++        return 1
++    keep_caches(cache_build, artifact, key, keep)
++    return 0
++
++
++def keep_caches(cache_build: Path, artifact: Path, key: jit_cache.CacheKey, keep: int) -> None:
++    """Keep what the engine just compiled, under `key`.
++
++    The engine has exited, so the copy cannot catch a file mid-write.
++    """
++    try:
++        namespace, n, pruned = jit_cache.persist(cache_build, artifact, key, keep=keep)
++    except (OSError, shutil.Error) as e:
++        # The checkpoint is fine; only the next cold start pays for this.
++        print(f"[SERVEKIT] warning: could not keep the JIT caches in {artifact}: {e}", flush=True)
++        return
++    print(f"[SERVEKIT] kept {n} JIT cache files in {namespace}", flush=True)
++    if pruned:
++        print(f"[SERVEKIT] pruned the JIT caches of older environments: {', '.join(pruned)}", flush=True)
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+index 0000000..7ba1745
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,28 @@
++"""Keep each test off the machine it runs on: its home, its temp dir, its GPUs.
++
++launch and prepare key the JIT caches by the node's GPUs, and the fake engines
++here compile into $HOME. On a developer's machine those are real, and not
++what CI has.
++"""
++import tempfile
++
++import pytest
++
++from servekit import jit_cache
++
++
++@pytest.fixture(autouse=True)
++def isolated_machine(request, tmp_path_factory, monkeypatch):
++    if request.node.get_closest_marker("e2e"):
++        return None  # a real cluster job: its environment must stay the submitter's
++    root = tmp_path_factory.mktemp("machine")
++    (root / "home").mkdir()
++    (root / "tmp").mkdir()
++    monkeypatch.setenv("HOME", str(root / "home"))
++    monkeypatch.setenv("USER", "tester")
++    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
++    monkeypatch.setattr(tempfile, "tempdir", str(root / "tmp"))
++    for cache in jit_cache.CACHES:
++        monkeypatch.delenv(cache.var, raising=False)
++    monkeypatch.setattr(jit_cache, "gpu_capabilities", lambda: ("9.0",))
++    return root
+diff --git a/tests/e2e/scripts/prepare-serve-apertus8b.sbatch b/tests/e2e/scripts/prepare-serve-apertus8b.sbatch
+index fd9b743..18f0f2b 100755
+--- a/tests/e2e/scripts/prepare-serve-apertus8b.sbatch
++++ b/tests/e2e/scripts/prepare-serve-apertus8b.sbatch
+@@ -96,8 +96,11 @@ import json, os
+ from pathlib import Path
+ 
+ root = Path(os.environ["ARTIFACT"]) / "servekit-caches"
+-dirs = sorted(d for d in root.iterdir() if d.is_dir()) if root.is_dir() else []
++# One namespace per environment (servekit-cache-key.json); a fresh artifact has this job's only.
++spaces = [d for d in root.iterdir() if (d / "servekit-cache-key.json").is_file()] if root.is_dir() else []
++dirs = sorted(d for ns in spaces for d in ns.iterdir() if d.is_dir())
+ summary = {d.name: {"bytes": sum(p.stat().st_size for p in d.rglob("*") if p.is_file())} for d in dirs}
++summary["namespaces"] = sorted(ns.name for ns in spaces)
+ Path(os.environ["CACHES_OUT"]).write_text(json.dumps(summary))
+ print(f"[E2E] JIT caches under {root}: {summary}")
+ PY
+diff --git a/tests/e2e/test_prepare_serve_e2e.py b/tests/e2e/test_prepare_serve_e2e.py
+index fca438e..0a25220 100644
+--- a/tests/e2e/test_prepare_serve_e2e.py
++++ b/tests/e2e/test_prepare_serve_e2e.py
+@@ -50,10 +50,15 @@ def test_freshly_prepared_apertus8b_serves_its_own_baseline():
+     assert manifest["source"] == MODEL
+ 
+     caches = _log(job_id, ".caches.json")
++    assert len(caches["namespaces"]) == 1, f"one environment, one namespace: {caches['namespaces']}"
+     for name in ("triton", "tvm-ffi"):
+         assert caches[name]["bytes"] > 1024, f"{name} cache is trivially small: {caches}"
+ 
+-    _assert_served_and_benched(_log(job_id, ".report.json"))
++    report = _log(job_id, ".report.json")
++    _assert_served_and_benched(report)
++    # The serving launch staged what the prepare above kept, for its own key.
++    assert report["jit_cache"]["source"] == "namespace", report["jit_cache"]
++    assert report["jit_cache"]["key"] == caches["namespaces"][0]
+ 
+     result = _log(job_id, ".json")
+     assert result["passed"], "\n".join(result["failures"])
+diff --git a/tests/test_jit_cache.py b/tests/test_jit_cache.py
+index ccc60e3..368f518 100644
+--- a/tests/test_jit_cache.py
++++ b/tests/test_jit_cache.py
+@@ -1,10 +1,16 @@
+-"""Tests for where the JIT caches go: every cache each engine release compiles
+-must land where servekit keeps it."""
++"""Tests for where the JIT caches go, what they are keyed by, and how they are
++kept: per engine version, per environment, and across a prune."""
++import copy
++import json
++import os
++import sys
+ from pathlib import Path
+ 
+ import pytest
+ 
+ from servekit import jit_cache
++from servekit.cli import main
++from servekit.manifest import Manifest
+ 
+ # --- every cache each sglang release compiles lands where servekit keeps it ------------------------
+ 
+@@ -82,3 +88,275 @@ def test_the_old_list_kept_the_all_reduce_kernel_only_up_to_0_5_16(tmp_path, ver
+     env = {"HOME": str(tmp_path / "home"), **{var: str(root / sub) for var, sub in BEFORE.items()}}
+ 
+     assert (root in WHERE[version]["load_jit (custom all-reduce)"](env).parents) is kept
++
++
++def test_a_cache_the_environment_already_points_somewhere_is_left_there(tmp_path):
++    environ = {"TRITON_CACHE_DIR": "/capstor/shared/triton"}
++
++    env = jit_cache.env_for(tmp_path / "ns", environ)
++
++    assert "TRITON_CACHE_DIR" not in env
++    assert env["SGLANG_JIT_CACHE_DIR"] == str(tmp_path / "ns" / "sglang-jit")
++    assert jit_cache.left_to_environment(environ) == environ
++
++
++# --- the validity key -----------------------------------------------------------------------------
++
++MATERIAL = {
++    "layout": 1, "engine": "sglang", "gpu": ["9.0"], "cpu": "aarch64", "python": "3.12", "cuda": "13.0.3", "image": {},
++    "packages": {"sglang": "0.5.20", "torch": "2.13.0", "flashinfer-python": "0.6.18", "apache-tvm-ffi": "0.1.11"},
++}
++
++
++def _key(packages=None, **fields) -> jit_cache.CacheKey:
++    material = copy.deepcopy(MATERIAL)
++    material["packages"].update(packages or {})
++    material.update(fields)
++    return jit_cache.CacheKey(material)
++
++
++def test_the_namespace_reads_engine_gpu_and_cpu_before_the_digest():
++    name = _key().name
++    assert name.startswith("sglang-0.5.20-sm90-aarch64-")
++    assert len(name.rsplit("-", 1)[1]) == 12
++
++
++def test_the_same_environment_always_gets_the_same_namespace():
++    reordered = jit_cache.CacheKey(dict(reversed(list(copy.deepcopy(MATERIAL).items()))))
++    assert reordered.name == _key().name
++
++
++@pytest.mark.parametrize(
++    "changed, said",
++    [
++        (_key(packages={"sglang": "0.5.16"}), "sglang 0.5.16 -> 0.5.20"),
++        (_key(packages={"torch": "2.12.0"}), "torch 2.12.0 -> 2.13.0"),
++        (_key(packages={"flashinfer-python": "0.6.17"}), "flashinfer-python 0.6.17 -> 0.6.18"),
++        (_key(gpu=["8.0"]), "gpu ['8.0'] -> ['9.0']"),
++        (_key(cpu="x86_64"), "cpu x86_64 -> aarch64"),
++        (_key(python="3.10"), "python 3.10 -> 3.12"),
++        (_key(cuda="12.9.1"), "cuda 12.9.1 -> 13.0.3"),
++    ],
++)
++def test_anything_that_decides_validity_moves_the_namespace(changed, said):
++    assert changed.name != _key().name
++    assert said in jit_cache.key_differences(_key().material, changed.material)
++
++
++def test_the_key_reads_package_metadata_and_never_imports_the_engine(tmp_path, monkeypatch):
++    installed = {"sglang": "0.5.20", "torch": "2.13.0", "sglang-kernel": "0.4.7"}
++
++    def version(name):
++        if name not in installed:
++            raise jit_cache.metadata.PackageNotFoundError(name)
++        return installed[name]
++
++    monkeypatch.setattr(jit_cache.metadata, "version", version)
++    cuda = tmp_path / "cuda"
++    cuda.mkdir()
++    (cuda / "version.json").write_text(json.dumps({"cuda": {"name": "CUDA SDK", "version": "13.0.3"}}))
++
++    key = jit_cache.validity_key("sglang", {"CUDA_HOME": str(cuda), "SGLANG_IMAGE_TAG": "lmsysorg/sglang:v0.5.20"})
++
++    assert key.material["packages"] == installed
++    assert key.material["gpu"] == ["9.0"]
++    assert key.material["cuda"] == "13.0.3"
++    assert key.material["image"] == {"SGLANG_IMAGE_TAG": "lmsysorg/sglang:v0.5.20"}
++    assert "sglang" not in sys.modules
++
++
++# --- namespaces: stage, persist, prune ---------------------------------------------------------------
++
++
++def _build(root: Path, files: dict) -> Path:
++    for rel, data in files.items():
++        (root / rel).parent.mkdir(parents=True, exist_ok=True)
++        (root / rel).write_bytes(data)
++    return root
++
++
++def test_a_namespace_is_staged_only_into_the_environment_that_built_it(tmp_path):
++    artifact = tmp_path / "llama70b-tp4"
++    jit_cache.persist(_build(tmp_path / "b", {"sglang-jit/sm90/m.so": b"so"}), artifact, _key())
++
++    hit = jit_cache.stage(artifact, tmp_path / "node", _key(), environ={})
++    other = _key(packages={"sglang": "0.5.21"})
++    miss = jit_cache.stage(artifact, tmp_path / "node", other, environ={})
++
++    assert hit.source == "namespace" and hit.root == tmp_path / "node" / artifact.name / _key().name
++    assert (hit.root / "sglang-jit/sm90/m.so").read_bytes() == b"so"
++    assert not (hit.root / jit_cache.KEY_FILE).exists()
++    assert hit.env == jit_cache.env_for(hit.root)
++    assert miss.source == "none" and miss.files == 0
++    assert miss.root == tmp_path / "node" / artifact.name / other.name
++    assert [ns.path.name for ns in miss.others] == [_key().name]
++
++
++def test_an_artifact_from_before_keys_is_staged_the_way_it_always_was(tmp_path):
++    artifact = tmp_path / "llama70b-tp4"
++    _build(artifact / jit_cache.CACHE_DIR_NAME, {"triton/k.cubin": b"cubin", "tvm-ffi/m.so": b"so"})
++
++    staged = jit_cache.stage(artifact, tmp_path / "node", _key(), environ={})
++
++    # The path it was built at, which ninja and Triton's group files baked in.
++    assert staged.source == "legacy" and staged.root == tmp_path / "node" / artifact.name
++    assert (staged.root / "triton/k.cubin").read_bytes() == b"cubin"
++    assert staged.env == jit_cache.env_for(staged.root)
++
++
++def test_a_stage_cut_short_leaves_whole_files_only(tmp_path, monkeypatch):
++    artifact = tmp_path / "llama70b-tp4"
++    jit_cache.persist(_build(tmp_path / "b", {"triton/a.cubin": b"a" * 10, "triton/b.cubin": b"b" * 10}), artifact, _key())
++    copy2 = jit_cache.shutil.copy2
++
++    def full_disk(src, dst, **kwargs):
++        if src.endswith("b.cubin"):
++            Path(dst).write_bytes(b"b" * 3)
++            raise OSError(28, "No space left on device")
++        return copy2(src, dst, **kwargs)
++
++    monkeypatch.setattr(jit_cache.shutil, "copy2", full_disk)
++    staged = jit_cache.stage(artifact, tmp_path / "node", _key(), environ={})
++
++    assert "No space left" in staged.error
++    assert (staged.root / "triton" / "a.cubin").read_bytes() == b"a" * 10
++    assert not (staged.root / "triton" / "b.cubin").exists()
++    assert staged.env == jit_cache.env_for(staged.root)
++
++
++def test_caches_that_cannot_be_kept_do_not_fail_the_prepare(tmp_path, monkeypatch, capsys):
++    from servekit import prepare as prepare_mod
++
++    def quota(*args, **kwargs):
++        raise OSError(122, "Disk quota exceeded")
++
++    monkeypatch.setattr(prepare_mod.jit_cache, "persist", quota)
++
++    prepare_mod.keep_caches(tmp_path / "b", tmp_path / "a", _key(), 3)
++    assert "could not keep the JIT caches" in capsys.readouterr().out
++
++
++def test_persisting_replaces_this_environments_namespace_atomically(tmp_path):
++    artifact = tmp_path / "llama70b-tp4"
++    jit_cache.persist(_build(tmp_path / "b1", {"triton/old": b"1"}), artifact, _key())
++
++    namespace, n, _ = jit_cache.persist(_build(tmp_path / "b2", {"triton/new": b"2"}), artifact, _key())
++
++    assert n == 1
++    assert sorted(p.name for p in (namespace / "triton").iterdir()) == ["new"]
++    assert [p.name for p in (artifact / jit_cache.CACHE_DIR_NAME).iterdir()] == [_key().name]
++
++
++def test_what_describes_the_node_or_an_interrupted_write_is_not_persisted(tmp_path):
++    build = _build(tmp_path / "b", {
++        "sglang/gpu_p2p_access_cache_for_0,1.json": b"{}",
++        "sglang-jit/sm90/m/build-1/.staging-ab12/m.so": b"half",
++        "sglang-jit/sm90/m/build-1/deps-2/m.so": b"so",
++        "sglang-jit/sm90/m/build-1/.lock": b"x",
++        "triton/KEY/tmp.pid_7_ab/k.cubin": b"half",
++        "triton/KEY/k.cubin": b"cubin",
++        "tilelang/tmp/k.cu": b"src",
++    })
++
++    namespace, n, _ = jit_cache.persist(build, tmp_path / "a", _key())
++
++    kept = sorted(p.relative_to(namespace).as_posix() for p in namespace.rglob("*") if p.is_file())
++    assert kept == [jit_cache.KEY_FILE, "sglang-jit/sm90/m/build-1/deps-2/m.so", "triton/KEY/k.cubin"]
++    assert n == 2
++
++
++def test_prune_keeps_the_newest_namespaces_and_always_this_one(tmp_path, monkeypatch):
++    artifact = tmp_path / "a"
++    keys = [_key(packages={"sglang": f"0.5.{v}"}) for v in (16, 17, 18, 19)]
++    clock = iter(range(100, 200))
++    monkeypatch.setattr(jit_cache.time, "time", lambda: next(clock))
++    for key in keys:
++        jit_cache.persist(_build(tmp_path / key.name, {"triton/k": b"k"}), artifact, key, keep=10)
++    _build(artifact / jit_cache.CACHE_DIR_NAME, {"triton/legacy.cubin": b"old"})
++
++    removed = jit_cache.prune(artifact, keep=2, current=keys[0])
++
++    left = sorted(p.name for p in (artifact / jit_cache.CACHE_DIR_NAME).iterdir())
++    assert left == sorted([keys[0].name, keys[2].name, keys[3].name])
++    assert keys[1].name in removed and any("unkeyed" in r for r in removed)
++
++
++# --- --only-prepare builds a new environment's caches without re-sharding ---------------------------
++
++FAKE_WARMUP = '''
++import json, os, sys
++from pathlib import Path
++json.dump(sys.argv[1:], open(os.environ["CALLS"] + f".{len(os.listdir(os.path.dirname(os.environ['CALLS'])))}", "w"))
++leaf = Path(os.environ["SGLANG_JIT_CACHE_DIR"]) / "sm90" / "comm" / "build-0" / "deps-0"
++leaf.mkdir(parents=True, exist_ok=True)
++(leaf / "comm.so").write_bytes(b"so")
++'''
++
++
++@pytest.fixture
++def prepared(tmp_path, monkeypatch):
++    model = tmp_path / "Llama-3.1-70B-Instruct"
++    model.mkdir()
++    artifact = tmp_path / "llama70b-tp4"
++    artifact.mkdir()
++    (artifact / "config.json").write_text("{}")
++    (artifact / "model-rank-0-part-0.safetensors").write_bytes(b"weights")
++    Manifest(
++        format="sharded_state", engine="sglang", engine_version="0.5.16", tp_size=1, pp_size=1,
++        dp_size=1, dtype="bfloat16", quantization=None, source=str(model),
++    ).write(artifact)
++    # Caches from the image before the upgrade.
++    jit_cache.persist(_build(tmp_path / "old", {"tvm-ffi/m.so": b"so"}), artifact, _key(packages={"sglang": "0.5.16"}))
++
++    script = tmp_path / "fake_warmup.py"
++    script.write_text(FAKE_WARMUP)
++    (tmp_path / "calls").mkdir()
++    monkeypatch.setenv("CALLS", str(tmp_path / "calls" / "call"))
++    monkeypatch.setattr("servekit.prepare.SAVE_SCRIPT", script)
++    monkeypatch.setattr("servekit.launch.DEFAULT_CACHE_ROOT", tmp_path / "node-local")
++    return model, artifact
++
++
++def _only_prepare(model, artifact):
++    return main([
++        "launch", "--servekit-artifact-path", str(artifact), "--only-prepare",
++        "--", "python", "-m", "sglang.launch_server", "--model-path", str(model),
++    ])
++
++
++def test_only_prepare_builds_this_environments_caches_without_resharding(tmp_path, prepared):
++    model, artifact = prepared
++    weights = (artifact / "model-rank-0-part-0.safetensors").stat()
++
++    assert _only_prepare(model, artifact) == 0
++
++    key = jit_cache.validity_key("sglang")
++    argv = json.loads(next((tmp_path / "calls").iterdir()).read_text())
++    assert "--servekit-warm-only" in argv
++    assert argv[-4:] == ["--model-path", str(artifact), "--load-format", "sharded_state"]
++    assert (artifact / jit_cache.CACHE_DIR_NAME / key.name / "sglang-jit/sm90/comm/build-0/deps-0/comm.so").is_file()
++    assert (artifact / "model-rank-0-part-0.safetensors").stat().st_mtime_ns == weights.st_mtime_ns
++    assert len(jit_cache.namespaces(artifact)) == 2  # the old image's stays, within --jit-cache-keep
++
++
++def test_only_prepare_does_nothing_once_this_environment_has_caches(tmp_path, prepared):
++    model, artifact = prepared
++    assert _only_prepare(model, artifact) == 0
++    assert _only_prepare(model, artifact) == 0
++    assert len(list((tmp_path / "calls").iterdir())) == 1
++
++
++def test_only_prepare_says_so_when_it_cannot_write_the_caches(tmp_path, prepared, capsys):
++    model, artifact = prepared
++    caches = artifact / jit_cache.CACHE_DIR_NAME
++    os.chmod(caches, 0o555)
++    try:
++        assert _only_prepare(model, artifact) == 1
++    finally:
++        os.chmod(caches, 0o755)
++    assert "cannot write JIT caches" in capsys.readouterr().err
++
++
++def test_keep_must_leave_at_least_this_environment():
++    with pytest.raises(SystemExit):
++        main(["launch", "--servekit-artifact-path", "/x", "--jit-cache-keep", "0", "--", "python", "-m", "sglang.launch_server"])
+diff --git a/tests/test_launch.py b/tests/test_launch.py
+index 3be3eea..7cfbf4f 100644
+--- a/tests/test_launch.py
++++ b/tests/test_launch.py
+@@ -164,7 +164,10 @@ def test_the_engine_reads_a_node_local_copy_not_the_checkpoint(tmp_path, model,
+ def test_a_checkpoint_with_no_caches_still_serves(tmp_path, model, prepared_checkpoint, fake_engine, capsys, monkeypatch):
+     assert _launch(tmp_path, model, prepared_checkpoint, monkeypatch) == 0
+ 
+-    assert fake_engine["env"] == {}
++    # Into an empty node-local namespace rather than $HOME, so what it JITs is
++    # where the audit, and a later --only-prepare, can find it.
++    key = jit_cache.validity_key("sglang")
++    assert fake_engine["env"] == jit_cache.env_for(tmp_path / "cache-root" / prepared_checkpoint.name / key.name)
+     assert "JIT from cold" in capsys.readouterr().out
+ 
+ 
+diff --git a/tests/test_prepare.py b/tests/test_prepare.py
+index 097c91b..edde171 100644
+--- a/tests/test_prepare.py
++++ b/tests/test_prepare.py
+@@ -83,6 +83,7 @@ def test_the_sharding_run_jits_where_launch_will_read(tmp_path, model, fake_shar
+     out = tmp_path / "llama70b-tp4"
+     cache_root = tmp_path / "node-local"
+     dumped = tmp_path / "env.json"
++    key = jit_cache.validity_key("sglang")
+ 
+     rc = prepare(
+         model, out, tp=4, cache_root=cache_root,
+@@ -91,21 +92,22 @@ def test_the_sharding_run_jits_where_launch_will_read(tmp_path, model, fake_shar
+ 
+     assert rc == 0
+     child_env = json.loads(dumped.read_text())
+-    expected = jit_cache.env_for(cache_root / out.name)
++    expected = jit_cache.env_for(cache_root / out.name / key.name)
+     assert {var: child_env.get(var) for var in expected} == expected
+ 
+ 
+ def test_what_the_sharding_run_jitted_is_kept_with_the_checkpoint(tmp_path, model, fake_sharder):
+     out = tmp_path / "llama70b-tp4"
+     cache_root = tmp_path / "node-local"
++    key = jit_cache.validity_key("sglang")
+ 
+     rc = prepare(
+         model, out, tp=4, cache_root=cache_root,
+-        engine_args=fake_sharder + ["--jit-a-kernel", str(cache_root / out.name / "triton" / "k.cubin")],
++        engine_args=fake_sharder + ["--jit-a-kernel", str(cache_root / out.name / key.name / "triton" / "k.cubin")],
+     )
+ 
+     assert rc == 0
+-    assert (out / jit_cache.CACHE_DIR_NAME / "triton" / "k.cubin").read_bytes() == b"cubin"
++    assert (out / jit_cache.CACHE_DIR_NAME / key.name / "triton" / "k.cubin").read_bytes() == b"cubin"
+ 
+ 
+ def test_a_missing_rank_leaves_no_manifest(tmp_path, model, fake_sharder):
+-- 
+2.50.1 (Apple Git-155)
+

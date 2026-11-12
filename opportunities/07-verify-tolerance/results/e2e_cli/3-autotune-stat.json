@@ -1,0 +1,227 @@
+{
+  "passed": true,
+  "mode": "statistical",
+  "failures": [],
+  "model_warning": null,
+  "weights_equal": null,
+  "weight_messages": [
+    "no weight checksums on one side"
+  ],
+  "diagnosis": [],
+  "info": [
+    "noise model: scale 0.132 x (1 - p), 8 perturbed calibration runs, margin_tau 1.39, alpha 0.01",
+    "3 greedy divergence(s) at near-ties (margin <= 1.39), explained by noise"
+  ],
+  "stats": {
+    "max_z": 3.405286223394615,
+    "rms_z": 0.6534592352131018,
+    "shift": 0.0694265673383887,
+    "max_abs_delta": 0.352577805519104,
+    "n_tokens": 1141,
+    "flips": 0,
+    "flips_checked": 871,
+    "greedy_unexplained": 0,
+    "greedy_explained": 3,
+    "bitwise_equal": false,
+    "worst_tokens": [
+      {
+        "prompt": "rare_tokens",
+        "position": 23,
+        "token": "ip",
+        "ref_logprob": -1.5288337469100952,
+        "delta": 0.352577805519104,
+        "z": 3.405286223394615
+      },
+      {
+        "prompt": "long_prose",
+        "position": 326,
+        "token": "off",
+        "ref_logprob": -0.0012884180760011077,
+        "delta": -0.0005577398696914315,
+        "z": -3.2766678348884812
+      },
+      {
+        "prompt": "long_prose",
+        "position": 576,
+        "token": "off",
+        "ref_logprob": -0.004658441059291363,
+        "delta": 0.0018209978006780148,
+        "z": 2.963860651751751
+      },
+      {
+        "prompt": "rare_tokens",
+        "position": 22,
+        "token": "hil",
+        "ref_logprob": -2.6036388874053955,
+        "delta": -0.3494548797607422,
+        "z": -2.854694858823895
+      },
+      {
+        "prompt": "french",
+        "position": 17,
+        "token": "elle",
+        "ref_logprob": -0.01628689095377922,
+        "delta": -0.005862437188625336,
+        "z": -2.7450461939161523
+      }
+    ],
+    "greedy": {
+      "capital_of_france": "tie@5",
+      "fibonacci_code": "tie@18",
+      "arithmetic": "ok",
+      "primes": "ok",
+      "thermodynamics": "ok",
+      "french": "tie@4",
+      "german": "ok",
+      "unicode": "ok"
+    },
+    "per_prompt": {
+      "capital_of_france": {
+        "n": 4,
+        "max_abs_delta": 0.10457229614257812,
+        "max_z": 0.9866054663295967,
+        "nll_delta": -0.04136483743786812
+      },
+      "fibonacci_code": {
+        "n": 16,
+        "max_abs_delta": 0.2008819580078125,
+        "max_z": 1.7726463251478792,
+        "nll_delta": -0.013554186160035897
+      },
+      "arithmetic": {
+        "n": 26,
+        "max_abs_delta": 0.11990761756896973,
+        "max_z": 2.579849593680793,
+        "nll_delta": 0.022367260418832302
+      },
+      "primes": {
+        "n": 22,
+        "max_abs_delta": 0.0721743106842041,
+        "max_z": 1.0101872626306576,
+        "nll_delta": 0.0017574895163389474
+      },
+      "thermodynamics": {
+        "n": 13,
+        "max_abs_delta": 0.09115445613861084,
+        "max_z": 1.0449447752443801,
+        "nll_delta": 0.0032909569473793874
+      },
+      "french": {
+        "n": 21,
+        "max_abs_delta": 0.14896631240844727,
+        "max_z": 2.7450461939161523,
+        "nll_delta": 0.0023692647657645423
+      },
+      "german": {
+        "n": 22,
+        "max_abs_delta": 0.15804100036621094,
+        "max_z": 2.54992777350633,
+        "nll_delta": -0.0010885318042710423
+      },
+      "unicode": {
+        "n": 31,
+        "max_abs_delta": 0.21803951263427734,
+        "max_z": 1.6832590556163325,
+        "nll_delta": -0.014953119935648095
+      },
+      "json_schema": {
+        "n": 21,
+        "max_abs_delta": 0.11075615882873535,
+        "max_z": 0.9504708483933935,
+        "nll_delta": -0.015151202828357262
+      },
+      "sql": {
+        "n": 28,
+        "max_abs_delta": 0.12882232666015625,
+        "max_z": 1.0663059407885969,
+        "nll_delta": 0.004386498100107669
+      },
+      "repetition": {
+        "n": 12,
+        "max_abs_delta": 0.2584066390991211,
+        "max_z": 1.9547079182152114,
+        "nll_delta": 0.007984342984855175
+      },
+      "rare_tokens": {
+        "n": 28,
+        "max_abs_delta": 0.352577805519104,
+        "max_z": 3.405286223394615,
+        "nll_delta": 0.015544111707380839
+      },
+      "dialogue": {
+        "n": 20,
+        "max_abs_delta": 0.10553693771362305,
+        "max_z": 1.8825967723492287,
+        "nll_delta": 0.007429086964111775
+      },
+      "chess": {
+        "n": 47,
+        "max_abs_delta": 0.17790913581848145,
+        "max_z": 2.044643204674459,
+        "nll_delta": 0.003994373129086292
+      },
+      "numbers": {
+        "n": 61,
+        "max_abs_delta": 0.11243915557861328,
+        "max_z": 1.631009410023051,
+        "nll_delta": -0.0014994565746269846
+      },
+      "long_prose": {
+        "n": 769,
+        "max_abs_delta": 0.2381739616394043,
+        "max_z": 3.2766678348884812,
+        "nll_delta": 0.0014595785525260989
+      }
+    }
+  },
+  "noise_model": {
+    "scale": 0.1321971858340971,
+    "tail_shape": 0.03784944486689312,
+    "clip": 3.9878741752392894,
+    "margin_tau": 1.3859539031982422,
+    "abs_floor": 1e-07,
+    "alpha": 0.01,
+    "n_runs": 8,
+    "thresholds": {
+      "max_z": 8.554587279194845,
+      "rms_z": 0.7750949528075379,
+      "shift": 0.07876933570194619
+    },
+    "null": {
+      "max_z": [
+        4.461714195879658,
+        4.7213115160103465,
+        4.7213115160103465,
+        4.7213115160103465,
+        4.732114144408846,
+        6.578256546621648,
+        4.7213115160103465,
+        4.7213115160103465
+      ],
+      "rms_z": [
+        0.6258289839346558,
+        0.6681034246116953,
+        0.6736140983151756,
+        0.6681034246116953,
+        0.6742065882044829,
+        0.7159265557860294,
+        0.6681034246116953,
+        0.6681034246116953
+      ],
+      "shift": [
+        -0.03531983104383662,
+        -0.04638441022088749,
+        -0.047076765296069044,
+        -0.04638441022088749,
+        -0.05064370880846706,
+        0.033667842852957,
+        -0.04638441022088749,
+        -0.04638441022088749
+      ]
+    },
+    "deterministic": true,
+    "batch_invariant": false,
+    "calibration_max_abs_delta": 0.46198463439941406,
+    "warnings": []
+  }
+}

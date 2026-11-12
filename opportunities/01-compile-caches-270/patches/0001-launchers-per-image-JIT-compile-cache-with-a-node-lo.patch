@@ -1,0 +1,988 @@
+From 79d7bed34219b8516282fd19c19c76fb4c00b2ff Mon Sep 17 00:00:00 2001
+From: cache-audit <noreply@example.invalid>
+Date: Thu, 12 Nov 2026 06:59:14 +0100
+Subject: [PATCH 1/4] launchers: per-image JIT/compile cache with a node-local
+ overlay (#270)
+
+Key the shared cache by image and GPU arch on the batch host: a
+<image>.digest sidecar if the images CI wrote one, else a hash of the
+file size and the 96-byte squashfs superblock (images are updated in
+place, so the path is no key). Each node seeds a fixed node-local copy
+before the engine starts (Triton group files and ninja trees store
+absolute paths) and publishes new entries after /health answers, then
+every 30 min. Publication is staging + rename/link: first writer wins,
+no overwrites, no partial entries, no cross-node locks.
+
+--jit-cache overlay|shared|off, --jit-cache-root. The helper is stdlib
+only and embedded into master.sh like the health checker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../assets/sml_jit_cache.py                   | 471 ++++++++++++++++++
+ src/swiss_ai_model_launch/cli/main.py         |  20 +
+ .../launchers/framework.py                    | 100 +++-
+ .../launchers/launch_args.py                  |  11 +
+ tests/unit/test_jit_cache.py                  | 205 ++++++++
+ 5 files changed, 799 insertions(+), 8 deletions(-)
+ create mode 100644 src/swiss_ai_model_launch/assets/sml_jit_cache.py
+ create mode 100644 tests/unit/test_jit_cache.py
+
+diff --git a/src/swiss_ai_model_launch/assets/sml_jit_cache.py b/src/swiss_ai_model_launch/assets/sml_jit_cache.py
+new file mode 100644
+index 0000000..f7811e8
+--- /dev/null
++++ b/src/swiss_ai_model_launch/assets/sml_jit_cache.py
+@@ -0,0 +1,471 @@
++#!/usr/bin/env python3
++"""Per-image, per-GPU-arch shared JIT/compile cache for sml (swiss-ai/model-launch#270).
++
++Layout on shared storage (capstor):
++
++    <root>/<image-key>/<gpu-arch>/<component>/...      component = triton, inductor, vllm, tilelang, ...
++    <root>/<image-key>/<gpu-arch>/.meta/{image,last_used,promotions.log}
++    <root>/<image-key>/<gpu-arch>/.staging/<host>-<pid>-<rand>/   (same filesystem: atomic rename)
++
++Lifecycle of one job (all unprivileged, standard library only, runs inside the engine image):
++
++    key      image key: "<image>.digest" sidecar written by the images CI if present, else a hash of
++             the file size and the 96-byte squashfs superblock (mkfs time, table offsets, bytes used):
++             one small read, changes on every rebuild, even though images are updated in place.
++    arch     "sm90" from nvidia-smi compute_cap (GH200/H100), "sm80" (A100), ...
++    seed     copy the shared tree into a node-local overlay at a FIXED path (Triton group files and
++             ninja trees store absolute paths, so entries must be read where they were written),
++             in parallel; never copies lock files, temp files or node-specific runtime state.
++    promote  after the server is ready (and periodically), publish entries the job created: each
++             new subtree is copied into .staging, made group-readable (some writers create 0600
++             files), then renamed into place. A directory rename onto an existing non-empty
++             directory fails and a file is published with link(), which fails if it exists, so the
++             first writer wins, nothing is overwritten and readers never see a partial entry. No
++             cross-node locks are needed (Lustre may be mounted localflock or noflock).
++    gc       LRU by .meta/last_used (touched by every seed) under a byte budget and a max age.
++"""
++
++from __future__ import annotations
++
++import argparse
++import concurrent.futures as cf
++import contextlib
++import fnmatch
++import hashlib
++import json
++import os
++import shutil
++import socket
++import stat
++import subprocess
++import sys
++import time
++import urllib.request
++import uuid
++from collections.abc import Iterator
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++DEFAULT_ROOT = "/capstor/store/cscs/swissai/infra01/sml/shared-caches"
++# Fixed, node-local path on purpose: entries must be read where they were written.
++DEFAULT_OVERLAY = "/tmp/sml-jit-cache"  # noqa: S108
++MANIFEST = ".sml-seed-manifest.json"
++
++# Never seed or promote: locks (a stale cpp_extension FileBaton blocks forever), temp and
++# staging files of the libraries' own atomic writes, node-topology state, our own bookkeeping.
++EXCLUDE = [
++    "*.lock",
++    "lock",
++    "*.lck",
++    "LOCK",
++    "tmp.pid_*",
++    ".staging*",
++    "*.tmp",
++    "*.tmp.*",
++    ".*.tmp",
++    "*.partial",
++    "tmp",
++    "gpu_p2p_access_cache_for_*.json",
++    ".meta",
++    MANIFEST,
++    "__pycache__",
++]
++
++
++# ----------------------------------------------------------------------------------------- key
++def squashfs_fingerprint(path: str) -> str | None:
++    """sha256 over (file size, first 96 bytes) if the file is a squashfs image."""
++    try:
++        st = os.stat(path)
++        with open(path, "rb") as f:
++            sb = f.read(96)
++    except OSError:
++        return None
++    if len(sb) < 96 or sb[:4] not in (b"hsqs", b"sqsh"):
++        return None
++    h = hashlib.sha256(str(st.st_size).encode() + b"\0" + sb).hexdigest()
++    return "sqsh-" + h[:16]
++
++
++def image_key(image: str) -> str:
++    sidecar = image + ".digest"
++    try:
++        with open(sidecar) as f:
++            d = f.readline().strip()
++        if d:
++            return d.replace(":", "-")[:23] if d.startswith("sha256:") else _clean(d)
++    except OSError:
++        pass
++    if "@sha256:" in image:
++        return "sha256-" + image.split("@sha256:", 1)[1][:16]
++    fp = squashfs_fingerprint(image)
++    if fp:
++        return fp
++    if os.path.isfile(image):  # not squashfs: size + first MiB
++        with open(image, "rb") as f:
++            head = f.read(1 << 20)
++        return "file-" + hashlib.sha256(str(os.path.getsize(image)).encode() + head).hexdigest()[:16]
++    # a registry tag: tags move, so this key is only as good as the tag
++    return "ref-" + hashlib.sha256(image.encode()).hexdigest()[:16]
++
++
++def _clean(s: str) -> str:
++    return "".join(c if c.isalnum() or c in "-_." else "-" for c in s)[:64]
++
++
++def gpu_arch() -> str:
++    if os.environ.get("SML_GPU_ARCH"):
++        return os.environ["SML_GPU_ARCH"]
++    try:
++        out = subprocess.run(  # noqa: S603
++            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],  # noqa: S607
++            capture_output=True,
++            text=True,
++            timeout=30,
++        ).stdout
++        caps = sorted({c.strip().replace(".", "") for c in out.splitlines() if c.strip()})
++        if caps:
++            return "+".join("sm" + c for c in caps)
++    except (OSError, subprocess.SubprocessError):
++        pass
++    return "unknown-gpu"
++
++
++# ------------------------------------------------------------------------------------- helpers
++def _excluded(name: str) -> bool:
++    return any(fnmatch.fnmatchcase(name, p) for p in EXCLUDE)
++
++
++def _walk(root: Path) -> Iterator[tuple[Path, os.stat_result]]:
++    """Yield (relative path, lstat) for files and symlinks, skipping excluded names."""
++    stack = [root]
++    while stack:
++        d = stack.pop()
++        try:
++            it = os.scandir(d)
++        except OSError:
++            continue
++        with it:
++            for e in it:
++                if _excluded(e.name):
++                    continue
++                try:
++                    st = e.stat(follow_symlinks=False)
++                except OSError:
++                    continue
++                if stat.S_ISDIR(st.st_mode):
++                    stack.append(Path(e.path))
++                else:
++                    yield Path(e.path).relative_to(root), st
++
++
++def _copy_file(src: Path, dst: Path) -> int:
++    dst.parent.mkdir(parents=True, exist_ok=True)
++    if src.is_symlink():
++        os.symlink(os.readlink(src), dst)
++        return 0
++    shutil.copy2(src, dst)
++    return dst.stat().st_size
++
++
++def _share_modes(path: Path) -> None:
++    """Group/other readable, group writable for dirs (setgid keeps the group)."""
++    for d, _dirs, files in os.walk(path):
++        try:
++            os.chmod(d, 0o2775)  # noqa: S103  # group-shared cache: setgid + group write
++        except OSError:
++            pass
++        for f in files:
++            p = os.path.join(d, f)
++            try:
++                st = os.lstat(p)
++                if stat.S_ISREG(st.st_mode):
++                    os.chmod(p, 0o775 if st.st_mode & 0o111 else 0o664)
++            except OSError:
++                pass
++
++
++# ---------------------------------------------------------------------------------------- seed
++def seed(shared: Path, local: Path, jobs: int = 16) -> dict[str, Any]:
++    t0 = time.monotonic()
++    local.mkdir(parents=True, exist_ok=True)
++    files = list(_walk(shared)) if shared.is_dir() else []
++    nbytes = 0
++    with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
++        futs = {}
++        for rel, _st in files:
++            dst = local / rel
++            if dst.exists() or dst.is_symlink():
++                continue
++            futs[ex.submit(_copy_file, shared / rel, dst)] = rel
++        errors = 0
++        for f in cf.as_completed(futs):
++            try:
++                nbytes += f.result()
++            except OSError:
++                errors += 1
++    manifest = {str(rel): [st.st_size, int(st.st_mtime)] for rel, st in _walk(local)}
++    (local / MANIFEST).write_text(json.dumps(manifest))
++    meta = shared / ".meta"
++    try:
++        meta.mkdir(parents=True, exist_ok=True)
++        (meta / "last_used").touch()
++    except OSError:
++        pass  # read-only users still seed
++    return {"files": len(futs), "bytes": nbytes, "errors": errors, "seconds": round(time.monotonic() - t0, 2)}
++
++
++# ------------------------------------------------------------------------------------- promote
++def _new_subtrees(shared: Path, local: Path, settle: float = 0) -> tuple[list[Path], int, int]:
++    """Minimal set of relative paths (dirs or files) that exist locally but not in shared,
++    skipping files the seed brought in and units with a file modified in the last ``settle``
++    seconds (a build may still be writing in place). Returns (paths, n_modified, n_unsettled)."""
++    try:
++        seeded = json.loads((local / MANIFEST).read_text())
++    except (OSError, ValueError):
++        seeded = {}
++    out: list[Path] = []
++    taken: set[Path] = set()
++    modified = 0
++    now = time.time()
++    files = sorted(_walk(local), key=lambda x: str(x[0]))
++    fresh = [rel for rel, st in files if settle and now - st.st_mtime < settle]
++    for rel, st in files:
++        if str(rel) in seeded:
++            if seeded[str(rel)] != [st.st_size, int(st.st_mtime)]:
++                modified += 1  # existing entries are immutable in shared: never overwrite
++            continue
++        if any(p == rel or p in rel.parents for p in taken):
++            continue
++        # highest ancestor that is missing in shared
++        unit = rel
++        for parent in reversed(rel.parents):
++            if str(parent) == ".":
++                continue
++            if not (shared / parent).exists():
++                unit = parent
++                break
++        if (shared / unit).exists():
++            continue
++        taken.add(unit)
++        out.append(unit)
++    unsettled = [u for u in out if any(f == u or u in f.parents for f in fresh)]
++    out = [u for u in out if u not in unsettled]
++    return out, modified, len(unsettled)
++
++
++def promote(shared: Path, local: Path, settle: float = 0, max_passes: int = 5) -> dict[str, Any]:
++    """Publish new local entries. A directory unit that loses the race to another job is
++    re-examined in the next pass one level deeper, so entries only this job built still land."""
++    t0 = time.monotonic()
++    res: dict[str, Any] = {
++        "promoted": 0,
++        "files": 0,
++        "bytes": 0,
++        "lost_race": 0,
++        "skipped_modified": 0,
++        "unsettled": 0,
++        "errors": 0,
++    }
++    stage_root = shared / ".staging" / f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
++    try:
++        for _ in range(max_passes):
++            units, modified, unsettled = _new_subtrees(shared, local, settle)
++            res["skipped_modified"], res["unsettled"] = modified, unsettled
++            if not units:
++                break
++            try:
++                stage_root.mkdir(parents=True, exist_ok=True)
++            except OSError as e:
++                res["errors"] += 1
++                res["error"] = f"cannot write {shared}: {e.strerror}"
++                break
++            if not _promote_units(units, shared, local, stage_root, res):
++                break  # no directory lost a race: nothing deeper to retry
++    finally:
++        shutil.rmtree(stage_root, ignore_errors=True)
++    res["seconds"] = round(time.monotonic() - t0, 2)
++    if res["promoted"] or res["errors"]:
++        _log(shared, res)
++    return res
++
++
++def _log(shared: Path, res: dict[str, Any]) -> None:
++    try:
++        meta = shared / ".meta"
++        meta.mkdir(parents=True, exist_ok=True)
++        with open(meta / "promotions.log", "a") as f:
++            f.write(
++                json.dumps(
++                    {"t": time.time(), "host": socket.gethostname(), "job": os.environ.get("SLURM_JOB_ID"), **res}
++                )
++                + "\n"
++            )
++    except OSError:
++        pass
++
++
++def _promote_units(units: list[Path], shared: Path, local: Path, stage_root: Path, res: dict[str, Any]) -> bool:
++    """One pass. Returns True if a directory unit lost a race (worth another pass)."""
++    retry = False
++    for unit in units:
++        src, dst, tmp = local / unit, shared / unit, stage_root / unit
++        try:
++            if src.is_dir() and not src.is_symlink():
++                n = 0
++                for rel, _ in _walk(src):
++                    res["bytes"] += _copy_file(src / rel, tmp / rel)
++                    n += 1
++                if n == 0:
++                    continue
++                _share_modes(tmp)
++                dst.parent.mkdir(parents=True, exist_ok=True)
++                try:
++                    os.rename(tmp, dst)  # fails if dst appeared meanwhile (non-empty)
++                except OSError:
++                    res["lost_race"] += 1
++                    shutil.rmtree(tmp, ignore_errors=True)
++                    retry = True
++                    continue
++                res["files"] += n
++            else:
++                res["bytes"] += _copy_file(src, tmp)
++                _share_modes(tmp.parent)
++                dst.parent.mkdir(parents=True, exist_ok=True)
++                try:
++                    os.link(tmp, dst)  # atomic create-if-absent
++                except FileExistsError:
++                    res["lost_race"] += 1
++                    continue
++                except OSError:  # no hard links: rename if still absent
++                    if dst.exists():
++                        res["lost_race"] += 1
++                        continue
++                    os.rename(tmp, dst)
++                res["files"] += 1
++            res["promoted"] += 1
++        except OSError:
++            res["errors"] += 1
++    return retry
++
++
++def wait_ready(url: str, timeout: float) -> bool:
++    if not url.startswith(("http://", "https://")):
++        raise ValueError(f"not an http(s) URL: {url}")
++    end = time.monotonic() + timeout
++    while time.monotonic() < end:
++        with contextlib.suppress(OSError, ValueError):
++            with urllib.request.urlopen(url, timeout=5) as r:  # noqa: S310  # scheme checked above
++                if r.status == 200:
++                    return True
++        time.sleep(10)
++    return False
++
++
++# ------------------------------------------------------------------------------------------ gc
++def _du(p: Path) -> int:
++    return sum(st.st_size for _, st in _walk(p))
++
++
++@dataclass
++class _CacheDir:
++    path: Path
++    last_used: float
++    bytes: int
++
++
++def gc(root: Path, max_bytes: int, max_age_days: float, dry_run: bool = False) -> list[dict[str, Any]]:
++    entries: list[_CacheDir] = []
++    for key in sorted(root.iterdir()) if root.is_dir() else []:
++        if key.name.startswith("."):
++            continue
++        for arch in sorted(key.iterdir()):
++            if not arch.is_dir():
++                continue
++            lu = arch / ".meta" / "last_used"
++            last = lu.stat().st_mtime if lu.exists() else arch.stat().st_mtime
++            entries.append(_CacheDir(arch, last, _du(arch)))
++    entries.sort(key=lambda e: e.last_used)  # oldest first
++    total = sum(e.bytes for e in entries)
++    now = time.time()
++    evicted: list[dict[str, Any]] = []
++    for e in entries:
++        too_old = now - e.last_used > max_age_days * 86400
++        if not too_old and total <= max_bytes:
++            continue
++        evicted.append({"path": str(e.path), "bytes": e.bytes, "idle_days": round((now - e.last_used) / 86400, 1)})
++        total -= e.bytes
++        if not dry_run:
++            trash = root / ".trash" / f"{e.path.parent.name}-{e.path.name}-{int(now)}"
++            trash.parent.mkdir(parents=True, exist_ok=True)
++            os.rename(e.path, trash)  # atomic: a job mid-seed falls back to a cold start
++            shutil.rmtree(trash, ignore_errors=True)
++    return evicted
++
++
++# ----------------------------------------------------------------------------------------- cli
++def main(argv: list[str] | None = None) -> int:
++    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    sub = ap.add_subparsers(dest="cmd", required=True)
++    k = sub.add_parser("key")
++    k.add_argument("image")
++    sub.add_parser("arch")
++    p = sub.add_parser("path", help="print <root>/<key>/<arch>")
++    p.add_argument("image")
++    p.add_argument("--root", default=os.environ.get("SML_JIT_CACHE_ROOT", DEFAULT_ROOT))
++    s = sub.add_parser("seed")
++    s.add_argument("--shared", required=True)
++    s.add_argument("--local", default=DEFAULT_OVERLAY)
++    s.add_argument("--jobs", type=int, default=16)
++    pr = sub.add_parser("promote")
++    pr.add_argument("--shared", required=True)
++    pr.add_argument("--local", default=DEFAULT_OVERLAY)
++    pr.add_argument("--when-ready", default=None, help="health URL to wait for before the first promote")
++    pr.add_argument("--ready-timeout", type=float, default=6 * 3600)
++    pr.add_argument("--interval", type=float, default=0, help="then promote again every N s (0: once)")
++    pr.add_argument(
++        "--settle",
++        type=float,
++        default=60,
++        help="skip units with a file modified in the last N s (a build may be in progress)",
++    )
++    g = sub.add_parser("gc")
++    g.add_argument("--root", default=os.environ.get("SML_JIT_CACHE_ROOT", DEFAULT_ROOT))
++    g.add_argument("--max-bytes", type=float, default=500e9)
++    g.add_argument("--max-age-days", type=float, default=30)
++    g.add_argument("--dry-run", action="store_true")
++    d = sub.add_parser("du")
++    d.add_argument("--root", default=os.environ.get("SML_JIT_CACHE_ROOT", DEFAULT_ROOT))
++    a = ap.parse_args(argv)
++
++    if a.cmd == "key":
++        print(image_key(a.image))
++    elif a.cmd == "arch":
++        print(gpu_arch())
++    elif a.cmd == "path":
++        print(os.path.join(a.root, image_key(a.image), gpu_arch()))
++    elif a.cmd == "seed":
++        print(json.dumps({"seed": seed(Path(a.shared), Path(a.local), a.jobs)}))
++    elif a.cmd == "promote":
++        if a.when_ready and not wait_ready(a.when_ready, a.ready_timeout):
++            print(json.dumps({"promote": "server never became ready"}))
++            return 1
++        while True:
++            print(json.dumps({"promote": promote(Path(a.shared), Path(a.local), a.settle)}), flush=True)
++            if a.interval <= 0:
++                break
++            time.sleep(a.interval)
++    elif a.cmd == "gc":
++        print(json.dumps({"evicted": gc(Path(a.root), int(a.max_bytes), a.max_age_days, a.dry_run)}, indent=1))
++    elif a.cmd == "du":
++        root = Path(a.root)
++        for key in sorted(root.iterdir()) if root.is_dir() else []:
++            for arch in sorted(key.iterdir()) if key.is_dir() and not key.name.startswith(".") else []:
++                comps = {c.name: _du(c) for c in sorted(arch.iterdir()) if c.is_dir() and not c.name.startswith(".")}
++                print(f"{key.name}/{arch.name}: " + ", ".join(f"{c} {b / 1e9:.2f} GB" for c, b in comps.items()))
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/src/swiss_ai_model_launch/cli/main.py b/src/swiss_ai_model_launch/cli/main.py
+index 05c14f0..1833b78 100644
+--- a/src/swiss_ai_model_launch/cli/main.py
++++ b/src/swiss_ai_model_launch/cli/main.py
+@@ -363,6 +363,24 @@ def _add_advanced_launch_arguments(
+         action="store_true",
+         help="Disable metrics collection.",
+     )
++    advanced_parser.add_argument(
++        "--jit-cache",
++        dest="jit_cache",
++        choices=["overlay", "shared", "off"],
++        default="overlay",
++        help=(
++            "Persistent JIT/compile caches, one per image and GPU arch (#270). overlay (default): "
++            "seed a node-local copy, publish new kernels back after the server is ready; shared: use "
++            "the shared directory directly; off: per-job caches only."
++        ),
++    )
++    advanced_parser.add_argument(
++        "--jit-cache-root",
++        dest="jit_cache_root",
++        default=None,
++        metavar="DIR",
++        help="Root of the shared JIT caches (default /capstor/store/cscs/swissai/infra01/sml/shared-caches).",
++    )
+     advanced_parser.add_argument(
+         "--pre-launch-cmds",
+         dest="pre_launch_cmds",
+@@ -906,6 +924,8 @@ def build_launch_args_from_advanced(
+         disable_dcgm_exporter=args.disable_dcgm_exporter,
+         disable_metrics=args.disable_metrics,
+         telemetry_endpoint=telemetry_endpoint,
++        jit_cache=getattr(args, "jit_cache", "overlay"),
++        **({"jit_cache_root": args.jit_cache_root} if getattr(args, "jit_cache_root", None) else {}),
+     )
+ 
+ 
+diff --git a/src/swiss_ai_model_launch/launchers/framework.py b/src/swiss_ai_model_launch/launchers/framework.py
+index 9f626c2..837818f 100644
+--- a/src/swiss_ai_model_launch/launchers/framework.py
++++ b/src/swiss_ai_model_launch/launchers/framework.py
+@@ -12,6 +12,8 @@ from swiss_ai_model_launch.launchers.container import (
+ )
+ from swiss_ai_model_launch.launchers.launch_args import (
+     FRAMEWORK_PORT,
++    JIT_CACHE_OFF,
++    JIT_CACHE_OVERLAY,
+     ROUTER_SGLANG,
+     LaunchArgs,
+     time_str_to_seconds,
+@@ -41,6 +43,15 @@ _DCGM_COUNTERS = f"{_METRICS_CONFIG_DIR}/default-counters.csv"
+ _HEALTH_CHECKER_TEXT = files("swiss_ai_model_launch.assets").joinpath("replica_health_checker.py").read_text()
+ _HEALTH_CHECKER_HEREDOC = "__SML_HEALTH_CHECKER_EOF__"
+ _OPENTELA_HTTP_PORT = 8092
++
++# JIT/compile caches (#270). The helper is embedded into master.sh like the health checker.
++_JIT_CACHE_HELPER_TEXT = files("swiss_ai_model_launch.assets").joinpath("sml_jit_cache.py").read_text()
++_JIT_CACHE_HELPER_HEREDOC = "__SML_JIT_CACHE_HELPER_EOF__"
++# Fixed on purpose: Triton group files and ninja build trees store absolute paths, so an
++# entry only hits when it is read at the path it was written at.
++JIT_CACHE_LOCAL = "/tmp/sml-jit-cache"  # noqa: S108
++# After the first promote, publish again periodically: kernels compiled on first use.
++_JIT_CACHE_PROMOTE_INTERVAL_SECONDS = 1800
+ _HEALTH_INTERVAL_SECONDS = 30
+ _HEALTH_TIMEOUT_SECONDS = 10
+ 
+@@ -180,6 +191,24 @@ def _shebang_and_setup(framework: Framework, pre_launch_cmds: str) -> str:
+     return "\n".join(lines)
+ 
+ 
++def _render_jit_cache_rank(launch_args: LaunchArgs, health_host: str) -> str:
++    """Seed this node's overlay from the shared cache; publish new entries once the
++    replica answers /health, then every half hour (kernels JIT-compiled on first use)."""
++    if launch_args.jit_cache != JIT_CACHE_OVERLAY:
++        return ""
++    url = f"http://{health_host}:{FRAMEWORK_PORT}/health"
++    return (
++        "# JIT/compile caches (#270): seed from the shared per-image cache, publish new entries.\n"
++        'if [[ -n "${SML_JIT_CACHE_SHARED:-}" ]]; then\n'
++        '    sml_jit="$(dirname "$0")/sml_jit_cache.py"\n'
++        '    python3 "$sml_jit" seed --shared "$SML_JIT_CACHE_SHARED" --local "$SML_JIT_CACHE_LOCAL" \\\n'
++        '        || echo "JIT cache: seed failed, starting cold" >&2\n'
++        '    python3 "$sml_jit" promote --shared "$SML_JIT_CACHE_SHARED" --local "$SML_JIT_CACHE_LOCAL" \\\n'
++        f'        --when-ready "{url}" --interval {_JIT_CACHE_PROMOTE_INTERVAL_SECONDS} &\n'
++        "fi\n"
++    )
++
++
+ def _render_sglang_head(launch_args: LaunchArgs, framework: Framework) -> str:
+     args = _compose_framework_args(launch_args)
+     npr = launch_args.topology.nodes_per_replica
+@@ -209,7 +238,8 @@ def _render_sglang_head(launch_args: LaunchArgs, framework: Framework) -> str:
+         launch = _opentela_wrap_head(cmd, launch_args)
+     else:
+         launch = cmd
+-    return f"{pre}\n\n{body_args}\n{launch}\n"
++    jit = _render_jit_cache_rank(launch_args, "localhost")
++    return f"{pre}\n\n{body_args}\n{jit}{launch}\n"
+ 
+ 
+ def _render_sglang_follower(launch_args: LaunchArgs, framework: Framework) -> str:
+@@ -234,7 +264,8 @@ def _render_sglang_follower(launch_args: LaunchArgs, framework: Framework) -> st
+         launch = _opentela_wrap_metrics_only(cmd, launch_args)
+     else:
+         launch = cmd
+-    return f'{pre}\n\nnode_rank="$1"\nreplica_head_ip="$2"\n\n{launch}\n'
++    jit = _render_jit_cache_rank(launch_args, "$replica_head_ip")
++    return f'{pre}\n\nnode_rank="$1"\nreplica_head_ip="$2"\n\n{jit}{launch}\n'
+ 
+ 
+ def _render_vllm_head(launch_args: LaunchArgs, framework: Framework) -> str:
+@@ -251,7 +282,8 @@ def _render_vllm_head(launch_args: LaunchArgs, framework: Framework) -> str:
+             launch = _opentela_wrap_head(cmd, launch_args)
+         else:
+             launch = cmd
+-        return f"{pre}\n\n{body_args}\n{launch}\n"
++        jit = _render_jit_cache_rank(launch_args, "localhost")
++        return f"{pre}\n\n{body_args}\n{jit}{launch}\n"
+ 
+     # Multi-node head: stage the Ray bootstrap + API server invocation as a
+     # script on /tmp (single-quoted heredoc keeps $-constructs literal in
+@@ -287,7 +319,8 @@ def _render_vllm_head(launch_args: LaunchArgs, framework: Framework) -> str:
+         launch = _opentela_wrap_head("bash $ray_head_script", launch_args)
+     else:
+         launch = 'bash "$ray_head_script"'
+-    return f"{pre}\n\n{body_args}\n{head_script_body}\n\n{launch}\n"
++    jit = _render_jit_cache_rank(launch_args, "localhost")
++    return f"{pre}\n\n{body_args}\n{head_script_body}\n\n{jit}{launch}\n"
+ 
+ 
+ def _render_vllm_follower(launch_args: LaunchArgs, framework: Framework) -> str:
+@@ -303,13 +336,14 @@ def _render_vllm_follower(launch_args: LaunchArgs, framework: Framework) -> str:
+         launch = _opentela_wrap_metrics_only(cmd, launch_args)
+     else:
+         launch = cmd
++    jit = _render_jit_cache_rank(launch_args, "$replica_head_ip")
+     return (
+         f"{pre}\n\n"
+         f"# shellcheck disable=SC2034  # unused — Ray followers are symmetric\n"
+         f'node_rank="$1"\n'
+         f'replica_head_ip="$2"\n'
+         f"\n"
+-        f"{launch}\n"
++        f"{jit}{launch}\n"
+     )
+ 
+ 
+@@ -486,7 +520,7 @@ def _render_env_file_resolution(launch_args: LaunchArgs) -> str:
+     env = launch_args.environment
+     return (
+         f'SML_ENV_FILE="{env}"\n'
+-        'if grep -q "{arch}" "$SML_ENV_FILE"; then\n'
++        'if grep -q -e "{arch}" -e "{jit_cache}" "$SML_ENV_FILE"; then\n'
+         # Absolute, and in the job's working dir. Two constraints:
+         #  - pyxis treats an --environment value with no "/" in it as an EDF
+         #    *name*: it appends ".toml" and searches ~/.edf and the site EDF
+@@ -495,7 +529,9 @@ def _render_env_file_resolution(launch_args: LaunchArgs) -> str:
+         #    SLURM launcher passes it straight through), so don't write beside
+         #    it. $PWD already holds the job's logs/ tree.
+         '    SML_RESOLVED_ENV="${PWD}/env_resolved_${SLURM_JOB_ID}_${SML_ARCH}.toml"\n'
+-        '    sed "s|{arch}|${SML_ARCH}|g" "$SML_ENV_FILE" > "$SML_RESOLVED_ENV"\n'
++        '    sed -e "s|{arch}|${SML_ARCH}|g" -e "s|{jit_cache}|${SML_JIT_CACHE_LOCAL:-'
++        + JIT_CACHE_LOCAL
++        + '}|g" "$SML_ENV_FILE" > "$SML_RESOLVED_ENV"\n'
+         '    SML_ENV_FILE="$SML_RESOLVED_ENV"\n'
+         '    echo "Resolved env file for ${SML_ARCH}: $SML_ENV_FILE"\n'
+         "fi\n"
+@@ -511,6 +547,50 @@ def _render_env_file_resolution(launch_args: LaunchArgs) -> str:
+     )
+ 
+ 
++def _render_jit_cache_setup(launch_args: LaunchArgs) -> str:
++    """Key the shared cache by image and GPU arch, on the batch host, before the env file
++    is resolved (its ``{jit_cache}`` placeholder is the node-local overlay, or the shared
++    directory itself in ``shared`` mode).
++
++    Images are updated in place, so the path is no key. A ``<image>.digest`` sidecar
++    (written by the images CI) wins; otherwise hash the file size and the 96-byte squashfs
++    superblock (mkfs time, table offsets, bytes used): one small read, new on every rebuild.
++    Same key as ``sml_jit_cache.py key``.
++    """
++    if launch_args.jit_cache == JIT_CACHE_OFF:
++        return f'export SML_JIT_CACHE_MODE=off SML_JIT_CACHE_LOCAL="{JIT_CACHE_LOCAL}" SML_JIT_CACHE_SHARED=""'
++    env = launch_args.environment
++    return (
++        "# JIT/compile caches (#270): <root>/<image key>/<gpu arch>, see docs/jit-cache.md.\n"
++        f'SML_JIT_CACHE_MODE="{launch_args.jit_cache}"\n'
++        f'SML_JIT_CACHE_LOCAL="{JIT_CACHE_LOCAL}"\n'
++        'SML_JIT_CACHE_SHARED=""\n'
++        'sml_img=$(sed -n \'s|^ *image *= *"\\([^"]*\\)".*|\\1|p\' '
++        f'"{env}" | head -1 | sed "s|{{arch}}|${{SML_ARCH}}|g")\n'
++        'if [[ -r "${sml_img}.digest" ]]; then\n'
++        "    sml_key=$(head -1 \"${sml_img}.digest\" | tr ':' '-' | cut -c1-23)\n"
++        'elif [[ -f "$sml_img" && "$(head -c 4 "$sml_img")" == "hsqs" ]]; then\n'
++        '    sml_key="sqsh-$( { printf \'%s\\0\' "$(wc -c < "$sml_img" | tr -d \' \')"; head -c 96 "$sml_img"; } '
++        '| sha256sum | cut -c1-16)"\n'
++        "else\n"
++        '    sml_key="ref-$(printf \'%s\' "$sml_img" | sha256sum | cut -c1-16)"\n'
++        "fi\n"
++        "sml_cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null"
++        " | head -1 | tr -d '.[:space:]')\n"
++        f'SML_JIT_CACHE_SHARED="{launch_args.jit_cache_root}/${{sml_key}}/sm${{sml_cc:-unknown}}"\n'
++        "# Readers without write access still seed; only promotion needs it.\n"
++        'mkdir -p "$SML_JIT_CACHE_SHARED" 2>/dev/null || true\n'
++        'if [[ "$SML_JIT_CACHE_MODE" == "shared" ]]; then\n'
++        '    SML_JIT_CACHE_LOCAL="$SML_JIT_CACHE_SHARED"\n'
++        "fi\n"
++        'echo "JIT cache ($SML_JIT_CACHE_MODE): shared $SML_JIT_CACHE_SHARED, in-container $SML_JIT_CACHE_LOCAL"\n'
++        "export SML_JIT_CACHE_MODE SML_JIT_CACHE_LOCAL SML_JIT_CACHE_SHARED\n"
++        f"cat > \"$RANKS_DIR/sml_jit_cache.py\" <<'{_JIT_CACHE_HELPER_HEREDOC}'\n"
++        f"{_JIT_CACHE_HELPER_TEXT.rstrip()}\n"
++        f"{_JIT_CACHE_HELPER_HEREDOC}"
++    )
++
++
+ def _render_pyxis_setup(env: PyxisEnvironment) -> str:
+     # {arch} in the image path is resolved per node arch, like the EDF path.
+     image = shell_double_quote(env.image).replace("{arch}", "${SML_ARCH}")
+@@ -524,7 +604,10 @@ def _render_pyxis_setup(env: PyxisEnvironment) -> str:
+         "    exit 1",
+         "fi",
+     ]
+-    lines += [f"export {key}={shell_double_quote(value)}" for key, value in env.env.items()]
++    lines += [
++        f"export {key}={shell_double_quote(value).replace('{jit_cache}', '${SML_JIT_CACHE_LOCAL}')}"
++        for key, value in env.env.items()
++    ]
+     if env.mounts:
+         lines.append(f"SML_CONTAINER_MOUNTS={shell_double_quote(','.join(env.container_mounts()))}")
+     return "\n".join(lines)
+@@ -871,6 +954,7 @@ def render_master(launch_args: LaunchArgs) -> str:
+         sections.append(telemetry)
+ 
+     sections.append(_render_arch_detection(launch_args))
++    sections.append(_render_jit_cache_setup(launch_args))
+     if launch_args.container_runtime == CONTAINER_RUNTIME_PYXIS:
+         sections.append(_render_pyxis_setup(PyxisEnvironment.from_toml(launch_args.environment)))
+     else:
+diff --git a/src/swiss_ai_model_launch/launchers/launch_args.py b/src/swiss_ai_model_launch/launchers/launch_args.py
+index dbb9778..fa81ea2 100644
+--- a/src/swiss_ai_model_launch/launchers/launch_args.py
++++ b/src/swiss_ai_model_launch/launchers/launch_args.py
+@@ -23,6 +23,15 @@ FRAMEWORK_PORT = 8080
+ 
+ TELEMETRY_ENDPOINT = "https://sml-dev.swissai.svc.cscs.ch/launches"
+ 
++# Persistent JIT/compile caches (#270), one directory per image and GPU arch under the
++# root. overlay: each node seeds a fixed node-local copy and publishes new entries back
++# atomically; shared: point the caches at the shared directory directly; off: per-job only.
++JitCacheMode = Literal["overlay", "shared", "off"]
++JIT_CACHE_OVERLAY: JitCacheMode = "overlay"
++JIT_CACHE_SHARED: JitCacheMode = "shared"
++JIT_CACHE_OFF: JitCacheMode = "off"
++JIT_CACHE_ROOT = "/capstor/store/cscs/swissai/infra01/sml/shared-caches"
++
+ # SLURM caps a single job at 12h on the target clusters. A model that needs to
+ # stay up longer is served by a chain of consecutive jobs (see --consecutive),
+ # each running for at most this cap.
+@@ -107,6 +116,8 @@ class LaunchArgs(BaseModel):
+     dcgm_exporter_binary: str = "/capstor/store/cscs/swissai/infra01/opentela-share/dcgm-exporter"
+     disable_dcgm_exporter: bool = False
+     disable_metrics: bool = False
++    jit_cache: JitCacheMode = JIT_CACHE_OVERLAY
++    jit_cache_root: str = JIT_CACHE_ROOT
+ 
+     @model_validator(mode="after")
+     def _validate(self) -> "LaunchArgs":
+diff --git a/tests/unit/test_jit_cache.py b/tests/unit/test_jit_cache.py
+new file mode 100644
+index 0000000..b9d9a07
+--- /dev/null
++++ b/tests/unit/test_jit_cache.py
+@@ -0,0 +1,205 @@
++# ruff: noqa: S603, S607  # subprocess invocations against controlled paths/binaries
++"""Persistent JIT/compile caches (#270): cache key, {jit_cache} resolution, rank-script hooks,
++and the embedded helper (seed / promote / gc).
++
++Like test_env_arch_resolution, the shell is run for real: the key the batch host computes
++in bash must equal the helper's, or seeding and promotion would use different directories.
++"""
++
++import importlib.util
++import json
++import stat
++import subprocess
++import sys
++import tomllib
++from importlib.resources import files
++from pathlib import Path
++
++import pytest
++
++from swiss_ai_model_launch.launchers.framework import (
++    JIT_CACHE_LOCAL,
++    _render_env_file_resolution,
++    _render_jit_cache_setup,
++    render_master,
++    render_rank_scripts,
++)
++from swiss_ai_model_launch.launchers.launch_args import LaunchArgs
++from swiss_ai_model_launch.launchers.topology import Topology
++
++_HELPER = Path(str(files("swiss_ai_model_launch.assets").joinpath("sml_jit_cache.py")))
++_spec = importlib.util.spec_from_file_location("sml_jit_cache", _HELPER)
++assert _spec and _spec.loader
++sjc = importlib.util.module_from_spec(_spec)
++sys.modules["sml_jit_cache"] = sjc  # dataclasses resolve their module
++_spec.loader.exec_module(sjc)
++
++
++def _args(environment: str, **kw: object) -> LaunchArgs:
++    base: dict[str, object] = {
++        "job_name": "j",
++        "served_model_name": "vendor/model-abc1",
++        "account": "proj01",
++        "partition": "normal",
++        "environment": environment,
++        "framework": "vllm",
++    }
++    base.update(kw)
++    return LaunchArgs(**base)  # type: ignore[arg-type]
++
++
++def _fake_sqsh(path: Path, salt: bytes = b"") -> Path:
++    path.write_bytes(b"hsqs" + b"\x01" * 4 + salt.ljust(88, b"\0") + b"x" * 4096)
++    return path
++
++
++def _run_setup(tmp_path: Path, env_file: Path, args: LaunchArgs) -> dict[str, str]:
++    bin_dir = tmp_path / "bin"
++    bin_dir.mkdir(exist_ok=True)
++    smi = bin_dir / "nvidia-smi"
++    smi.write_text("#!/bin/sh\necho 9.0\necho 9.0\n")
++    smi.chmod(0o755)
++    ranks = tmp_path / "ranks"
++    ranks.mkdir(exist_ok=True)
++    script = (
++        f"set -euo pipefail\nSML_ARCH=arm64\nRANKS_DIR={ranks}\n{_render_jit_cache_setup(args)}\n"
++        'echo "SHARED=$SML_JIT_CACHE_SHARED"\necho "LOCAL=$SML_JIT_CACHE_LOCAL"\n'
++    )
++    proc = subprocess.run(
++        ["bash", "-c", script],
++        cwd=tmp_path,
++        env={"PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"},
++        capture_output=True,
++        text=True,
++    )
++    assert proc.returncode == 0, proc.stderr
++    out = dict(ln.split("=", 1) for ln in proc.stdout.splitlines() if "=" in ln)
++    assert (ranks / "sml_jit_cache.py").read_text() == _HELPER.read_text()
++    return out
++
++
++_HAS_SHA256SUM = any((Path(d) / "sha256sum").exists() for d in ("/usr/bin", "/bin", "/usr/sbin", "/sbin"))
++
++
++@pytest.mark.skipif(not _HAS_SHA256SUM, reason="needs coreutils sha256sum")
++def test_bash_key_matches_helper_and_changes_on_rebuild(tmp_path: Path) -> None:
++    img = _fake_sqsh(tmp_path / "vllm_base-arm64.sqsh")
++    env_file = tmp_path / "env.toml"
++    env_file.write_text(f'image = "{tmp_path}/vllm_base-{{arch}}.sqsh"\n')
++    out = _run_setup(tmp_path, env_file, _args(str(env_file), jit_cache_root="/root"))
++    assert out["SHARED"] == f"/root/{sjc.image_key(str(img))}/sm90"
++    assert out["LOCAL"] == JIT_CACHE_LOCAL
++    _fake_sqsh(img, b"rebuilt in place")  # images are updated in place: same path, new key
++    out2 = _run_setup(tmp_path, env_file, _args(str(env_file), jit_cache_root="/root"))
++    assert out2["SHARED"] != out["SHARED"]
++    (tmp_path / "vllm_base-arm64.sqsh.digest").write_text("sha256:0123456789abcdef0123456789\n")
++    out3 = _run_setup(tmp_path, env_file, _args(str(env_file), jit_cache_root="/root"))
++    assert out3["SHARED"] == "/root/sha256-0123456789abcdef/sm90"
++
++
++@pytest.mark.skipif(not _HAS_SHA256SUM, reason="needs coreutils sha256sum")
++def test_shared_mode_points_caches_at_shared_dir(tmp_path: Path) -> None:
++    env_file = tmp_path / "env.toml"
++    env_file.write_text('image = "docker.io/lmsysorg/sglang:v0.5.20"\n')
++    out = _run_setup(tmp_path, env_file, _args(str(env_file), jit_cache="shared", jit_cache_root="/root"))
++    assert out["SHARED"].startswith("/root/ref-") and out["LOCAL"] == out["SHARED"]
++
++
++def test_jit_cache_placeholder_resolved_with_arch(tmp_path: Path) -> None:
++    env_file = tmp_path / "env.toml"
++    env_file.write_text('image = "/imgs/x-{arch}.sqsh"\n[env]\nTRITON_CACHE_DIR = "{jit_cache}/triton"\n')
++    block = _render_env_file_resolution(_args(str(env_file)))
++    script = f'set -euo pipefail\nSML_ARCH=arm64\n{block}\ncat "$SML_ENV_FILE"\n'
++    proc = subprocess.run(
++        ["bash", "-c", script],
++        cwd=tmp_path,
++        env={"SLURM_JOB_ID": "1", "PATH": "/usr/bin:/bin", "SML_JIT_CACHE_LOCAL": JIT_CACHE_LOCAL},
++        capture_output=True,
++        text=True,
++    )
++    # The image itself is missing here, so only the resolved env file is checked.
++    resolved = (tmp_path / "env_resolved_1_arm64.toml").read_text()
++    assert 'TRITON_CACHE_DIR = "/tmp/sml-jit-cache/triton"' in resolved
++    assert 'image = "/imgs/x-arm64.sqsh"' in resolved
++    assert proc.returncode != 0  # missing image is still reported
++
++
++@pytest.mark.parametrize("framework", ["vllm", "sglang"])
++@pytest.mark.parametrize("npr", [1, 2])
++def test_rank_scripts_seed_and_promote(framework: str, npr: int) -> None:
++    scripts = render_rank_scripts(
++        _args("/e.toml", framework=framework, topology=Topology(replicas=1, nodes_per_replica=npr))
++    )
++    head = scripts["head.sh"]
++    assert 'sml_jit="$(dirname "$0")/sml_jit_cache.py"' in head
++    assert 'seed --shared "$SML_JIT_CACHE_SHARED"' in head
++    assert '--when-ready "http://localhost:8080/health"' in head
++    if npr > 1:
++        assert '--when-ready "http://$replica_head_ip:8080/health"' in scripts["follower.sh"]
++    # the cache hooks run before the engine starts
++    assert head.index("seed --shared") < head.index("$OPENTELA_BIN start")
++
++
++def test_off_mode_renders_no_hooks() -> None:
++    args = _args("/e.toml", jit_cache="off")
++    assert "sml_jit_cache.py" not in "".join(render_rank_scripts(args).values())
++    master = render_master(args)
++    assert "SML_JIT_CACHE_MODE=off" in master and "sml_jit_cache.py" not in master
++
++
++def test_env_tomls_point_every_cache_at_the_placeholder() -> None:
++    envs = files("swiss_ai_model_launch.assets").joinpath("envs")
++    for name, required in {
++        "vllm_base.toml": {"VLLM_CACHE_ROOT", "TRITON_CACHE_DIR", "TILELANG_CACHE_DIR", "DG_JIT_CACHE_DIR"},
++        "sglang_base.toml": {"SGLANG_CACHE_DIR", "SGLANG_JIT_CACHE_DIR", "TRITON_CACHE_DIR", "TILELANG_CACHE_DIR"},
++    }.items():
++        env = tomllib.loads(envs.joinpath(name).read_text())["env"]
++        assert required <= set(env), name
++        for key in required:
++            assert env[key].startswith("{jit_cache}/"), (name, key)
++
++
++# --- the embedded helper ---------------------------------------------------------------------
++
++
++def _overlay(local: Path, tag: str) -> None:
++    for k in range(5):
++        d = local / "triton" / f"{tag}{k}"
++        d.mkdir(parents=True)
++        (d / "k.cubin").write_bytes(b"\x7fELF" + tag.encode() * 100)
++    (local / "inductor" / "locks").mkdir(parents=True)
++    (local / "inductor" / "locks" / "a.lock").write_text("")
++    (local / "vllm").mkdir()
++    (local / "vllm" / "gpu_p2p_access_cache_for_0,1.json").write_text("{}")
++    at = local / "sglang" / "flashinfer" / "autotune" / "rank_0.json"
++    at.parent.mkdir(parents=True)
++    at.write_text("{}")
++    at.chmod(0o600)
++
++
++def test_helper_promote_concurrently_then_seed(tmp_path: Path) -> None:
++    shared = tmp_path / "shared"
++    shared.mkdir()
++    overlays = []
++    for i in range(6):
++        o = tmp_path / f"o{i}"
++        _overlay(o, f"J{i}K")
++        overlays.append(o)
++    procs = [
++        subprocess.Popen(
++            [sys.executable, str(_HELPER), "promote", "--shared", str(shared), "--local", str(o), "--settle", "0"],
++            stdout=subprocess.PIPE,
++            text=True,
++        )
++        for o in overlays
++    ]
++    results = [json.loads(p.communicate()[0])["promote"] for p in procs]
++    assert all(r["errors"] == 0 for r in results)
++    assert len(list((shared / "triton").iterdir())) == 30  # every job's distinct kernels landed
++    assert not list(shared.rglob("*.lock")) and not list(shared.rglob("gpu_p2p_access_cache_for_*"))
++    mode = stat.S_IMODE((shared / "sglang/flashinfer/autotune/rank_0.json").stat().st_mode)
++    assert mode & 0o044 == 0o044  # readable by other infra01 members despite mkstemp's 0600
++    fresh = tmp_path / "fresh"
++    seeded = sjc.seed(shared, fresh)
++    assert seeded["errors"] == 0 and (fresh / "triton" / "J3K4" / "k.cubin").exists()
++    assert sjc.promote(shared, fresh)["promoted"] == 0
+-- 
+2.50.1 (Apple Git-155)
+

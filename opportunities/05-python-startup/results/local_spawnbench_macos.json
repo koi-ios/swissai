@@ -1,0 +1,343 @@
+{
+ "targets": [
+  "torch",
+  "transformers",
+  "transformers.modeling_utils",
+  "fastapi"
+ ],
+ "workers": 4,
+ "repeats": 3,
+ "python": "3.12.13",
+ "platform": "darwin",
+ "summary": {
+  "spawn": {
+   "n": 3,
+   "t0_to_all_ready_s": {
+    "median": 8.481,
+    "min": 7.578,
+    "max": 11.101
+   },
+   "slowest_child_after_launch_s": {
+    "median": 4.272,
+    "min": 3.841,
+    "max": 4.671
+   },
+   "parent_import_s": {
+    "median": 4.198,
+    "min": 3.731,
+    "max": 6.419
+   }
+  },
+  "zygote": {
+   "n": 3,
+   "t0_to_all_ready_s": {
+    "median": 4.194,
+    "min": 3.827,
+    "max": 4.309
+   },
+   "slowest_child_after_launch_s": {
+    "median": 0.024,
+    "min": 0.019,
+    "max": 0.026
+   },
+   "parent_import_s": {
+    "median": 4.159,
+    "min": 3.788,
+    "max": 4.276
+   }
+  },
+  "fork": {
+   "n": 3,
+   "t0_to_all_ready_s": {
+    "median": 4.154,
+    "min": 3.769,
+    "max": 4.446
+   },
+   "slowest_child_after_launch_s": {
+    "median": 0.013,
+    "min": 0.013,
+    "max": 0.024
+   },
+   "parent_import_s": {
+    "median": 4.141,
+    "min": 3.755,
+    "max": 4.422
+   }
+  }
+ },
+ "runs": [
+  {
+   "method": "spawn",
+   "workers": 4,
+   "parent_import_s": 6.419,
+   "launch_to_ready_s": [
+    4.664,
+    4.666,
+    4.669,
+    4.671
+   ],
+   "launch_to_target_enter_s": [
+    0.046,
+    0.035,
+    0.04,
+    0.052
+   ],
+   "t0_to_all_ready_s": 11.101,
+   "children_preloaded": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "process_wall_s": 12.065,
+   "repeat": 0
+  },
+  {
+   "method": "zygote",
+   "workers": 4,
+   "parent_import_s": 4.276,
+   "launch_to_ready_s": [
+    0.017,
+    0.019,
+    0.021,
+    0.024
+   ],
+   "launch_to_target_enter_s": [
+    0.017,
+    0.019,
+    0.021,
+    0.023
+   ],
+   "t0_to_all_ready_s": 4.309,
+   "children_preloaded": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "zygote_preload_s": 4.249,
+   "zygote_waited_s": 4.286,
+   "zygote_invariants": {
+    "torch_cuda_initialized": false,
+    "nvidia_fds": [],
+    "python_threads": 1,
+    "native_threads": null,
+    "mapped": {
+     "libcuda.so": null,
+     "libnvidia-ml.so": null
+    },
+    "denied_present": []
+   },
+   "process_wall_s": 5.114,
+   "repeat": 0
+  },
+  {
+   "method": "fork",
+   "workers": 4,
+   "parent_import_s": 4.422,
+   "launch_to_ready_s": [
+    0.015,
+    0.019,
+    0.02,
+    0.024
+   ],
+   "launch_to_target_enter_s": [
+    0.015,
+    0.019,
+    0.02,
+    0.024
+   ],
+   "t0_to_all_ready_s": 4.446,
+   "children_preloaded": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "process_wall_s": 4.942,
+   "repeat": 0
+  },
+  {
+   "method": "spawn",
+   "workers": 4,
+   "parent_import_s": 4.198,
+   "launch_to_ready_s": [
+    4.26,
+    4.261,
+    4.261,
+    4.272
+   ],
+   "launch_to_target_enter_s": [
+    0.041,
+    0.047,
+    0.054,
+    0.059
+   ],
+   "t0_to_all_ready_s": 8.481,
+   "children_preloaded": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "process_wall_s": 9.441,
+   "repeat": 1
+  },
+  {
+   "method": "zygote",
+   "workers": 4,
+   "parent_import_s": 4.159,
+   "launch_to_ready_s": [
+    0.018,
+    0.022,
+    0.023,
+    0.026
+   ],
+   "launch_to_target_enter_s": [
+    0.018,
+    0.022,
+    0.023,
+    0.026
+   ],
+   "t0_to_all_ready_s": 4.194,
+   "children_preloaded": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "zygote_preload_s": 4.134,
+   "zygote_waited_s": 4.168,
+   "zygote_invariants": {
+    "torch_cuda_initialized": false,
+    "nvidia_fds": [],
+    "python_threads": 1,
+    "native_threads": null,
+    "mapped": {
+     "libcuda.so": null,
+     "libnvidia-ml.so": null
+    },
+    "denied_present": []
+   },
+   "process_wall_s": 5.047,
+   "repeat": 1
+  },
+  {
+   "method": "fork",
+   "workers": 4,
+   "parent_import_s": 4.141,
+   "launch_to_ready_s": [
+    0.01,
+    0.011,
+    0.012,
+    0.013
+   ],
+   "launch_to_target_enter_s": [
+    0.01,
+    0.011,
+    0.012,
+    0.013
+   ],
+   "t0_to_all_ready_s": 4.154,
+   "children_preloaded": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "process_wall_s": 4.54,
+   "repeat": 1
+  },
+  {
+   "method": "spawn",
+   "workers": 4,
+   "parent_import_s": 3.731,
+   "launch_to_ready_s": [
+    3.837,
+    3.838,
+    3.839,
+    3.841
+   ],
+   "launch_to_target_enter_s": [
+    0.038,
+    0.031,
+    0.033,
+    0.036
+   ],
+   "t0_to_all_ready_s": 7.578,
+   "children_preloaded": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "process_wall_s": 8.339,
+   "repeat": 2
+  },
+  {
+   "method": "zygote",
+   "workers": 4,
+   "parent_import_s": 3.788,
+   "launch_to_ready_s": [
+    0.016,
+    0.016,
+    0.017,
+    0.019
+   ],
+   "launch_to_target_enter_s": [
+    0.016,
+    0.016,
+    0.017,
+    0.019
+   ],
+   "t0_to_all_ready_s": 3.827,
+   "children_preloaded": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "zygote_preload_s": 3.766,
+   "zygote_waited_s": 3.808,
+   "zygote_invariants": {
+    "torch_cuda_initialized": false,
+    "nvidia_fds": [],
+    "python_threads": 1,
+    "native_threads": null,
+    "mapped": {
+     "libcuda.so": null,
+     "libnvidia-ml.so": null
+    },
+    "denied_present": []
+   },
+   "process_wall_s": 4.517,
+   "repeat": 2
+  },
+  {
+   "method": "fork",
+   "workers": 4,
+   "parent_import_s": 3.755,
+   "launch_to_ready_s": [
+    0.011,
+    0.011,
+    0.012,
+    0.013
+   ],
+   "launch_to_target_enter_s": [
+    0.011,
+    0.011,
+    0.012,
+    0.013
+   ],
+   "t0_to_all_ready_s": 3.769,
+   "children_preloaded": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "process_wall_s": 4.153,
+   "repeat": 2
+  }
+ ]
+}

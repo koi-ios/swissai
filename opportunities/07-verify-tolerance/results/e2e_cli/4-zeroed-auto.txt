@@ -1,0 +1,54 @@
+[SERVEKIT] waiting up to 300s for http://127.0.0.1:18104 to serve
+[SERVEKIT] checking 16 prompts from http://127.0.0.1:18104 against results/e2e_cli/gold.json
+
+[SERVEKIT] Verify of http://127.0.0.1:18104 (exact mode)
+----------------------------------------
+prompt                n_tok   max|dlp|    max z       dnll    greedy
+capital_of_france         4     0.3643    0.371    -0.0966        ok
+fibonacci_code           16     0.3212    0.424      -0.04    tie@18
+arithmetic               26     0.4683    0.475   +0.00149        ok
+primes                   22      1.491 1.54e+03     +0.146     23/32
+thermodynamics           13      1.356     1.67     +0.135     13/32
+french                   21     0.5121     2.58    +0.0943      7/32
+german                   22     0.4064     6.54   +0.00574     11/32
+unicode                  31      1.681     3.64     +0.086      4/32
+json_schema              21      2.271     2.28      +0.17         -
+sql                      28      1.027     1.07    +0.0241         -
+repetition               12     0.5256    0.528    +0.0942         -
+rare_tokens              28      20.27      441      +1.03         -
+dialogue                 20     0.5932    0.595    +0.0352         -
+chess                    47     0.8852     1.54      +0.02         -
+numbers                  61     0.6905    0.696    -0.0483         -
+long_prose              769      2.961     3.56   +0.00428         -
+
+max |delta token_logprob|: 20.2746   bitwise equal: False
+calibration: 8 perturbed runs, scale 0.132, deterministic True, batch-invariant False
+weight checksums: DIFFER
+  not bitwise equal; the drift is beyond the calibrated noise of perturbed load (max_z 1.17e+04 vs 8.55). That is what a corrupted load looks like.
+FAIL
+! weight checksums differ: rank 0: model.layers.4.mlp.down_proj.weight differs
+! capital_of_france: 4/4 logprobs differ; worst at token 2 by +0.364
+! fibonacci_code: 16/16 logprobs differ; worst at token 12 by +0.321
+! fibonacci_code: greedy continuation differs
+! arithmetic: 26/26 logprobs differ; worst at token 24 by +0.468
+! primes: 22/22 logprobs differ; worst at token 11 by -1.49
+! primes: greedy continuation differs
+! thermodynamics: 13/13 logprobs differ; worst at token 5 by -1.36
+! thermodynamics: greedy continuation differs
+! french: 21/21 logprobs differ; worst at token 16 by -0.512
+! french: greedy continuation differs
+! german: 22/22 logprobs differ; worst at token 3 by +0.406
+! german: greedy continuation differs
+! unicode: 31/31 logprobs differ; worst at token 3 by +1.68
+! unicode: greedy continuation differs
+! json_schema: 21/21 logprobs differ; worst at token 3 by -2.27
+! sql: 28/28 logprobs differ; worst at token 9 by -1.03
+! repetition: 12/12 logprobs differ; worst at token 1 by -0.526
+! rare_tokens: 28/28 logprobs differ; worst at token 5 by -20.3
+! dialogue: 20/20 logprobs differ; worst at token 19 by -0.593
+! chess: 47/47 logprobs differ; worst at token 35 by +0.885
+! numbers: 61/61 logprobs differ; worst at token 4 by +0.69
+! long_prose: 765/769 logprobs differ; worst at token 30 by -2.96
+
+result written to results/e2e_cli/4-zeroed-auto.json
+exit 1

@@ -1,0 +1,986 @@
+From 61b05a136c9280d10ce0d52405a30a7d6fa18b06 Mon Sep 17 00:00:00 2001
+From: pystartup <pystartup@localhost>
+Date: Thu, 12 Nov 2026 01:44:48 +0100
+Subject: [PATCH] [startup] opt-in worker zygote: fork TP workers from a
+ preloaded fork server
+
+With SGLANG_WORKER_ZYGOTE=1 the launch process starts a multiprocessing fork server
+at the top of `import sglang`. It preloads the CUDA-free import set in parallel with
+the launch process, under a guard that serves device facts from an NVML probe and
+trips on any other way into the driver. Workers are forked from it only if torch.cuda
+is uninitialised, no /dev/nvidia* fd is open and it runs one thread; otherwise spawn
+is kept. Each worker gets the launch process's environment as of Process.start().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ python/sglang/__init__.py                 |   5 +
+ python/sglang/_worker_zygote/__init__.py  | 173 +++++++++
+ python/sglang/_worker_zygote/common.py    |   9 +
+ python/sglang/_worker_zygote/cudafacts.py | 423 ++++++++++++++++++++++
+ python/sglang/_worker_zygote/preload.py   | 257 +++++++++++++
+ python/sglang/srt/entrypoints/engine.py   |   6 +-
+ python/sglang/srt/environ.py              |   5 +
+ python/sglang/srt/utils/numa_utils.py     |   9 +
+ 8 files changed, 885 insertions(+), 2 deletions(-)
+ create mode 100644 python/sglang/_worker_zygote/__init__.py
+ create mode 100644 python/sglang/_worker_zygote/common.py
+ create mode 100644 python/sglang/_worker_zygote/cudafacts.py
+ create mode 100644 python/sglang/_worker_zygote/preload.py
+
+diff --git a/python/sglang/__init__.py b/python/sglang/__init__.py
+index 3fbec34..b56dd7b 100644
+--- a/python/sglang/__init__.py
++++ b/python/sglang/__init__.py
+@@ -1,5 +1,10 @@
+ """SGLang public API."""
+ 
++# Opt-in worker zygote (SGLANG_WORKER_ZYGOTE=1): must run before anything heavy is imported.
++from sglang._worker_zygote import on_sglang_import as _wz_on_import
++
++_wz_on_import()
++
+ import platform as _platform
+ import sys as _sys
+ 
+diff --git a/python/sglang/_worker_zygote/__init__.py b/python/sglang/_worker_zygote/__init__.py
+new file mode 100644
+index 0000000..e4f79e7
+--- /dev/null
++++ b/python/sglang/_worker_zygote/__init__.py
+@@ -0,0 +1,173 @@
++"""Opt-in worker zygote (SGLANG_WORKER_ZYGOTE=1): fork TP workers from a preloaded server.
++
++With the default "spawn" start method every scheduler and the detokenizer is a fresh
++interpreter that re-imports torch, transformers, triton and SGLang (11-16 s per launch on
++the Swiss AI clusters). With the zygote, a multiprocessing fork server is started from the
++very top of `import sglang` in the launch process, preloads the import set in parallel with
++the launch process's own work, and the workers are forked from it.
++
++Safety (see cudafacts.py and preload.py):
++* the fork server is a fresh interpreter (fork+exec): none of the launch process's CUDA
++  state reaches it;
++* while it preloads, torch.cuda answers is_available/device_count/capability/name from an
++  NVML probe run in a separate short-lived process, and every other way into the driver
++  raises; after preload it checks that torch.cuda is not initialised, that no /dev/nvidia*
++  descriptor is open and that it runs one Python thread, else the launch uses spawn;
++* each worker gets the launch process's environment as of Process.start(), and checks the
++  served device facts against the device after its own first CUDA init.
++
++This module is standard library only at import.
++"""
++import json
++import os
++import sys
++import tempfile
++import time
++
++from sglang._worker_zygote.common import CONFIG_ENV, ENV_KEY, in_forkserver_process
++
++STARTED_ENV = "SGLANG_WORKER_ZYGOTE_STARTED"
++PRELOAD_MODULE = "sglang._worker_zygote.preload"
++DEFAULT_MODULES = [
++    "torch", "torch.nn", "torch.nn.functional", "torch.distributed", "numpy", "safetensors",
++    "safetensors.torch", "tokenizers", "huggingface_hub", "transformers",
++    "transformers.configuration_utils", "transformers.tokenization_utils_base",
++    "transformers.modeling_utils", "triton", "triton.language", "fastapi", "uvicorn",
++    "pydantic", "zmq", "zmq.asyncio", "orjson", "msgspec", "uvloop", "psutil", "requests",
++    "aiohttp", "jinja2", "einops", "PIL.Image", "sentencepiece", "openai", "partial_json_parser",
++    "outlines_core", "xgrammar", "llguidance", "torchao", "compressed_tensors",
++]
++_STATE = {"status_path": None, "t_start": None, "method": None}
++
++
++def enabled() -> bool:
++    return os.environ.get("SGLANG_WORKER_ZYGOTE", "0") == "1"
++
++
++def _is_launch_process() -> bool:
++    argv = list(getattr(sys, "orig_argv", []) or [])
++    joined = " ".join(argv)
++    if "sglang.launch_server" in joined:
++        return True
++    return any(os.path.basename(a) == "sglang" for a in argv[:2]) and "serve" in argv
++
++
++def _static_env():
++    """The unconditional part of engine._set_envs_and_config, set before the zygote imports."""
++    os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "8"
++    if os.environ.get("TRTLLM_ENABLE_PDL", "1") != "0":
++        os.environ["TRTLLM_ENABLE_PDL"] = "1"
++    os.environ.setdefault("CUTE_DSL_LOG_LEVEL", "30")
++    os.environ.setdefault("CUTE_DSL_LOG_TO_CONSOLE", "1")
++
++
++def _modules():
++    spec = os.environ.get("SGLANG_WORKER_ZYGOTE_MODULES")
++    if not spec:
++        return DEFAULT_MODULES, False, {}
++    with open(spec) as f:
++        if spec.endswith(".json"):
++            cal = json.load(f)
++            return cal["modules"], True, cal.get("origins", {})
++        return [l.strip() for l in f if l.strip() and not l.startswith("#")], False, {}
++
++
++def _install_parent_hooks():
++    import multiprocessing.spawn as mpspawn
++
++    orig = mpspawn.get_preparation_data
++
++    def get_preparation_data(name):
++        d = orig(name)
++        d[ENV_KEY] = dict(os.environ)
++        return d
++
++    mpspawn.get_preparation_data = get_preparation_data
++
++
++def _start():
++    import multiprocessing
++    from multiprocessing import forkserver
++
++    os.environ[STARTED_ENV] = str(os.getpid())
++    _static_env()
++    modules, calibrated, origins = _modules()
++    d = tempfile.mkdtemp(prefix="sglang-worker-zygote-")
++    status_path = os.path.join(d, "status.json")
++    cfg = {"modules": modules, "facts": "probe", "strict": calibrated, "calibrated": calibrated,
++           "origins": origins, "deny_modules": ["prometheus_client"], "allow_native_threads": True,
++           "status_path": status_path, "exit_if_not_ok": True}
++    cfg_path = os.path.join(d, "config.json")
++    with open(cfg_path, "w") as f:
++        json.dump(cfg, f)
++    os.environ[CONFIG_ENV] = cfg_path
++    multiprocessing.get_context("forkserver").set_forkserver_preload([PRELOAD_MODULE])
++    _STATE["t_start"] = time.time()
++    forkserver.ensure_running()
++    _STATE["status_path"] = status_path
++    _install_parent_hooks()
++
++
++def on_sglang_import():
++    """Called first thing in sglang/__init__.py."""
++    if not enabled():
++        return
++    if in_forkserver_process(getattr(sys, "orig_argv", None)) and os.environ.get(CONFIG_ENV):
++        # This is the zygote: arm the guard before the rest of `import sglang` runs.
++        from sglang._worker_zygote import cudafacts
++
++        facts = cudafacts.probe_facts()
++        import torch  # noqa: F401  (CUDA-free)
++
++        cudafacts.CudaGuard(facts).arm()
++        return
++    if os.environ.get(STARTED_ENV) or not _is_launch_process():
++        return
++    try:
++        _start()
++    except Exception as e:  # never break the launch: spawn stays the fallback
++        sys.stderr.write(f"sglang worker zygote not started: {e!r}\n")
++
++
++def _forkserver_alive() -> bool:
++    from multiprocessing import forkserver
++
++    pid = getattr(forkserver._forkserver, "_forkserver_pid", None)
++    if pid is None:
++        return False
++    try:
++        return os.waitpid(pid, os.WNOHANG)[0] == 0
++    except ChildProcessError:
++        return False
++
++
++def worker_start_method() -> str:
++    """'forkserver' if the zygote is ready and safe, else 'spawn' (decided once)."""
++    if _STATE["method"] is not None:
++        return _STATE["method"]
++    path = _STATE["status_path"]
++    method, why = "spawn", "zygote not enabled"
++    if path:
++        deadline = time.time() + float(os.environ.get("SGLANG_WORKER_ZYGOTE_WAIT", "300"))
++        st = None
++        while time.time() < deadline:
++            if os.path.exists(path):
++                with open(path) as f:
++                    st = json.load(f)
++                break
++            if not _forkserver_alive():
++                time.sleep(0.05)
++                if os.path.exists(path):
++                    with open(path) as f:
++                        st = json.load(f)
++                break
++            time.sleep(0.01)
++        if st and st.get("ok"):
++            method, why = "forkserver", f"preload {st.get('preload_s')} s"
++        else:
++            why = (st or {}).get("reasons") or "zygote did not report"
++    _STATE["method"] = method
++    import logging
++
++    logging.getLogger(__name__).info(f"worker start method: {method} ({why})")
++    return method
+diff --git a/python/sglang/_worker_zygote/common.py b/python/sglang/_worker_zygote/common.py
+new file mode 100644
+index 0000000..3ae636e
+--- /dev/null
++++ b/python/sglang/_worker_zygote/common.py
+@@ -0,0 +1,9 @@
++"""Names shared by the zygote parent (zygote.py) and the forkserver side (zygote_preload.py)."""
++CONFIG_ENV = "SGLANG_WORKER_ZYGOTE_CONFIG"   # path of the JSON config the forkserver reads
++CHILD_ENV = "SGLANG_WORKER_ZYGOTE_CHILD"     # set in every worker forked from the zygote (value: zygote pid)
++ENV_KEY = "sglang_worker_zygote_environ"            # key of the parent's environment in the preparation data
++
++
++def in_forkserver_process(orig_argv) -> bool:
++    """True only in the interpreter multiprocessing started as its fork server."""
++    return any("multiprocessing.forkserver import main" in a for a in (orig_argv or []))
+diff --git a/python/sglang/_worker_zygote/cudafacts.py b/python/sglang/_worker_zygote/cudafacts.py
+new file mode 100644
+index 0000000..7dc553b
+--- /dev/null
++++ b/python/sglang/_worker_zygote/cudafacts.py
+@@ -0,0 +1,423 @@
++"""Device facts without touching the CUDA driver, and a guard that serves them during preload.
++
++Why: SGLang modules call `torch.cuda.is_available()` at import (95 files in v0.5.20 do
++`_is_cuda = is_cuda()`), and `sgl_kernel` picks its sm90/sm100 build at import through
++`torch.cuda.current_device()` + `get_device_properties()`. In a process that will later
++fork TP workers, any of these calls runs `cuInit`, and a forked child can then no longer use
++CUDA ("poisoned fork"; PyTorch docs, `multiprocessing-poison-fork-note`).
++
++What this module does:
++
++* `probe_facts()` runs NVML in a *separate short-lived process* (ctypes, no torch) and
++  returns the visible devices' count, compute capability and name, honouring
++  CUDA_VISIBLE_DEVICES. The calling process never opens a driver handle.
++* `CudaGuard` replaces, while armed, the handful of `torch.cuda` entry points that only need
++  those facts (is_available, device_count, current_device, get_device_capability,
++  get_device_name, get_device_properties().major/.minor/.name). Every other way into the
++  driver (`torch.cuda._lazy_init`, `torch._C._cuda_getDeviceCount`, `torch._C._cuda_init`,
++  any other attribute of the properties object) raises `CudaTouch`.
++* `CudaTouch` derives from BaseException so `except Exception:` in library code cannot
++  swallow it. A swallowed trip is still detected (the guard counts trips).
++* Every replacement is self-disarming: once `disarm()` runs, a reference captured during
++  preload delegates to the real function, so children see real behaviour.
++* `verify_facts()` runs in each child right after its first real CUDA init
++  (`torch.cuda._lazy_call`) and aborts the child if the facts served during preload differ
++  from the device.
++
++Standard library only (torch is imported lazily, by the guard).
++"""
++from __future__ import annotations
++
++import json
++import os
++import subprocess
++import sys
++import traceback
++from dataclasses import asdict, dataclass, field
++from typing import Any, Callable, Dict, List, Optional
++
++
++class CudaTouch(BaseException):
++    """Code tried to reach the CUDA driver while the zygote guard was armed."""
++
++
++ACTIVE = None  # the armed CudaGuard of this process, if any (an early hook may arm it first)
++
++
++@dataclass
++class CudaFacts:
++    count: int
++    major: int
++    minor: int
++    name: str
++    source: str = "nvml-probe"
++    uuids: List[str] = field(default_factory=list)
++
++    def to_json(self) -> str:
++        return json.dumps(asdict(self))
++
++    @classmethod
++    def from_json(cls, s: str) -> "CudaFacts":
++        d = json.loads(s)
++        return cls(**{k: d[k] for k in ("count", "major", "minor", "name", "source", "uuids") if k in d})
++
++
++# Runs in a separate interpreter (-I -S): ctypes + NVML only, prints one JSON line.
++_PROBE_CODE = r"""
++import ctypes, json, sys
++out = {"devices": []}
++try:
++    nvml = ctypes.CDLL("libnvidia-ml.so.1")
++except OSError as e:
++    print(json.dumps({"error": "libnvidia-ml.so.1: %s" % e})); sys.exit(0)
++rc = nvml.nvmlInit_v2()
++if rc != 0:
++    print(json.dumps({"error": "nvmlInit_v2 rc=%d" % rc})); sys.exit(0)
++try:
++    n = ctypes.c_uint(0)
++    rc = nvml.nvmlDeviceGetCount_v2(ctypes.byref(n))
++    if rc != 0:
++        raise RuntimeError("nvmlDeviceGetCount_v2 rc=%d" % rc)
++    for i in range(n.value):
++        h = ctypes.c_void_p()
++        if nvml.nvmlDeviceGetHandleByIndex_v2(i, ctypes.byref(h)) != 0:
++            raise RuntimeError("handle %d" % i)
++        ma, mi = ctypes.c_int(), ctypes.c_int()
++        if nvml.nvmlDeviceGetCudaComputeCapability(h, ctypes.byref(ma), ctypes.byref(mi)) != 0:
++            raise RuntimeError("capability %d" % i)
++        name = ctypes.create_string_buffer(96)
++        nvml.nvmlDeviceGetName(h, name, 96)
++        uuid = ctypes.create_string_buffer(96)
++        nvml.nvmlDeviceGetUUID(h, uuid, 96)
++        out["devices"].append({"index": i, "major": ma.value, "minor": mi.value,
++                               "name": name.value.decode(errors="replace"),
++                               "uuid": uuid.value.decode(errors="replace")})
++except Exception as e:
++    out = {"error": str(e)}
++finally:
++    nvml.nvmlShutdown()
++print(json.dumps(out))
++"""
++
++
++def visible_devices(devices: List[dict], cvd: Optional[str]) -> Optional[List[dict]]:
++    """Apply CUDA_VISIBLE_DEVICES the way the CUDA runtime does, or None if we cannot be sure.
++
++    Integers and GPU-<uuid> prefixes are supported; parsing stops at the first invalid entry
++    (CUDA semantics). MIG entries are not modelled -> None (the zygote then preloads no
++    module that needs device facts).
++    """
++    if cvd is None:
++        return list(devices)
++    cvd = cvd.strip()
++    if cvd == "":
++        return []
++    out: List[dict] = []
++    for tok in cvd.split(","):
++        tok = tok.strip()
++        if tok.startswith("MIG-"):
++            return None
++        if tok.lstrip("-").isdigit():
++            idx = int(tok)
++            if idx < 0 or idx >= len(devices):
++                break
++            out.append(devices[idx])
++        elif tok.startswith("GPU-"):
++            matches = [d for d in devices if d.get("uuid", "").startswith(tok)]
++            if len(matches) != 1:
++                break
++            out.append(matches[0])
++        else:
++            break
++    return out
++
++
++def facts_from_devices(devs: List[dict], source: str) -> Optional[CudaFacts]:
++    if not devs:
++        return None
++    caps = {(d["major"], d["minor"]) for d in devs}
++    names = {d["name"] for d in devs}
++    if len(caps) != 1 or len(names) != 1:
++        return None  # heterogeneous node: a single fake would be wrong for some device
++    (ma, mi), = caps
++    return CudaFacts(count=len(devs), major=ma, minor=mi, name=names.pop(), source=source,
++                     uuids=[d.get("uuid", "") for d in devs])
++
++
++def probe_facts(timeout: float = 20.0, python: Optional[str] = None,
++                env: Optional[Dict[str, str]] = None) -> Optional[CudaFacts]:
++    """Device facts from NVML, obtained in a child process. None when unavailable or unsure."""
++    fake = os.environ.get("SGLANG_WORKER_ZYGOTE_FAKE_CUDA")
++    if fake:
++        # CPU-only emulation (import studies and tests). Never set this on a GPU node.
++        d = json.loads(fake)
++        d.setdefault("source", "env-fake")
++        return CudaFacts(**d)
++    try:
++        r = subprocess.run([python or sys.executable, "-I", "-S", "-c", _PROBE_CODE],
++                           capture_output=True, text=True, timeout=timeout, env=env)
++        data = json.loads(r.stdout.strip().splitlines()[-1])
++    except Exception:
++        return None
++    if "error" in data:
++        return None
++    devs = visible_devices(data["devices"], (env or os.environ).get("CUDA_VISIBLE_DEVICES"))
++    if devs is None:
++        return None
++    return facts_from_devices(devs, "nvml-probe")
++
++
++class _FakeProps:
++    """Stand-in for torch.cuda._CudaDeviceProperties while armed.
++
++    Only major / minor / name are served. Any other attribute trips while armed, and
++    resolves to the real properties once disarmed (so captured objects heal in children).
++    """
++
++    __slots__ = ("_guard", "_index")
++
++    def __init__(self, guard: "CudaGuard", index: int):
++        object.__setattr__(self, "_guard", guard)
++        object.__setattr__(self, "_index", index)
++
++    def __getattr__(self, item):
++        g = object.__getattribute__(self, "_guard")
++        idx = object.__getattribute__(self, "_index")
++        if g.armed:
++            if item == "major":
++                return g.facts.major
++            if item == "minor":
++                return g.facts.minor
++            if item == "name":
++                return g.facts.name
++            g._trip(f"get_device_properties().{item}")
++        return getattr(g._orig["get_device_properties"](idx), item)
++
++    def __repr__(self):
++        return f"_FakeProps(index={object.__getattribute__(self, '_index')})"
++
++
++class CudaGuard:
++    """Serve device facts to importing code and trip on anything else (see module doc)."""
++
++    SERVED = ("is_available", "device_count", "current_device", "get_device_capability",
++              "get_device_name", "get_device_properties")
++    TRIPPED = ("_lazy_init",)
++    TRIPPED_C = ("_cuda_getDeviceCount", "_cuda_init", "_cuda_getDevice", "_cuda_setDevice")
++
++    def __init__(self, facts: Optional[CudaFacts]):
++        self.facts = facts
++        self.armed = False
++        self.trips: List[dict] = []
++        self.current_module: Optional[str] = None  # set by the preloader for attribution
++        self._orig: Dict[str, Callable] = {}
++        self._orig_c: Dict[str, Callable] = {}
++        self._patched_refs: List[tuple] = []  # (module, attr, original)
++        self._torch = None
++
++    # -- tripping -------------------------------------------------------------------------
++    def _trip(self, what: str):
++        tb = traceback.extract_stack(limit=12)[:-2]
++        frames = [f"{os.path.basename(f.filename)}:{f.lineno}:{f.name}" for f in tb[-6:]]
++        self.trips.append({"what": what, "module": self.current_module, "stack": frames})
++        raise CudaTouch(f"zygote guard: {what} while preloading {self.current_module}")
++
++    def _device_index(self, device=None) -> int:
++        if device is None:
++            return 0
++        if isinstance(device, int):
++            return device
++        idx = getattr(device, "index", None)
++        if isinstance(device, str):
++            idx = int(device.split(":")[1]) if ":" in device else 0
++        if idx is None:
++            idx = 0
++        return int(idx)
++
++    def _check_index(self, idx: int) -> int:
++        if self.facts is None or not (0 <= idx < self.facts.count):
++            self._trip(f"device index {idx} (facts: {self.facts.count if self.facts else 'none'})")
++        return idx
++
++    # -- served entry points --------------------------------------------------------------
++    def _make_served(self):
++        g = self
++
++        def is_available():
++            if not g.armed:
++                return g._orig["is_available"]()
++            if g.facts is None:
++                g._trip("is_available()")
++            return g.facts.count > 0
++
++        def device_count():
++            if not g.armed:
++                return g._orig["device_count"]()
++            if g.facts is None:
++                g._trip("device_count()")
++            return g.facts.count
++
++        def current_device():
++            if not g.armed:
++                return g._orig["current_device"]()
++            if g.facts is None or g.facts.count == 0:
++                g._trip("current_device()")
++            return 0
++
++        def get_device_capability(device=None):
++            if not g.armed:
++                return g._orig["get_device_capability"](device)
++            if g.facts is None:
++                g._trip("get_device_capability()")
++            g._check_index(g._device_index(device))
++            return (g.facts.major, g.facts.minor)
++
++        def get_device_name(device=None):
++            if not g.armed:
++                return g._orig["get_device_name"](device)
++            if g.facts is None:
++                g._trip("get_device_name()")
++            g._check_index(g._device_index(device))
++            return g.facts.name
++
++        def get_device_properties(device=None):
++            if not g.armed:
++                return g._orig["get_device_properties"](device)
++            if g.facts is None:
++                g._trip("get_device_properties()")
++            return _FakeProps(g, g._check_index(g._device_index(device)))
++
++        return {"is_available": is_available, "device_count": device_count,
++                "current_device": current_device, "get_device_capability": get_device_capability,
++                "get_device_name": get_device_name, "get_device_properties": get_device_properties}
++
++    def _make_tripped(self, name: str, orig: Callable):
++        g = self
++
++        def tripped(*a, **k):
++            if g.armed:
++                g._trip(f"{name}()")
++            return orig(*a, **k)
++
++        tripped.__name__ = getattr(orig, "__name__", name)
++        tripped.__wrapped__ = orig
++        return tripped
++
++    # -- arm / disarm ---------------------------------------------------------------------
++    def arm(self):
++        import torch  # noqa: F401  (torch import itself never initialises CUDA)
++        import torch.cuda as tc
++
++        self._torch = torch
++        served = self._make_served()
++        for name in self.SERVED:
++            if hasattr(tc, name):
++                self._orig[name] = getattr(tc, name)
++                setattr(tc, name, served[name])
++        orig_lazy = tc._lazy_init
++        self._orig["_lazy_init"] = orig_lazy
++        tripped_lazy = self._make_tripped("torch.cuda._lazy_init", orig_lazy)
++        tc._lazy_init = tripped_lazy
++        # torch submodules that bound the original function at import (e.g. `from . import _lazy_init`)
++        for modname, mod in list(sys.modules.items()):
++            if not modname.startswith("torch.cuda") or mod is None or mod is tc:
++                continue
++            for attr in ("_lazy_init",):
++                if getattr(mod, attr, None) is orig_lazy:
++                    self._patched_refs.append((mod, attr, orig_lazy))
++                    setattr(mod, attr, tripped_lazy)
++        C = torch._C
++        for name in self.TRIPPED_C:
++            fn = getattr(C, name, None)
++            if fn is not None:
++                self._orig_c[name] = fn
++                setattr(C, name, self._make_tripped(f"torch._C.{name}", fn))
++        self.armed = True
++        global ACTIVE
++        ACTIVE = self
++        return self
++
++    def disarm(self):
++        """Stop serving facts. Module attributes go back to the originals; wrappers that
++        were captured by reference keep delegating to them."""
++        global ACTIVE
++        if ACTIVE is self:
++            ACTIVE = None
++        if self._torch is None:
++            self.armed = False
++            return
++        import torch.cuda as tc
++
++        self.armed = False
++        for name, fn in self._orig.items():
++            setattr(tc, name, fn)
++        for mod, attr, fn in self._patched_refs:
++            setattr(mod, attr, fn)
++        for name, fn in self._orig_c.items():
++            setattr(self._torch._C, name, fn)
++
++
++def verify_facts(facts: CudaFacts) -> List[str]:
++    """Compare the facts served during preload with the real device (call after CUDA init)."""
++    import torch
++
++    problems = []
++    n = torch.cuda.device_count()
++    if n != facts.count:
++        problems.append(f"device_count {n} != {facts.count}")
++    for i in range(min(n, facts.count)):
++        cap = torch.cuda.get_device_capability(i)
++        if cap != (facts.major, facts.minor):
++            problems.append(f"capability[{i}] {cap} != {(facts.major, facts.minor)}")
++        name = torch.cuda.get_device_name(i)
++        if name != facts.name:
++            problems.append(f"name[{i}] {name!r} != {facts.name!r}")
++    return problems
++
++
++def nvidia_fds() -> List[str]:
++    """Open file descriptors that point at NVIDIA device nodes (driver handles)."""
++    fd_dir = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
++    out = []
++    try:
++        for fd in os.listdir(fd_dir):
++            try:
++                target = os.readlink(os.path.join(fd_dir, fd))
++            except OSError:
++                continue
++            if target.startswith("/dev/nvidia"):
++                out.append(target)
++    except OSError:
++        pass
++    return sorted(set(out))
++
++
++def mapped_libraries(substrings=("libcuda.so", "libnvidia-ml.so")) -> Dict[str, bool]:
++    """Which of the given shared libraries are mapped into this process (Linux only)."""
++    res = {s: False for s in substrings}
++    try:
++        with open("/proc/self/maps") as f:
++            for line in f:
++                for s in substrings:
++                    if s in line:
++                        res[s] = True
++    except OSError:
++        return {s: None for s in substrings}  # type: ignore[misc]
++    return res
++
++
++def native_thread_count() -> Optional[int]:
++    try:
++        return len(os.listdir("/proc/self/task"))
++    except OSError:
++        return None
++
++
++def torch_cuda_initialized() -> Optional[bool]:
++    tc = sys.modules.get("torch.cuda")
++    if tc is None:
++        return False
++    try:
++        return bool(tc.is_initialized())
++    except Exception:
++        return None
+diff --git a/python/sglang/_worker_zygote/preload.py b/python/sglang/_worker_zygote/preload.py
+new file mode 100644
+index 0000000..c3c77df
+--- /dev/null
++++ b/python/sglang/_worker_zygote/preload.py
+@@ -0,0 +1,257 @@
++"""Runs *inside* the multiprocessing forkserver process, as its only preload module.
++
++The launch process (see __init__.py) starts the forkserver with
++`set_forkserver_preload(["sglang._worker_zygote.preload"])` and points
++PYSTARTUP_ZYGOTE_CONFIG at a JSON file:
++
++    {"modules": [...],          # import order (calibrated list or a safe default list)
++     "facts": "probe" | {...} | null,
++     "strict": true,            # any failure/trip -> not ok
++     "deny_modules": ["prometheus_client"],
++     "allow_native_threads": true,
++     "status_path": "/tmp/...json"}
++
++What happens here, in order:
++1. `import torch` (CUDA-free) and arm the CudaGuard with device facts from an NVML probe
++   that runs in a separate short-lived process.
++2. Import the configured modules one by one, attributing any CUDA touch to the module.
++3. Disarm, then check the invariants that make forking safe:
++   - torch.cuda.is_initialized() is False;
++   - no /dev/nvidia* descriptor is open (no driver handle, so no cuInit, no NVML session);
++   - exactly one Python thread (and report native threads);
++   - no denied module was imported (e.g. prometheus_client, which reads
++     PROMETHEUS_MULTIPROC_DIR at import and must see the env the parent sets later).
++4. Install the child-side hooks: every forked child first takes the parent's environment as
++   it was at Process.start() (spawn semantics, via multiprocessing.spawn.prepare), then,
++   after its own first real CUDA init, checks the served facts against the device.
++5. Write the status JSON atomically. If not ok, exit: the parent falls back to spawn.
++
++Nothing here may raise: forkserver.main() would die with it. Everything is caught and
++reported in the status file.
++"""
++from __future__ import annotations
++
++import importlib
++import json
++import os
++import sys
++import threading
++import time
++
++from sglang._worker_zygote.common import CHILD_ENV, CONFIG_ENV, ENV_KEY, in_forkserver_process
++
++
++def _write_status(path, status):
++    if not path:
++        return
++    tmp = f"{path}.tmp.{os.getpid()}"
++    with open(tmp, "w") as f:
++        json.dump(status, f, indent=1, default=str)
++    os.replace(tmp, path)
++
++
++def _install_child_hooks(facts):
++    import multiprocessing.spawn as mpspawn
++
++    orig_prepare = mpspawn.prepare
++
++    def prepare(data):
++        env = data.get(ENV_KEY) if isinstance(data, dict) else None
++        if env is not None:
++            # spawn semantics: the child's environment is the parent's at Process.start()
++            for k in list(os.environ):
++                if k not in env:
++                    del os.environ[k]
++            os.environ.update(env)
++        os.environ[CHILD_ENV] = str(os.getppid())
++        return orig_prepare(data)
++
++    mpspawn.prepare = prepare
++
++    def after_in_child():
++        tc = sys.modules.get("torch.cuda")
++        if tc is None:
++            return
++        try:
++            if tc.is_initialized():  # cannot happen if the invariants held; never continue if it does
++                os.write(2, b"sglang worker zygote: CUDA initialised in the zygote, child aborts\n")
++                os._exit(70)
++        except Exception:
++            pass
++        if facts is None:
++            return
++        from sglang._worker_zygote.cudafacts import verify_facts
++
++        def _verify():
++            problems = verify_facts(facts)
++            if problems:
++                raise RuntimeError("sglang worker zygote: device facts served during preload differ "
++                                   "from the device: " + "; ".join(problems))
++
++        try:
++            tc._lazy_call(_verify)
++        except Exception:
++            pass
++
++    os.register_at_fork(after_in_child=after_in_child)
++
++
++def _replay_ok(name, origin):
++    """For calibrated lists: is `name` still the module calibration saw?"""
++    import importlib.util
++
++    try:
++        spec = importlib.util.find_spec(name)
++    except (ImportError, ValueError, AttributeError):
++        return False
++    if spec is None:
++        return False
++    return origin is None or spec.origin == origin
++
++
++def run():
++    t0 = time.time()
++    status = {"ok": False, "pid": os.getpid(), "ppid": os.getppid(), "python": sys.version,
++              "t_start": t0, "loaded": [], "failed": [], "tripped": [], "tainted": [],
++              "skipped": [], "reasons": []}
++    cfg_path = os.environ.get(CONFIG_ENV)
++    cfg = {}
++    try:
++        with open(cfg_path) as f:
++            cfg = json.load(f)
++    except Exception as e:  # no config: nothing to do, report and serve plain forks
++        status["reasons"].append(f"no config at {cfg_path!r}: {e!r}")
++    status_path = cfg.get("status_path")
++    strict = bool(cfg.get("strict", True))
++    modules = cfg.get("modules", [])
++    origins = cfg.get("origins", {})
++    n_before = len(sys.modules)
++    guard = None
++    facts = None
++    try:
++        from sglang._worker_zygote import cudafacts
++        from sglang._worker_zygote.cudafacts import CudaFacts, CudaGuard, CudaTouch, probe_facts
++
++        if cudafacts.ACTIVE is not None and cudafacts.ACTIVE.armed:
++            # armed earlier in this process by an early hook (e.g. the top of a package __init__)
++            guard = cudafacts.ACTIVE
++            facts = guard.facts
++            status["guard"] = "armed by early hook"
++        else:
++            f = cfg.get("facts", "probe")
++            t = time.time()
++            if f == "probe":
++                facts = probe_facts()
++            elif isinstance(f, dict):
++                facts = CudaFacts(**f)
++            status["probe_s"] = round(time.time() - t, 3)
++            try:
++                t = time.time()
++                import torch  # noqa: F401
++
++                status["loaded"].append(["torch", round(time.time() - t, 3)])
++                guard = CudaGuard(facts).arm()
++            except ImportError as e:
++                status["reasons"].append(f"torch not importable, no guard needed: {e!r}")
++        status["facts"] = facts.__dict__ if facts else None
++        for name in modules:
++            if name in sys.modules:
++                continue
++            if cfg.get("calibrated") and not _replay_ok(name, origins.get(name)):
++                status["skipped"].append(name)
++                continue
++            if guard is not None:
++                guard.current_module = name
++            trips_before = len(guard.trips) if guard else 0
++            t = time.time()
++            try:
++                importlib.import_module(name)
++            except CudaTouch as e:
++                status["tripped"].append([name, str(e), guard.trips[-1] if guard and guard.trips else None])
++                continue
++            except ModuleNotFoundError as e:
++                # The named module itself is absent: nothing of it executed.
++                status["failed"].append([name, repr(e), e.name == name])
++                continue
++            except BaseException as e:  # noqa: BLE001 - must not kill the forkserver
++                status["failed"].append([name, repr(e), False])
++                continue
++            dt = round(time.time() - t, 3)
++            if guard is not None and len(guard.trips) > trips_before:
++                status["tainted"].append([name, guard.trips[trips_before:]])
++            else:
++                status["loaded"].append([name, dt])
++        if guard is not None:
++            guard.disarm()
++            status["trips_total"] = len(guard.trips)
++    except BaseException as e:  # noqa: BLE001
++        status["reasons"].append(f"preload crashed: {e!r}")
++        if guard is not None:
++            try:
++                guard.disarm()
++            except BaseException:
++                pass
++
++    # ---- invariants ---------------------------------------------------------------------
++    try:
++        from sglang._worker_zygote.cudafacts import (mapped_libraries, native_thread_count, nvidia_fds,
++                                         torch_cuda_initialized)
++
++        inv = {
++            "torch_cuda_initialized": torch_cuda_initialized(),
++            "nvidia_fds": nvidia_fds(),
++            "python_threads": threading.active_count(),
++            "native_threads": native_thread_count(),
++            "mapped": mapped_libraries(),
++            "denied_present": [m for m in cfg.get("deny_modules", []) if m in sys.modules],
++        }
++    except BaseException as e:  # noqa: BLE001
++        inv = {"error": repr(e)}
++    status["invariants"] = inv
++    reasons = status["reasons"]
++    if "error" in inv:
++        reasons.append("invariant check failed to run")
++    else:
++        if inv["torch_cuda_initialized"] is not False:
++            reasons.append("torch.cuda is initialised in the zygote")
++        if inv["nvidia_fds"]:
++            reasons.append(f"driver handles open in the zygote: {inv['nvidia_fds']}")
++        if inv["python_threads"] != 1:
++            reasons.append(f"{inv['python_threads']} Python threads in the zygote")
++        if (not cfg.get("allow_native_threads", True)) and (inv["native_threads"] or 1) > 1:
++            reasons.append(f"{inv['native_threads']} native threads in the zygote")
++        if inv["denied_present"]:
++            reasons.append(f"denied modules imported: {inv['denied_present']}")
++    if status["tripped"]:
++        reasons.append(f"{len(status['tripped'])} module(s) touched CUDA during preload; their partial "
++                       f"side effects stay in the zygote")
++    if status["tainted"]:
++        reasons.append(f"a CUDA trip was swallowed inside {[t[0] for t in status['tainted']]}")
++    if strict and status["failed"]:
++        reasons.append(f"{len(status['failed'])} module(s) failed in strict mode")
++    if not strict:
++        bad = [f for f in status["failed"] if not f[2]]
++        if bad:
++            reasons.append(f"{len(bad)} module(s) failed after executing code: {[b[0] for b in bad][:5]}")
++    status["ok"] = not reasons
++    status["modules_before"] = n_before
++    status["modules_after"] = len(sys.modules)
++    status["preload_s"] = round(time.time() - t0, 3)
++    status["t_ready"] = time.time()
++    if status["ok"]:
++        try:
++            _install_child_hooks(facts)
++        except BaseException as e:  # noqa: BLE001
++            status["ok"] = False
++            reasons.append(f"child hooks: {e!r}")
++    try:
++        _write_status(status_path, status)
++    except BaseException:  # noqa: BLE001
++        pass
++    if not status["ok"] and cfg.get("exit_if_not_ok", True):
++        os._exit(0)  # the parent will not use this server; free its memory now
++
++
++# Only the fork server runs the preload; importing this module anywhere else is a no-op.
++if in_forkserver_process(getattr(sys, "orig_argv", None)) and os.environ.get(CONFIG_ENV):
++    run()
+diff --git a/python/sglang/srt/entrypoints/engine.py b/python/sglang/srt/entrypoints/engine.py
+index 9afd8c4..8f1ce9e 100644
+--- a/python/sglang/srt/entrypoints/engine.py
++++ b/python/sglang/srt/entrypoints/engine.py
+@@ -1762,8 +1762,10 @@ def _set_envs_and_config(server_args: ServerArgs):
+             "the process tree when a child process fails."
+         )
+ 
+-    # Set mp start method
+-    mp.set_start_method("spawn", force=True)
++    # Set mp start method ("forkserver" only with a ready, CUDA-clean worker zygote)
++    from sglang._worker_zygote import worker_start_method
++
++    mp.set_start_method(worker_start_method(), force=True)
+ 
+     # Set gc threshold
+     if gc_threshold := cfg.gc_threshold:
+diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+index 46e9c70..c21fb03 100644
+--- a/python/sglang/srt/environ.py
++++ b/python/sglang/srt/environ.py
+@@ -1440,6 +1440,11 @@ class Envs:
+     # ===================================================================
+     SGLANG_SET_CPU_AFFINITY = EnvBool(False)
+     SGLANG_NUMA_BIND_V2 = EnvBool(True)
++    # Fork TP workers from a preloaded, CUDA-clean fork server (sglang/_worker_zygote).
++    # Read directly from os.environ at the top of `import sglang`; listed here for discovery.
++    SGLANG_WORKER_ZYGOTE = EnvBool(False)
++    SGLANG_WORKER_ZYGOTE_MODULES = EnvStr("")
++    SGLANG_WORKER_ZYGOTE_WAIT = EnvFloat(300.0)
+     SGLANG_AUTO_NUMA_BIND = EnvBool(True)
+     SGLANG_CRASH_ON_NUMA_BIND_FAILURE = EnvBool(False)
+ 
+diff --git a/python/sglang/srt/utils/numa_utils.py b/python/sglang/srt/utils/numa_utils.py
+index 5cb2dfa..78c4c46 100644
+--- a/python/sglang/srt/utils/numa_utils.py
++++ b/python/sglang/srt/utils/numa_utils.py
+@@ -92,6 +92,15 @@ exec numactl {numactl_args} {old_executable} "$@"'''
+ @contextmanager
+ def _mp_set_executable(executable: str, debug_str: str):
+     start_method = multiprocessing.get_start_method()
++    if start_method == "forkserver":
++        # numactl wraps the interpreter, which only spawn executes: spawn this worker
++        multiprocessing.set_start_method("spawn", force=True)
++        try:
++            with _mp_set_executable(executable=executable, debug_str=debug_str):
++                yield
++        finally:
++            multiprocessing.set_start_method("forkserver", force=True)
++        return
+     assert start_method == "spawn", f"{start_method=}"
+ 
+     old_executable = os.fsdecode(multiprocessing.spawn.get_executable())
+-- 
+2.50.1 (Apple Git-155)
+

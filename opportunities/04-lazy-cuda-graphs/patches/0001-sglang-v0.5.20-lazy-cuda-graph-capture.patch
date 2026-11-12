@@ -1,0 +1,1297 @@
+From: lazy-cuda-graphs prototype (opportunities/04-lazy-cuda-graphs)
+Subject: [PATCH] Lazy CUDA graph capture: capture a traffic-chosen startup set,
+ the rest during scheduler idle time
+
+Base: sgl-project/sglang v0.5.20 (94602c9c2b7cbdb8efd5c52802dac6a1c180089e)
+
+Adds opt-in lazy capture to the decode (full) and prefill (breakable) graph
+runners. With cuda_graph_config <phase>.initial_bs set, only those buckets are
+captured at startup; the remaining planned buckets are captured one per
+scheduler iteration while the server is fully idle, in deferred_bs order
+(priority-merged across phases), with hot eager buckets promoted. Batches whose
+default bucket is not yet captured run eagerly (bucket-exact dispatch, no extra
+padding). Steps run in lockstep on all TP ranks: rank 0 proposes a tick through
+the existing request broadcast, all ranks agree with one MIN all-reduce on the
+CPU group, then capture the same bucket in one graph_capture session.
+
+Default behaviour is unchanged unless initial_bs is given. Unsupported
+configurations (speculative decoding, LoRA, PP, DP attention, CP, PD,
+torch.compile, memory saver, MLA, hybrid state pools, post-capture KV sizing,
+non-default backends) fall back to capture-all with a warning.
+
+Not yet run on a GPU. Unit tests for the two GPU-free modules live outside the
+SGLang tree (opportunities/04-lazy-cuda-graphs/tests).
+
+diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+index 46e9c70..a11c577 100644
+--- a/python/sglang/srt/environ.py
++++ b/python/sglang/srt/environ.py
+@@ -1389,6 +1389,17 @@ class Envs:
+     # Eager forward wraps the ForwardBatch's own tensors instead of copying them
+     # into the CUDA graph buffer registry (no per-iter device-to-device copy).
+     SGLANG_EAGER_INPUT_NO_COPY = EnvBool(False)
++    # Lazy capture (cuda_graph_config <phase>.initial_bs): seconds the scheduler
++    # must be fully idle before the first deferred capture step.
++    SGLANG_LAZY_CUDA_GRAPH_MIN_IDLE_S = EnvFloat(1.0)
++    # Lazy capture: also require idle time >= ratio * estimated step cost.
++    SGLANG_LAZY_CUDA_GRAPH_IDLE_COST_RATIO = EnvFloat(0.0)
++    # Lazy capture: eager forwards that move a pending bucket to the queue head;
++    # 0 disables promotion.
++    SGLANG_LAZY_CUDA_GRAPH_PROMOTE_AFTER = EnvInt(4)
++    # Lazy capture: free device memory (MiB) every TP rank must have after
++    # empty_cache() before a deferred step; otherwise the bucket stays eager.
++    SGLANG_LAZY_CUDA_GRAPH_MIN_FREE_MB = EnvInt(2048)
+ 
+     # ===================================================================
+     # Tokenizer, request state, embeddings, and reasoning controls
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index 743c8af..2b8da4e 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -725,6 +725,8 @@ class Scheduler(
+ 
+         self.init_rank_consensus_checker()
+ 
++        self.maybe_init_lazy_graph_capture()
++
+         self.is_initializing = False
+         self.init_startup_timing_summary()
+ 
+@@ -2070,13 +2072,18 @@ class Scheduler(
+         value exists for the pipeline stages that relay requests onward.
+         """
+         local_reqs = []
+-        if (
+-            self.ps.pp_rank == 0
+-            and self.ps.attn_tp_rank == 0
+-            and self.ps.attn_cp_rank == 0
+-        ):
++        if self.lazy_graph_capture is not None:
++            self.lazy_graph_capture.begin_iteration()
++        if self._is_request_leader():
+             local_reqs = self._poll_timeout_aborts()
++            if self.lazy_graph_capture is not None:
++                # A deferred-capture tick rides the same broadcast as requests.
++                tick = self.lazy_graph_capture.propose(fully_idle=self.is_fully_idle())
++                if tick is not None:
++                    local_reqs = [*local_reqs, tick]
+         recv_reqs = self.request_receiver.recv_requests(local_reqs=local_reqs)
++        if self.lazy_graph_capture is not None:
++            recv_reqs = self.lazy_graph_capture.take_ticks(recv_reqs)
+         if recv_reqs:
+             self.metrics_reporter.record_scheduler_active()
+         self.process_input_requests(recv_reqs)
+@@ -2380,6 +2387,30 @@ class Scheduler(
+             groups += [self.pp_group]
+         rank_consensus_checker.configure(groups)
+ 
++    def maybe_init_lazy_graph_capture(self) -> None:
++        """Idle-time driver for deferred CUDA graph buckets; None unless enabled."""
++        # Imported here: the module pulls in the graph runner package, which is
++        # loaded by the model worker before this point.
++        from sglang.srt.managers.scheduler_components.lazy_graph_capture import (
++            maybe_create_lazy_graph_capture,
++        )
++
++        model_runner = self.tp_worker.model_runner
++        self.lazy_graph_capture = maybe_create_lazy_graph_capture(
++            is_leader=self._is_request_leader(),
++            decode_runner=model_runner.decode_cuda_graph_runner,
++            prefill_runner=model_runner.prefill_cuda_graph_runner,
++            tp_cpu_group=self.tp_cpu_group,
++            tp_size=self.ps.tp_size,
++        )
++
++    def _is_request_leader(self) -> bool:
++        return (
++            self.ps.pp_rank == 0
++            and self.ps.attn_tp_rank == 0
++            and self.ps.attn_cp_rank == 0
++        )
++
+     def init_kv_events_publisher(self) -> None:
+         self.kv_events_publisher = SchedulerKvEventsPublisher(
+             kv_events_config=get_observability().kv_events_config,
+@@ -4795,6 +4826,10 @@ class Scheduler(
+             self.load_inquirer.get_loads, force=True, snapshot=snapshot
+         )
+ 
++        # One deferred CUDA graph bucket per idle iteration, on every rank at once.
++        if self.lazy_graph_capture is not None:
++            self.lazy_graph_capture.run_pending(fully_idle=True)
++
+         # sleep until next event
+         self.maybe_sleep_on_idle()
+         self.metrics_reporter.record_scheduler_idle()
+diff --git a/python/sglang/srt/managers/scheduler_components/lazy_graph_capture.py b/python/sglang/srt/managers/scheduler_components/lazy_graph_capture.py
+new file mode 100644
+index 0000000..c1746af
+--- /dev/null
++++ b/python/sglang/srt/managers/scheduler_components/lazy_graph_capture.py
+@@ -0,0 +1,319 @@
++# Copyright 2023-2026 SGLang Team
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# ==============================================================================
++"""Idle-time driver for deferred CUDA-graph capture (lazy capture).
++
++Protocol, one capture step per scheduler iteration at most:
++
++1. Leader (TP rank 0) in ``ingest_requests``: if the scheduler was fully idle
++   for long enough, ``propose`` returns a ``LazyGraphCaptureTick`` naming the
++   head bucket. The tick rides the existing per-iteration request broadcast, so
++   every rank receives it in the same iteration and in the same order as real
++   requests. Only the leader reads a clock; *which* bucket is next is
++   rank-replicated state, *when* is the leader's decision.
++2. Every rank: the request dispatcher hands the tick to ``accept``.
++3. Every rank: ``on_idle`` (reached in lockstep, since the batch decision is
++   replicated) calls ``run_pending``. It agrees with the other ranks via one
++   MIN all-reduce on the CPU group that all of them are fully idle, expect the
++   same bucket and have memory headroom. Then all ranks capture exactly that
++   bucket inside one ``graph_capture`` session.
++
++A request that arrives during a step is polled in the next iteration, so it
++waits for at most one capture step.
++
++Imports are standard library plus the pure schedule module so this file can be
++unit-tested with fake runners and a fake all-reduce.
++"""
++
++from __future__ import annotations
++
++import logging
++import time
++from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple
++
++import msgspec
++
++from sglang.srt.model_executor.runner.lazy_capture import (
++    LazyCaptureSchedule,
++    pick_next_phase,
++)
++
++logger = logging.getLogger(__name__)
++
++# Fallback step-cost model (seconds = a + b * size) until the leader has
++# observed steps of a phase. Fitted to SGLang 0.5.16 capture logs of
++# Llama-3.1-70B TP4 on GH200 (lab runs); deliberately on the slow side.
++_DEFAULT_COST_MODEL: Dict[str, Tuple[float, float]] = {
++    "decode": (0.30, 0.0),
++    "prefill": (0.40, 1.4e-4),
++}
++
++
++class LazyGraphCaptureTick(msgspec.Struct, frozen=True, kw_only=True):
++    """Leader's proposal to capture one bucket; rides the TP request broadcast."""
++
++    seq: int
++    phase: str
++    size: int
++
++
++class LazyCaptureTarget(Protocol):
++    """What the controller needs from a decode or prefill graph runner."""
++
++    lazy_schedule: LazyCaptureSchedule
++
++    def capture_deferred(self, size: int) -> None: ...
++
++    def lazy_has_headroom(self, size: int) -> bool: ...
++
++
++class LazyGraphCaptureController:
++    def __init__(
++        self,
++        *,
++        is_leader: bool,
++        targets: Mapping[str, LazyCaptureTarget],
++        agree_min: Callable[[List[int]], List[int]],
++        min_idle_s: float,
++        idle_cost_ratio: float,
++        clock: Callable[[], float] = time.monotonic,
++    ) -> None:
++        self._is_leader = is_leader
++        # Decode first: on equal priority its buckets win (cheaper, hit per token).
++        self._targets: Dict[str, LazyCaptureTarget] = dict(targets)
++        self._agree_min = agree_min
++        self._min_idle_s = float(min_idle_s)
++        self._idle_cost_ratio = float(idle_cost_ratio)
++        self._clock = clock
++        self._seq = 0
++        # Set on every rank at once when the ranks disagree about the next step.
++        self._disabled = False
++        self._pending_tick: Optional[LazyGraphCaptureTick] = None
++        self._idle_since: Optional[float] = None
++        self._observed: Dict[str, List[Tuple[int, float]]] = {
++            phase: [] for phase in self._targets
++        }
++
++    # ---- shared state ------------------------------------------------------
++
++    @property
++    def seq(self) -> int:
++        return self._seq
++
++    def _schedules(self) -> List[LazyCaptureSchedule]:
++        return [target.lazy_schedule for target in self._targets.values()]
++
++    @property
++    def disabled(self) -> bool:
++        return self._disabled
++
++    def has_pending_work(self) -> bool:
++        return not self._disabled and pick_next_phase(self._schedules()) is not None
++
++    def next_bucket(self) -> Optional[Tuple[str, int]]:
++        schedule = pick_next_phase(self._schedules())
++        if schedule is None:
++            return None
++        head = schedule.next_pending()
++        assert head is not None
++        return schedule.phase, head[0]
++
++    # ---- leader --------------------------------------------------------------
++
++    def observe_step(self, *, phase: str, size: int, seconds: float) -> None:
++        """Feed a measured capture time (startup or deferred) to the cost model."""
++        self._observed.setdefault(phase, []).append((int(size), float(seconds)))
++
++    def estimate_cost(self, *, phase: str, size: int) -> float:
++        a, b = _fit_cost_model(
++            self._observed.get(phase, []), _DEFAULT_COST_MODEL.get(phase, (0.5, 0.0))
++        )
++        return max(0.0, a + b * size)
++
++    def propose(self, *, fully_idle: bool) -> Optional[LazyGraphCaptureTick]:
++        """Leader only: a tick for the head bucket once idle long enough."""
++        if not self._is_leader or self._disabled:
++            return None
++        if not fully_idle:
++            self._idle_since = None
++            return None
++        now = self._clock()
++        if self._idle_since is None:
++            self._idle_since = now
++        head = self.next_bucket()
++        if head is None:
++            return None
++        phase, size = head
++        needed = self._min_idle_s + self._idle_cost_ratio * self.estimate_cost(
++            phase=phase, size=size
++        )
++        if now - self._idle_since < needed:
++            return None
++        return LazyGraphCaptureTick(seq=self._seq, phase=phase, size=size)
++
++    # ---- every rank ----------------------------------------------------------
++
++    def begin_iteration(self) -> None:
++        """Drop a tick that was not run in the iteration that delivered it."""
++        self._pending_tick = None
++
++    def accept(self, tick: LazyGraphCaptureTick) -> None:
++        self._pending_tick = tick
++
++    def take_ticks(self, recv_reqs: List[Any]) -> List[Any]:
++        """Accept the broadcast tick, if any, and return the real requests."""
++        if not recv_reqs:
++            return recv_reqs
++        rest = []
++        for req in recv_reqs:
++            if isinstance(req, LazyGraphCaptureTick):
++                self.accept(req)
++            else:
++                rest.append(req)
++        return rest
++
++    def run_pending(self, *, fully_idle: bool) -> Optional[LazyGraphCaptureTick]:
++        """Run the delivered tick if every rank agrees; returns the tick run."""
++        tick = self._pending_tick
++        self._pending_tick = None
++        if tick is None:
++            return None
++        expected = self.next_bucket()
++        matches = (
++            expected is not None
++            and tick.seq == self._seq
++            and (tick.phase, tick.size) == expected
++        )
++        if not matches:
++            # Diverged bookkeeping is a bug; skip loudly rather than deadlock.
++            logger.error(
++                "Lazy CUDA graph capture: tick %s does not match local head %s "
++                "(seq %d); skipping.",
++                tick,
++                expected,
++                self._seq,
++            )
++        target = self._targets.get(tick.phase)
++        headroom = matches and fully_idle and target.lazy_has_headroom(tick.size)
++        votes = self._agree_min([int(matches), int(fully_idle), int(headroom)])
++        if not all(votes):
++            if not votes[0]:
++                # Some rank's queue diverged: stop on every rank, keep serving.
++                self._disabled = True
++                logger.error(
++                    "Lazy CUDA graph capture disabled: ranks disagree on the next "
++                    "bucket; uncaptured buckets will keep running eagerly."
++                )
++            elif votes[1] and not votes[2]:
++                # Out of memory headroom on some rank: give up on this bucket
++                # everywhere so the queue keeps moving.
++                target.lazy_schedule.mark_failed(tick.size)
++                self._seq += 1
++                logger.warning(
++                    "Lazy CUDA graph capture: no memory headroom for %s bucket "
++                    "%d on some rank; it will keep running eagerly.",
++                    tick.phase,
++                    tick.size,
++                )
++            return None
++        start = self._clock()
++        target.capture_deferred(tick.size)
++        seconds = self._clock() - start
++        self._seq += 1
++        self.observe_step(phase=tick.phase, size=tick.size, seconds=seconds)
++        self._log_step(tick, seconds)
++        return tick
++
++    def _log_step(self, tick: LazyGraphCaptureTick, seconds: float) -> None:
++        if not self._is_leader:
++            return
++        remaining = sum(len(s.pending) for s in self._schedules())
++        logger.info(
++            "Lazy CUDA graph capture: %s bucket %d captured in %.3f s "
++            "(step %d, %d buckets pending).",
++            tick.phase,
++            tick.size,
++            seconds,
++            tick.seq,
++            remaining,
++        )
++        if remaining == 0:
++            logger.info("Lazy CUDA graph capture: all planned buckets captured.")
++
++
++def _fit_cost_model(
++    observations: List[Tuple[int, float]], default: Tuple[float, float]
++) -> Tuple[float, float]:
++    """Least-squares ``seconds = a + b * size``; falls back to ``default``."""
++    if not observations:
++        return default
++    if len(observations) == 1 or len({s for s, _ in observations}) == 1:
++        mean_s = sum(t for _, t in observations) / len(observations)
++        a_default, b_default = default
++        size = observations[0][0]
++        # Keep the default slope, shift the intercept to match what we saw.
++        return max(0.0, mean_s - b_default * size), b_default
++    n = len(observations)
++    mean_x = sum(s for s, _ in observations) / n
++    mean_y = sum(t for _, t in observations) / n
++    sxx = sum((s - mean_x) ** 2 for s, _ in observations)
++    sxy = sum((s - mean_x) * (t - mean_y) for s, t in observations)
++    b = max(0.0, sxy / sxx)
++    a = max(0.0, mean_y - b * mean_x)
++    return a, b
++
++
++def maybe_create_lazy_graph_capture(
++    *,
++    is_leader: bool,
++    decode_runner: Any,
++    prefill_runner: Any,
++    tp_cpu_group: Any,
++    tp_size: int,
++) -> Optional[LazyGraphCaptureController]:
++    """A controller when either graph runner has deferred buckets, else None."""
++    from sglang.srt.environ import envs
++
++    targets: Dict[str, LazyCaptureTarget] = {}
++    for phase, runner in (("decode", decode_runner), ("prefill", prefill_runner)):
++        # Eager / disabled phases have no lazy_schedule attribute.
++        schedule = getattr(runner, "lazy_schedule", None)
++        if schedule is not None:
++            targets[phase] = runner
++    if not targets:
++        return None
++    return LazyGraphCaptureController(
++        is_leader=is_leader,
++        targets=targets,
++        agree_min=_make_agree_min(tp_cpu_group=tp_cpu_group, tp_size=tp_size),
++        min_idle_s=envs.SGLANG_LAZY_CUDA_GRAPH_MIN_IDLE_S.get(),
++        idle_cost_ratio=envs.SGLANG_LAZY_CUDA_GRAPH_IDLE_COST_RATIO.get(),
++    )
++
++
++def _make_agree_min(
++    *, tp_cpu_group: Any, tp_size: int
++) -> Callable[[List[int]], List[int]]:
++    """Element-wise MIN over the TP ranks on the CPU (gloo) group."""
++    if tp_size == 1:
++        return list
++
++    import torch
++    import torch.distributed as dist
++
++    def agree_min(flags: List[int]) -> List[int]:
++        tensor = torch.tensor(flags, dtype=torch.int64)
++        dist.all_reduce(tensor, op=dist.ReduceOp.MIN, group=tp_cpu_group)
++        return [int(v) for v in tensor.tolist()]
++
++    return agree_min
+diff --git a/python/sglang/srt/model_executor/cuda_graph_config.py b/python/sglang/srt/model_executor/cuda_graph_config.py
+index 8a70495..a1e7e23 100644
+--- a/python/sglang/srt/model_executor/cuda_graph_config.py
++++ b/python/sglang/srt/model_executor/cuda_graph_config.py
+@@ -66,6 +66,9 @@ ALLOWED_BACKENDS_PER_PHASE = {
+     ),
+ }
+ 
++# Lazy capture keys (both phases); see PhaseConfig.initial_bs.
++_LAZY_CAPTURE_KEYS = ("initial_bs", "deferred_bs", "deferred_priority")
++
+ # Per-phase settings schema. Keys other than backend are runner-level
+ # (read by any backend in that phase); tc_compiler is the lone
+ # backend-specific knob (only meaningful when backend == tc_piecewise).
+@@ -74,7 +77,7 @@ ALLOWED_BACKENDS_PER_PHASE = {
+ # full_prefill_max_req and full_prefill_prefix_chunk_tokens are prefill-only and
+ # only meaningful when backend == full.
+ ALLOWED_KEYS_PER_PHASE = {
+-    Phase.DECODE: ("backend", "max_bs", "bs", "tc_compiler"),
++    Phase.DECODE: ("backend", "max_bs", "bs", "tc_compiler", *_LAZY_CAPTURE_KEYS),
+     Phase.PREFILL: (
+         "backend",
+         "max_bs",
+@@ -82,6 +85,7 @@ ALLOWED_KEYS_PER_PHASE = {
+         "tc_compiler",
+         "full_prefill_max_req",
+         "full_prefill_prefix_chunk_tokens",
++        *_LAZY_CAPTURE_KEYS,
+     ),
+ }
+ 
+@@ -107,6 +111,16 @@ class PhaseConfig:
+     # chunk variants and chooses the smallest one covering a batch. None uses
+     # the scheduler's aggregate chunked_prefill_size token budget.
+     full_prefill_prefix_chunk_tokens: Optional[int] = None
++    # Lazy capture. None captures every bucket in bs at startup (default).
++    # A list captures only these buckets of bs at startup; the rest are
++    # captured one per step while the scheduler is idle, in deferred_bs order
++    # (planned buckets missing from deferred_bs go last, smallest first).
++    # Batches whose bucket is not captured yet run eagerly.
++    initial_bs: Optional[List[int]] = None
++    deferred_bs: Optional[List[int]] = None
++    # Optional per-entry priority for deferred_bs; the decode and prefill
++    # queues are merged by it (higher first).
++    deferred_priority: Optional[List[float]] = None
+ 
+ 
+ def default_prefill_backend() -> str:
+diff --git a/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py b/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
+index d5160d4..79be92c 100644
+--- a/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
++++ b/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
+@@ -64,6 +64,7 @@ from sglang.srt.model_executor.cuda_graph_buffer_registry import (
+     CudaGraphBufferRegistry,
+     build_decode_registry,
+ )
++from sglang.srt.model_executor.cuda_graph_config import Phase
+ from sglang.srt.model_executor.forward_batch_info import (
+     CaptureHiddenMode,
+     ForwardBatch,
+@@ -82,6 +83,10 @@ from sglang.srt.model_executor.runner.base_cuda_graph_runner import (
+ from sglang.srt.model_executor.runner.flashinfer_autotune import (
+     maybe_flashinfer_autotune_speculative_draft,
+ )
++from sglang.srt.model_executor.runner.lazy_capture_setup import (
++    has_capture_headroom,
++    maybe_create_lazy_schedule,
++)
+ from sglang.srt.model_executor.runner.metadata_glue_graph import MetadataGlueGraph
+ from sglang.srt.model_executor.runner.shape_key import ShapeKey
+ from sglang.srt.model_executor.runner_backend.breakable_cuda_graph_backend import (
+@@ -137,6 +142,7 @@ logger = logging.getLogger(__name__)
+ 
+ if TYPE_CHECKING:
+     from sglang.srt.model_executor.model_runner import ModelRunner
++    from sglang.srt.model_executor.runner.lazy_capture import LazyCaptureSchedule
+     from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
+ 
+ 
+@@ -218,6 +224,10 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+     pluggable self.backend that handles the actual capture/replay.
+     """
+ 
++    # Draft runners that define their own __init__ but reuse capture() keep
++    # this default, i.e. capture every bucket at startup.
++    lazy_schedule: Optional[LazyCaptureSchedule] = None
++
+     def __init__(
+         self,
+         model_runner: ModelRunner,
+@@ -310,6 +320,11 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+             model_runner, self.captured_req_width
+         )
+         self.max_bs = max(self.capture_bs)
++        # Buffers stay sized for every planned bucket; with lazy capture only
++        # lazy_schedule.initial is captured here, the rest while idle.
++        self.lazy_schedule = maybe_create_lazy_schedule(
++            phase=Phase.DECODE, planned=self.capture_bs, model_runner=model_runner
++        )
+         if KTRANSFORMERS_AVAILABLE:
+             KTMoEWrapper.set_capture_batch_sizes(self.capture_bs)
+ 
+@@ -679,6 +694,8 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+             if self.disable_padding
+             else cuda_graph_bs <= self.max_bs
+         )
++        if is_bs_supported and self.lazy_schedule is not None:
++            is_bs_supported = self._lazy_bucket_ready(cuda_graph_bs)
+ 
+         if self.require_mlp_sync:
+             is_bs_supported = (
+@@ -1018,12 +1035,7 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+         # plan reads these as the per-request KV length, and the prefill wrapper
+         # (DLLM_EXTEND) asserts kv_len >= qo_len, so restore the fill value the
+         # captured graph needs before capturing.
+-        self.buffers.seq_lens.fill_(self.seq_len_fill_value)
+-        self.buffers.seq_lens_cpu.fill_(self.seq_len_fill_value)
+-        # Capture runs real forwards, so a mid-serving recapture would index --
+-        # and write KV -- through the previous batch's live values. Replay is
+-        # already covered by the registry's padding policy.
+-        self.buffers.reset_index_buffers()
++        self._reset_buffers_for_capture()
+ 
+         # Trigger CUDA graph capture for specific shapes.
+         # Capture the large shapes first so that the smaller shapes
+@@ -1038,7 +1050,16 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+                 ):
+                     self.stream = graph_capture_context.stream
+                     with self.backend.capture_session(self.stream):
+-                        self._capture_one_stream()
++                        self._capture_one_stream(
++                            sizes=(
++                                None
++                                if self.lazy_schedule is None
++                                else self.lazy_schedule.initial
++                            )
++                        )
++                if self.lazy_schedule is not None:
++                    for bs in self.lazy_schedule.initial:
++                        self.lazy_schedule.mark_captured(bs)
+             else:
+                 set_pdmux_status(False)
+                 for i, sg in enumerate(self.stream_groups):
+@@ -1057,7 +1078,45 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+         # No pool-side pin to clear: the captured full-physical write loc rides the
+         # backend's `ForwardMetadata.out_cache_loc_full_physical` (-> KVWriteLoc.full_loc).
+ 
+-    def _capture_one_stream(self, stream_idx: Optional[int] = None) -> None:
++    def _reset_buffers_for_capture(self) -> None:
++        self.buffers.seq_lens.fill_(self.seq_len_fill_value)
++        self.buffers.seq_lens_cpu.fill_(self.seq_len_fill_value)
++        # Capture runs real forwards, so a mid-serving recapture would index --
++        # and write KV -- through the previous batch's live values. Zeroed
++        # indices send the dummy KV writes to the reserved slot 0.
++        self.buffers.reset_index_buffers()
++
++    def _lazy_bucket_ready(self, raw_bs: int) -> bool:
++        if self.lazy_schedule.can_replay(raw_bs):
++            return True
++        self.lazy_schedule.record_eager(raw_bs)
++        return False
++
++    def capture_deferred(self, bs: int) -> None:
++        """Capture one deferred bucket while the scheduler is idle (lazy capture)."""
++        self._reset_buffers_for_capture()
++        with model_capture_mode(), freeze_gc(get_exec().graph.enable_cudagraph_gc):
++            with graph_capture(
++                stream=get_or_create_global_graph_capture_stream()
++            ) as graph_capture_context:
++                self.stream = graph_capture_context.stream
++                with self.backend.capture_session(self.stream):
++                    self._capture_one_stream(sizes=[bs], show_progress=False)
++        # Warmups ran on the capture stream; drain them before the next forward.
++        self.device_module.synchronize()
++        self.lazy_schedule.mark_captured(bs)
++
++    def lazy_has_headroom(self, size: int) -> bool:
++        return has_capture_headroom()
++
++    def _capture_one_stream(
++        self,
++        stream_idx: Optional[int] = None,
++        *,
++        sizes: Optional[list[int]] = None,
++        show_progress: bool = True,
++    ) -> None:
++        sizes = self.capture_bs if sizes is None else sorted(sizes)
+         avail_mem = get_available_gpu_memory(
+             self.model_runner.device,
+             self.model_runner.gpu_id,
+@@ -1065,9 +1124,9 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+         )
+         # Reverse so cuda graphs share memory better.
+         capture_range = (
+-            tqdm.tqdm(list(reversed(self.capture_bs)))
+-            if get_parallel().tp_rank == 0
+-            else reversed(self.capture_bs)
++            tqdm.tqdm(list(reversed(sizes)))
++            if get_parallel().tp_rank == 0 and show_progress
++            else reversed(sizes)
+         )
+         lora_variants = (
+             [("lora", True), ("nolora", False)]
+@@ -1079,7 +1138,7 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+             variants.capture_labels if variants is not None else (None,)
+         )
+         for bs in capture_range:
+-            if get_parallel().tp_rank == 0:
++            if isinstance(capture_range, tqdm.tqdm):
+                 avail_mem = get_available_gpu_memory(
+                     self.model_runner.device,
+                     self.model_runner.gpu_id,
+diff --git a/python/sglang/srt/model_executor/runner/lazy_capture.py b/python/sglang/srt/model_executor/runner/lazy_capture.py
+new file mode 100644
+index 0000000..a00af3c
+--- /dev/null
++++ b/python/sglang/srt/model_executor/runner/lazy_capture.py
+@@ -0,0 +1,241 @@
++# Copyright 2023-2026 SGLang Team
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# ==============================================================================
++"""Bookkeeping for deferred (lazy) CUDA-graph capture of one phase runner.
++
++A runner keeps its full *planned* bucket list (static buffers stay sized for
++it) but captures only ``initial`` at startup. The remaining buckets wait in a
++priority queue and are captured one per step while the scheduler is idle
++(see ``scheduler_components/lazy_graph_capture.py``).
++
++Dispatch is bucket-exact: a batch replays a graph only if the bucket the
++default capture would have used for it is already captured; otherwise it runs
++eagerly. Lazy mode therefore never pads more than the default does.
++
++Rank consistency: every method is a pure function of rank-replicated inputs
++(config, the sequence of batch shapes, the sequence of capture steps). All TP
++ranks hold identical state without exchanging messages, which matters because
++graph replay and eager execution take different all-reduce paths and must not
++be mixed across ranks within one forward.
++
++This module imports only the standard library so it can be unit-tested
++without a GPU.
++"""
++
++from __future__ import annotations
++
++import bisect
++from typing import Dict, List, Optional, Sequence, Tuple
++
++# Promoted buckets sort ahead of every policy priority, in promotion order.
++_PROMOTED_PRIORITY = float("inf")
++
++
++class LazyCaptureSchedule:
++    """Planned, captured and pending buckets of one runner (decode or prefill)."""
++
++    def __init__(
++        self,
++        *,
++        phase: str,
++        planned: Sequence[int],
++        initial: Sequence[int],
++        deferred_order: Optional[Sequence[int]] = None,
++        deferred_priority: Optional[Sequence[float]] = None,
++        promote_after: int = 0,
++    ) -> None:
++        self.phase = phase
++        self._planned: Tuple[int, ...] = tuple(sorted(set(int(s) for s in planned)))
++        if not self._planned:
++            raise ValueError(f"lazy capture [{phase}]: planned bucket list is empty")
++        planned_set = set(self._planned)
++        initial_set = set(int(s) for s in initial)
++        unknown = initial_set - planned_set
++        if unknown:
++            raise ValueError(
++                f"lazy capture [{phase}]: initial_bs {sorted(unknown)} not in bs"
++            )
++        self._initial: Tuple[int, ...] = tuple(sorted(initial_set))
++        order = self._resolve_order(
++            planned=self._planned,
++            initial_set=initial_set,
++            deferred_order=deferred_order,
++        )
++        priority = self._resolve_priority(order, deferred_priority)
++        # Pending buckets in capture order; priorities are kept alongside so the
++        # scheduler can merge the decode and prefill queues.
++        self._pending: List[int] = list(order)
++        self._priority: Dict[int, float] = dict(zip(order, priority))
++        self._captured: List[int] = []
++        self._failed: List[int] = []
++        self._eager_hits: Dict[int, int] = {}
++        self._promote_after = int(promote_after)
++        self._num_promoted = 0
++
++    @staticmethod
++    def _resolve_order(
++        *,
++        planned: Tuple[int, ...],
++        initial_set: set,
++        deferred_order: Optional[Sequence[int]],
++    ) -> List[int]:
++        remaining = [s for s in planned if s not in initial_set]
++        if deferred_order is None:
++            # Small buckets first: they are the cheapest to capture.
++            return remaining
++        order: List[int] = []
++        seen = set()
++        for s in deferred_order:
++            s = int(s)
++            if s in initial_set or s not in planned or s in seen:
++                raise ValueError(
++                    f"deferred_bs entry {s} must be a planned bucket that is not "
++                    "in initial_bs, listed once"
++                )
++            order.append(s)
++            seen.add(s)
++        # Planned buckets the policy left out are still captured eventually, last.
++        order.extend(s for s in remaining if s not in seen)
++        return order
++
++    @staticmethod
++    def _resolve_priority(
++        order: List[int], deferred_priority: Optional[Sequence[float]]
++    ) -> List[float]:
++        if deferred_priority is None:
++            # Strictly decreasing so the given order is preserved when merged.
++            return [float(len(order) - i) for i in range(len(order))]
++        if len(deferred_priority) > len(order):
++            raise ValueError("deferred_priority is longer than the deferred list")
++        given = [float(p) for p in deferred_priority]
++        # Buckets appended after the policy's list rank below all of its entries.
++        floor = min(given, default=0.0)
++        tail = [floor - 1.0 - i for i in range(len(order) - len(given))]
++        return given + tail
++
++    # ---- read side ---------------------------------------------------------
++
++    @property
++    def planned(self) -> Tuple[int, ...]:
++        return self._planned
++
++    @property
++    def initial(self) -> Tuple[int, ...]:
++        return self._initial
++
++    @property
++    def captured(self) -> Tuple[int, ...]:
++        return tuple(self._captured)
++
++    @property
++    def pending(self) -> Tuple[int, ...]:
++        return tuple(self._pending)
++
++    @property
++    def failed(self) -> Tuple[int, ...]:
++        return tuple(self._failed)
++
++    def eager_hits(self, size: int) -> int:
++        return self._eager_hits.get(size, 0)
++
++    def planned_bucket(self, raw_size: int) -> Optional[int]:
++        """The bucket the default (capture-all) runner would pad ``raw_size`` to."""
++        index = bisect.bisect_left(self._planned, raw_size)
++        if index == len(self._planned):
++            return None
++        return self._planned[index]
++
++    def is_captured(self, size: int) -> bool:
++        index = bisect.bisect_left(self._captured, size)
++        return index < len(self._captured) and self._captured[index] == size
++
++    def can_replay(self, raw_size: int) -> bool:
++        bucket = self.planned_bucket(raw_size)
++        return bucket is not None and self.is_captured(bucket)
++
++    def next_pending(self) -> Optional[Tuple[int, float]]:
++        """Head of the queue as ``(size, priority)``, or None when done."""
++        if not self._pending:
++            return None
++        size = self._pending[0]
++        return size, self._priority[size]
++
++    # ---- write side (called identically on every rank) ---------------------
++
++    def record_eager(self, raw_size: int) -> Optional[int]:
++        """Count an eager forward whose bucket is still pending.
++
++        Returns the bucket if this call promoted it to the head of the queue.
++        """
++        bucket = self.planned_bucket(raw_size)
++        if bucket is None or self.is_captured(bucket):
++            return None
++        if bucket not in self._priority:
++            return None  # failed bucket: stays eager
++        hits = self._eager_hits.get(bucket, 0) + 1
++        self._eager_hits[bucket] = hits
++        if self._promote_after > 0 and hits == self._promote_after:
++            self._promote(bucket)
++            return bucket
++        return None
++
++    def _promote(self, bucket: int) -> None:
++        self._pending.remove(bucket)
++        # Earlier promotions keep their place ahead of this one.
++        self._pending.insert(self._num_promoted, bucket)
++        self._priority[bucket] = _PROMOTED_PRIORITY
++        self._num_promoted += 1
++
++    def mark_captured(self, size: int) -> None:
++        if size in self._pending:
++            index = self._pending.index(size)
++            self._pending.pop(index)
++            if index < self._num_promoted:
++                self._num_promoted -= 1
++            self._priority.pop(size, None)
++        elif size not in self._initial:
++            raise ValueError(f"lazy capture [{self.phase}]: {size} was never planned")
++        if not self.is_captured(size):
++            bisect.insort(self._captured, size)
++
++    def mark_failed(self, size: int) -> None:
++        """Drop a bucket that could not be captured; it keeps running eagerly."""
++        if size in self._pending:
++            index = self._pending.index(size)
++            self._pending.pop(index)
++            if index < self._num_promoted:
++                self._num_promoted -= 1
++            self._priority.pop(size, None)
++        if size not in self._failed:
++            self._failed.append(size)
++
++    def startup_sizes(self) -> List[int]:
++        """Buckets to capture before serving, largest first (pool reuse)."""
++        return sorted(self._initial, reverse=True)
++
++
++def pick_next_phase(
++    schedules: Sequence[Optional[LazyCaptureSchedule]],
++) -> Optional[LazyCaptureSchedule]:
++    """The schedule whose head has the highest priority; earlier entries win ties."""
++    best: Optional[LazyCaptureSchedule] = None
++    best_priority = float("-inf")
++    for schedule in schedules:
++        if schedule is None:
++            continue
++        head = schedule.next_pending()
++        if head is None:
++            continue
++        if best is None or head[1] > best_priority:
++            best, best_priority = schedule, head[1]
++    return best
+diff --git a/python/sglang/srt/model_executor/runner/lazy_capture_setup.py b/python/sglang/srt/model_executor/runner/lazy_capture_setup.py
+new file mode 100644
+index 0000000..4d2ae78
+--- /dev/null
++++ b/python/sglang/srt/model_executor/runner/lazy_capture_setup.py
+@@ -0,0 +1,182 @@
++# Copyright 2023-2026 SGLang Team
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# ==============================================================================
++"""Runner-side wiring for lazy CUDA-graph capture: eligibility, schedule
++construction from cuda_graph_config, and the per-step memory check."""
++
++from __future__ import annotations
++
++import logging
++from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
++
++import torch
++
++from sglang.srt.environ import envs
++from sglang.srt.model_executor.cuda_graph_config import Backend, Phase
++from sglang.srt.model_executor.runner.lazy_capture import LazyCaptureSchedule
++from sglang.srt.runtime_context import (
++    get_disagg,
++    get_exec,
++    get_flags,
++    get_parallel,
++)
++from sglang.srt.utils import log_info_on_rank0
++
++if TYPE_CHECKING:
++    from sglang.srt.model_executor.model_runner import ModelRunner
++
++logger = logging.getLogger(__name__)
++
++# Lazy capture is validated only for the default backend of each phase.
++_LAZY_BACKEND = {Phase.DECODE: Backend.FULL, Phase.PREFILL: Backend.BREAKABLE}
++
++
++def lazy_capture_unsupported_reason(
++    *, phase: str, model_runner: ModelRunner
++) -> Optional[str]:
++    """Why lazy capture cannot run for this phase, or None if it can.
++
++    Deferred steps capture while serving: every rank must reach the step in
++    the same scheduler iteration (TP-only request broadcast), and the step
++    must not touch state a live request owns.
++    """
++    parallel = get_parallel()
++    graph = get_exec().graph
++    backend = getattr(graph.cuda_graph_config, phase).backend
++    checks = (
++        (model_runner.device != "cuda", "device is not CUDA"),
++        (backend != _LAZY_BACKEND[phase], f"{phase} backend is {backend!r}"),
++        (model_runner.is_draft_worker, "draft worker"),
++        (model_runner.spec_algorithm.is_speculative(), "speculative decoding"),
++        (model_runner.lora_manager is not None, "LoRA"),
++        (model_runner.model_config.is_encoder_decoder, "encoder-decoder model"),
++        # MLA / DSA backends keep capture-time metadata outside the per-bucket
++        # dicts that FA3 / FlashInfer / Triton use; not validated.
++        (model_runner.use_mla_backend, "MLA attention"),
++        (parallel.pp_size > 1, "pipeline parallelism"),
++        (parallel.enable_dp_attention, "DP attention"),
++        (parallel.attn_cp_size > 1 or parallel.dcp_enabled, "context parallelism"),
++        (get_disagg().disaggregation_mode != "null", "PD disaggregation"),
++        (get_disagg().enable_pdmux, "PD multiplexing"),
++        (get_exec().overlap.enable_two_batch_overlap, "two-batch overlap"),
++        (get_flags().capture.enable_torch_compile, "torch.compile"),
++        (graph.enable_profile_cuda_graph, "CUDA graph profiling"),
++        (get_exec().features.enable_memory_saver, "memory saver"),
++        (
++            envs.SGLANG_ENABLE_POST_CAPTURE_KV_SIZING.get(),
++            "post-capture KV sizing (it sizes the KV pool after startup capture)",
++        ),
++        (
++            # Deferred capture zeroes index buffers so dummy writes hit the
++            # reserved KV slot 0; hybrid state pools have no such guarantee.
++            getattr(model_runner.req_to_token_pool, "mamba_pool", None) is not None,
++            "hybrid state (mamba) pools",
++        ),
++    )
++    phase_checks = {
++        Phase.DECODE: (
++            (graph.disable_cuda_graph_padding, "disable_cuda_graph_padding"),
++            (envs.SGLANG_ENABLE_METADATA_GLUE_GRAPH.get(), "metadata glue graph"),
++        ),
++        Phase.PREFILL: (),
++    }[phase]
++    for failed, reason in (*checks, *phase_checks):
++        if failed:
++            return reason
++    return None
++
++
++def maybe_create_lazy_schedule(
++    *, phase: str, planned: Sequence[int], model_runner: ModelRunner
++) -> Optional[LazyCaptureSchedule]:
++    """Build the schedule when cuda_graph_config[phase].initial_bs is set."""
++    phase_config = getattr(get_exec().graph.cuda_graph_config, phase)
++    if phase_config.initial_bs is None:
++        return None
++    reason = lazy_capture_unsupported_reason(phase=phase, model_runner=model_runner)
++    if reason is not None:
++        logger.warning(
++            "Lazy CUDA graph capture disabled for %s (%s); capturing every "
++            "bucket at startup.",
++            phase,
++            reason,
++        )
++        return None
++    initial, deferred, priority, dropped = _restrict_to_planned(
++        planned=planned,
++        initial_bs=phase_config.initial_bs,
++        deferred_bs=phase_config.deferred_bs,
++        deferred_priority=phase_config.deferred_priority,
++    )
++    if dropped:
++        log_info_on_rank0(
++            logger,
++            f"Lazy CUDA graph capture [{phase}]: ignoring buckets {dropped} that "
++            "are not in the resolved capture list.",
++        )
++    schedule = LazyCaptureSchedule(
++        phase=phase,
++        planned=planned,
++        initial=initial,
++        deferred_order=deferred,
++        deferred_priority=priority,
++        promote_after=envs.SGLANG_LAZY_CUDA_GRAPH_PROMOTE_AFTER.get(),
++    )
++    log_info_on_rank0(
++        logger,
++        f"Lazy CUDA graph capture [{phase}]: {len(schedule.initial)} of "
++        f"{len(schedule.planned)} buckets at startup {list(schedule.initial)}, "
++        f"{len(schedule.pending)} deferred.",
++    )
++    return schedule
++
++
++def _restrict_to_planned(
++    *,
++    planned: Sequence[int],
++    initial_bs: Sequence[int],
++    deferred_bs: Optional[Sequence[int]],
++    deferred_priority: Optional[Sequence[float]],
++) -> Tuple[List[int], Optional[List[int]], Optional[List[float]], List[int]]:
++    """Drop configured buckets the runner filtered out (alignment, pool size)."""
++    planned_set = set(planned)
++    initial = sorted({int(s) for s in initial_bs if int(s) in planned_set})
++    dropped = sorted({int(s) for s in initial_bs} - planned_set)
++    if deferred_bs is None:
++        return initial, None, None, dropped
++    if deferred_priority is not None and len(deferred_priority) != len(deferred_bs):
++        raise ValueError("deferred_priority must have one entry per deferred_bs entry")
++    kept = [
++        (int(s), i)
++        for i, s in enumerate(deferred_bs)
++        if int(s) in planned_set and int(s) not in initial
++    ]
++    dropped += sorted({int(s) for s in deferred_bs} - planned_set)
++    deferred = [s for s, _ in kept]
++    priority = (
++        [float(deferred_priority[i]) for _, i in kept]
++        if deferred_priority is not None
++        else None
++    )
++    return initial, deferred, priority, dropped
++
++
++def has_capture_headroom() -> bool:
++    """Free memory check before a deferred step; returns cached eager blocks first.
++
++    Eager forwards of not-yet-captured buckets leave activation blocks in the
++    caching allocator's default pool, which the graph pool cannot reuse.
++    """
++    torch.cuda.empty_cache()
++    free_bytes, _ = torch.cuda.mem_get_info()
++    return free_bytes >= envs.SGLANG_LAZY_CUDA_GRAPH_MIN_FREE_MB.get() * (1 << 20)
+diff --git a/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py b/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
+index ab33061..096c84c 100644
+--- a/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
++++ b/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
+@@ -79,7 +79,7 @@ from sglang.srt.model_executor.cuda_graph_buffer_registry import (
+     CudaGraphBufferRegistry,
+     build_prefill_registry,
+ )
+-from sglang.srt.model_executor.cuda_graph_config import Backend
++from sglang.srt.model_executor.cuda_graph_config import Backend, Phase
+ from sglang.srt.model_executor.forward_batch_info import (
+     CaptureHiddenMode,
+     ForwardBatch,
+@@ -94,6 +94,10 @@ from sglang.srt.model_executor.runner.base_cuda_graph_runner import (
+     BaseCudaGraphRunner,
+     freeze_gc,
+ )
++from sglang.srt.model_executor.runner.lazy_capture_setup import (
++    has_capture_headroom,
++    maybe_create_lazy_schedule,
++)
+ from sglang.srt.model_executor.runner.shape_key import ShapeKey
+ from sglang.srt.model_executor.runner_backend.breakable_cuda_graph_backend import (
+     BreakableCudaGraphBackend,
+@@ -146,6 +150,7 @@ from sglang.srt.utils.aiter import maybe_pre_warm_aiter_chip_info
+ if TYPE_CHECKING:
+     from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
+     from sglang.srt.model_executor.model_runner import ModelRunner
++    from sglang.srt.model_executor.runner.lazy_capture import LazyCaptureSchedule
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -283,6 +288,8 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+     buffer population, attention metadata init, and output slicing.
+     """
+ 
++    lazy_schedule: Optional[LazyCaptureSchedule] = None
++
+     def __init__(self, model_runner: ModelRunner):
+         if get_schedule().enable_mixed_chunk:
+             backend = get_exec().graph.cuda_graph_config.prefill.backend
+@@ -566,6 +573,19 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+         # --- aiter chip info pre-warming (AMD) -------------------------
+         maybe_pre_warm_aiter_chip_info()
+ 
++        # --- lazy capture ---------------------------------------------
++        # Buffers above stay sized for every planned bucket; with lazy capture
++        # only lazy_schedule.initial is captured here, the rest while idle.
++        self.lazy_schedule = maybe_create_lazy_schedule(
++            phase=Phase.PREFILL,
++            planned=self.capture_num_tokens,
++            model_runner=model_runner,
++        )
++        if self.lazy_schedule is not None:
++            # Lazy capture opens one session per bucket; share one eager-tail
++            # output buffer, sized for the largest planned bucket, across them.
++            self.backend.keep_output_buffer(rows=self.max_num_tokens)
++
+         # --- capture --------------------------------------------------
+         self.device_module.synchronize()
+         self.model_runner.tp_group.barrier()
+@@ -1224,6 +1244,10 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+             ),
+         ):
+             return False
++        if self.lazy_schedule is not None and not self._lazy_bucket_ready(
++            len(forward_batch.input_ids)
++        ):
++            return False
+         if getattr(self, "enable_cp_bcg_capture", False) and is_cp_active(
+             forward_batch
+         ):
+@@ -1406,6 +1430,40 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+         # Warm up + autotune kernels once before capture (run-once across the
+         # decode + prefill runners; see BaseRunner.warmup).
+         self.warmup()
++        if self.lazy_schedule is None:
++            self._capture_sizes(self.capture_num_tokens, show_progress=True)
++        else:
++            self._capture_sizes(self.lazy_schedule.initial, show_progress=True)
++            for num_tokens in self.lazy_schedule.initial:
++                self.lazy_schedule.mark_captured(num_tokens)
++        if get_flags().dp.prefill_graph_has_dp_gather:
++            logger.info(
++                "Prefill CUDA graph captured a DP gather/scatter; "
++                "DP ranks will replay a shared MAX_LEN bucket."
++            )
++
++    def capture_deferred(self, num_tokens: int) -> None:
++        """Capture one deferred bucket while the scheduler is idle (lazy capture)."""
++        # Capture writes KV through out_cache_loc, which still holds the last
++        # batch's slots; the radix cache may own them now. Zeroed indices send
++        # the dummy writes to the reserved slot 0.
++        self.buffers.reset_index_buffers()
++        self._capture_sizes([num_tokens], show_progress=False)
++        # Warmups and eager breaks ran on the capture stream; drain them before
++        # the next forward reads the shared buffers.
++        self.device_module.synchronize()
++        self.lazy_schedule.mark_captured(num_tokens)
++
++    def lazy_has_headroom(self, size: int) -> bool:
++        return has_capture_headroom()
++
++    def _lazy_bucket_ready(self, num_tokens: int) -> bool:
++        if self.lazy_schedule.can_replay(num_tokens):
++            return True
++        self.lazy_schedule.record_eager(num_tokens)
++        return False
++
++    def _capture_sizes(self, sizes: Sequence[int], *, show_progress: bool) -> None:
+         dp_flags = get_flags().dp
+         dp_flags.capturing_prefill_graph = True
+         try:
+@@ -1415,28 +1473,25 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+                 ) as graph_capture_context:
+                     self.stream = graph_capture_context.stream
+                     with self.backend.capture_session(self.stream):
+-                        self._capture_one_stream()
++                        self._capture_one_stream(
++                            sizes=sorted(sizes), show_progress=show_progress
++                        )
+         finally:
+             dp_flags.capturing_prefill_graph = False
+-        if dp_flags.prefill_graph_has_dp_gather:
+-            logger.info(
+-                "Prefill CUDA graph captured a DP gather/scatter; "
+-                "DP ranks will replay a shared MAX_LEN bucket."
+-            )
+ 
+-    def _capture_one_stream(self) -> None:
++    def _capture_one_stream(self, *, sizes: Sequence[int], show_progress: bool) -> None:
+         avail_mem = get_available_gpu_memory(
+             self.model_runner.device,
+             self.model_runner.gpu_id,
+             empty_cache=False,
+         )
+         capture_range = (
+-            tqdm.tqdm(list(reversed(self.capture_num_tokens)))
+-            if get_parallel().tp_rank == 0
+-            else reversed(self.capture_num_tokens)
++            tqdm.tqdm(list(reversed(sizes)))
++            if get_parallel().tp_rank == 0 and show_progress
++            else reversed(sizes)
+         )
+         for num_tokens in capture_range:
+-            if get_parallel().tp_rank == 0:
++            if isinstance(capture_range, tqdm.tqdm):
+                 avail_mem = get_available_gpu_memory(
+                     self.model_runner.device,
+                     self.model_runner.gpu_id,
+diff --git a/python/sglang/srt/model_executor/runner_backend/breakable_cuda_graph_backend.py b/python/sglang/srt/model_executor/runner_backend/breakable_cuda_graph_backend.py
+index 368db2e..57a397b 100644
+--- a/python/sglang/srt/model_executor/runner_backend/breakable_cuda_graph_backend.py
++++ b/python/sglang/srt/model_executor/runner_backend/breakable_cuda_graph_backend.py
+@@ -78,6 +78,8 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
+         self._capture_stream: Optional[torch.cuda.Stream] = None
+         self._debug_eager = debug_eager
+         self._shared_output_buffer: Optional[Any] = None
++        # Set by keep_output_buffer(); None keeps the per-session buffer.
++        self._output_buffer_rows: Optional[int] = None
+         self._precarve = GraphPoolPrecarve()
+         self._memory_saver_adapter: Optional[Any] = TorchMemorySaverAdapter.create(
+             enable=enable_memory_saver
+@@ -97,7 +99,8 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
+             self._pool = get_or_create_global_graph_memory_pool(self._device_module)
+         set_graph_pool_id(self._pool)
+         self._capture_stream = stream
+-        self._shared_output_buffer = None
++        if self._output_buffer_rows is None:
++            self._shared_output_buffer = None
+         self.begin_cuda_graph_capture()
+         try:
+             with self.replay_session():
+@@ -130,7 +133,9 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
+         )
+         size = shape_key.size
+         if self._shared_output_buffer is None:
+-            self._shared_output_buffer = self._alloc_full_buffer(warmup_out, size)
++            self._shared_output_buffer = self._alloc_full_buffer(
++                warmup_out, max(size, self._output_buffer_rows or 0)
++            )
+         with (
+             graph_pool_capture_scope(),
+             BreakableCUDAGraphCapture(
+@@ -151,6 +156,15 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
+         # CUDA graphs retain tensor addresses, not Python tensor lifetimes.
+         self._capture_inputs[shape_key] = capture_inputs
+ 
++    def keep_output_buffer(self, *, rows: int) -> None:
++        """Share one eager-tail output buffer of ``rows`` rows across sessions.
++
++        Buckets replay one at a time, so every graph can write its output into
++        the same buffer. Lazy capture opens one session per bucket and would
++        otherwise allocate a buffer per bucket.
++        """
++        self._output_buffer_rows = rows
++
+     def _output_rows(self, output: Any, cap: int) -> int:
+         """Leading-dim row count actually produced by the body, clamped to ``cap``.
+ 

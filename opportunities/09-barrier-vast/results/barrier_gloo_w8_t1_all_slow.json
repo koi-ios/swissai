@@ -1,0 +1,30 @@
+{
+ "torch": "2.15.0",
+ "world": 8,
+ "timeout_s": 1.0,
+ "results": [
+  {
+   "scenario": "all_slow",
+   "description": "ranks 1..N-1 all 1.5x timeout behind rank 0",
+   "world": 8,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 1.5,
+   "listed_failed_ranks": [
+    1
+   ],
+   "gloo_error": "[Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 2.036552906036377,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 1 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 3.5410752296447754
+    }
+   ]
+  }
+ ]
+}

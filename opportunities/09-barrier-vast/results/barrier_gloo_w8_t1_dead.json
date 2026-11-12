@@ -1,0 +1,78 @@
+{
+ "torch": "2.15.0",
+ "world": 8,
+ "timeout_s": 1.0,
+ "results": [
+  {
+   "scenario": "dead",
+   "description": "ranks 1..N-1 exit (e.g. OOM-killed) before the barrier",
+   "world": 8,
+   "timeout_s": 1.0,
+   "rank0_outcome": "raised",
+   "rank0_wait_s": 7.04,
+   "listed_failed_ranks": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "gloo_error": "[Rank 0]: Ranks 1, 2, 3, 4, 5, 6, 7 failed to pass monitoredBarrier in 1000 ms",
+   "ranks": [
+    {
+     "rank": 0,
+     "t_enter": 1.6495988368988037,
+     "timeout_s": 1.0,
+     "outcome": "raised",
+     "message": "TP rank 0 could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node.",
+     "gloo_error": "[Rank 0]: Ranks 1, 2, 3, 4, 5, 6, 7 failed to pass monitoredBarrier in 1000 ms",
+     "t_exit": 8.691789627075195
+    },
+    {
+     "rank": 1,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.6468327045440674
+    },
+    {
+     "rank": 2,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.6507587432861328
+    },
+    {
+     "rank": 3,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.6507599353790283
+    },
+    {
+     "rank": 4,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.6507608890533447
+    },
+    {
+     "rank": 5,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.6521668434143066
+    },
+    {
+     "rank": 6,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.6507618427276611
+    },
+    {
+     "rank": 7,
+     "outcome": "died",
+     "t_enter": null,
+     "t_exit": 1.6522276401519775
+    }
+   ]
+  }
+ ]
+}

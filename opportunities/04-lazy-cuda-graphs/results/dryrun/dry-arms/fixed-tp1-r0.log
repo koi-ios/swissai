@@ -1,0 +1,6 @@
+     0.038 [mock TP0] Load weight begin. model=mock/model tp=1
+     0.083 [mock TP0] Capture target prefill CUDA graph begin. sizes=[4, 8, 12, 16, 20, 24, 28, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 352, 384, 416, 448, 480, 512, 576, 640, 704, 768, 832, 896, 960, 1024, 1280, 1536, 1792, 2048]
+     0.307 [mock TP0] Capture target prefill CUDA graph end. elapsed=9.04 s, mem usage=0.08 GB, avail mem=10.00 GB.
+     0.308 [mock TP0] Capture target decode CUDA graph begin. sizes=[1, 2, 4, 8, 12, 16, 24, 32]
+     0.333 [mock TP0] Capture target decode CUDA graph end. elapsed=1.04 s, mem usage=0.02 GB, avail mem=10.00 GB.
+     0.336 [mock TP0] The server is fired up and ready to roll!

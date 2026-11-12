@@ -1,0 +1,22 @@
+?   	opentela/entry	[no test files]
+ok  	opentela/entry/cmd	3.278s
+ok  	opentela/internal/account	1.287s
+ok  	opentela/internal/analytics	1.787s
+ok  	opentela/internal/attestation	1.708s
+?   	opentela/internal/attestation/cmd/buildsign	[no test files]
+ok  	opentela/internal/common	1.186s
+ok  	opentela/internal/common/process	1.349s
+?   	opentela/internal/ingest	[no test files]
+ok  	opentela/internal/metrics	1.471s
+ok  	opentela/internal/platform	1.210s
+ok  	opentela/internal/platform/slurm	1.196s
+ok  	opentela/internal/protocol	3.491s
+ok  	opentela/internal/protocol/go-ds-crdt	5.491s
+ok  	opentela/internal/protocol/nodetable	1.948s
+ok  	opentela/internal/protocol/swim	2.120s
+ok  	opentela/internal/server	16.953s
+ok  	opentela/internal/solana	1.203s
+ok  	opentela/internal/usage	1.310s
+ok  	opentela/internal/wallet	1.215s
+?   	opentela/plugins/webui	[no test files]
+exit=0

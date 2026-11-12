@@ -1,0 +1,45 @@
+==== checkpoint-restore-exp :: environment probe ====
+date(host clock): 2026-08-20T12:29:14Z
+hostname: ubuntu
+
+== container check ==
+/.dockerenv absent
+cgroup: 0::/init.scope 
+
+== user / caps ==
+uid=0(root) gid=0(root) groups=0(root)
+CapInh:	0000000000000000
+CapPrm:	000001ffffffffff
+CapEff:	000001ffffffffff
+CapBnd:	000001ffffffffff
+CapAmb:	0000000000000000
+Seccomp:	0
+Seccomp_filters:	0
+
+== GPU / driver ==
+0, NVIDIA GeForce RTX 3060, 12288 MiB, 580.95.05
+1, NVIDIA GeForce RTX 3060, 12288 MiB, 580.95.05
+
+== RAM / disk ==
+               total        used        free      shared  buff/cache   available
+Mem:            98Gi       864Mi        90Gi       1.0Mi       7.7Gi        97Gi
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vda1       126G   13G  113G  11% /
+
+== criu ==
+path: /usr/local/sbin/criu
+Version: 4.2.1
+file caps: -- criu check (feature probe; non-fatal) --
+Looks good.
+
+== kernel knobs ==
+ptrace_scope        = 1
+unprivileged_userns = 1
+kernel              = 6.8.0-59-generic
+
+== interpretation ==
+The known blocker pattern (Bristen, and the first vast.ai container instance on
+this same plan) is: CapBnd excludes cap_checkpoint_restore/cap_sys_ptrace/
+cap_net_admin (unfixable from inside a container), and/or Seccomp != 0. If CapBnd
+here is the full set and Seccomp is 0, this box is not container-restricted.
+==== end probe ====

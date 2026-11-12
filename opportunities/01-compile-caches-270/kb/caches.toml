@@ -1,0 +1,470 @@
+# cache-audit knowledge base: which variable relocates which on-disk cache.
+#
+# Versions: the platform's images, sglang_base = SGLang 0.5.20, vllm_base = vLLM 0.32.0
+# (both torch 2.13.0 -> Triton 3.7.1, apache-tvm-ffi 0.1.11, TileLang 0.1.12;
+#  FlashInfer 0.6.18 (SGLang) / 0.7.0.post1 (vLLM); DeepGEMM via DeepJIT).
+#
+# patterns: path templates; {VAR} resolves from the run's env or the library default;
+#   "*" matches one path segment. A pattern that is exactly one of the entry's own vars
+#   applies only when that var is set. Longest (most literal) match wins.
+# evidence: citation ids (kb/engines.citations.json, research/*.citations.json); every one is
+#   checked against the vendored source at the shipped version (tests/test_kb_citations.py).
+# relocatable: does a copy at another absolute path still hit?   readonly_ok: does a hit work
+#   on a read-only copy?   yes | no | partial | unknown. "measured" = local cache-audit run.
+
+# ---------------------------------------------------------------------------------------
+# Triton and PyTorch
+# ---------------------------------------------------------------------------------------
+[[cache]]
+id = "triton"
+name = "Triton kernels (cubin, PTX, TTIR/TTGIR, metadata) and, with TRITON_CACHE_AUTOTUNING, autotune results"
+libraries = ["triton"]
+engines = ["sglang", "vllm"]
+vars = ["TRITON_CACHE_DIR"]
+patterns = [
+  "{TRITON_CACHE_DIR}",
+  "{TRITON_HOME}/.triton/cache",
+  "{SGLANG_CACHE_DIR}/triton",                                    # SGLang 0.5.20 import-time setdefault
+  "{TORCHINDUCTOR_CACHE_DIR}/triton",                             # Inductor default when TRITON_CACHE_DIR unset
+  "{TMPDIR}/torchinductor_{SANITIZED_USER}/triton",
+  "{SGLANG_CACHE_DIR}/inductor/triton",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/*/triton_cache",         # vLLM legacy adaptor
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/*/inductor_cache/triton",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/torch_aot_compile/*/inductor_cache/triton",  # vLLM default (AOT)
+]
+redirect = "triton"
+key = ["triton_key(): Triton version + frontend/backend sources + libtriton", "kernel source and line number", "ptxas version + target arch", "options, extern libs by content", "cache-invalidating env vars"]
+write = "per file: temp dir tmp.pid_<pid>_<uuid4> inside the cache dir, then os.replace; group index written last; no lock"
+lock = "none"
+relocatable = "no"
+readonly_ok = "partial"
+notes = "Group files store ABSOLUTE child paths and get_group drops children whose path no longer exists, so a moved cache silently misses: always read and write it at one fixed absolute path. A hit works read-only; a miss crashes at makedirs. Unset, it lands per Inductor dir (per rank, per vLLM compile hash): set it explicitly so Triton kernels are shared across checkpoints."
+evidence = ["triton.reloc.group_abs", "triton.write.tmpdir", "triton.write.replace", "triton_store.reloc.abs_child_paths", "triton_store.read.missing_children_dropped", "triton_store.write.group_last", "triton_store.read.makedirs_on_lookup", "triton.env.cache_dir", "triton.default.dot_triton", "triton.key.cache_key", "triton.key.ptxas_arch", "inductor.engine.triton_dir_only_if_unset", "sglang.engine.redirect_triton", "vllm.engine.triton_autotune_cache"]
+
+[[cache]]
+id = "inductor"
+name = "TorchInductor caches (generated code, compiled .so, autotune .best_config)"
+libraries = ["torch"]
+engines = ["sglang", "vllm"]
+vars = ["TORCHINDUCTOR_CACHE_DIR"]
+patterns = [
+  "{TORCHINDUCTOR_CACHE_DIR}",
+  "{TMPDIR}/torchinductor_{SANITIZED_USER}",
+  "/tmp/torchinductor_{SANITIZED_USER}",
+  "{SGLANG_CACHE_DIR}/inductor",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/*/inductor_cache",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/torch_aot_compile/*/inductor_cache",
+]
+redirect = "inductor"
+key = ["torch version + source hash (torch_key)", "FX graph and inputs", "inductor config", "system info: GPU name (not compute capability), torch CUDA version, Triton key"]
+write = "temp file .<pid>.<thread id>.tmp in the same dir + rename (write_atomic)"
+lock = "filelock files under <cache>/locks, also taken on a hit"
+relocatable = "yes"
+readonly_ok = "no"
+notes = "Measured (torch 2.13.0, CPU): a moved copy hit with zero rewrites; a read-only copy crashed with PermissionError on <cache>/locks/*.lock. The temp name has no random part, so two nodes with equal pid and thread id writing one shared dir can interleave. No key includes the driver version. vLLM overwrites TORCHINDUCTOR_CACHE_DIR with its per-compile-hash dir (decorators.py, AOT path), and that hash includes the checkpoint path, so under vLLM this cache is per checkpoint. Default is in TMPDIR, lost with the job even on a persistent HOME."
+evidence = ["inductor.env.cache_dir_var", "inductor.engine.setdefault", "inductor.default.tmp", "inductor.lock.dir", "inductor.lock.lock_dir", "inductor.write.tmpname", "inductor.write.rename", "fxgraph.key.device_name", "fxgraph.key.cuda_version", "fxgraph.key.triton_key", "sglang.engine.redirect_inductor", "vllm_aot.engine.inductor_override", "vllm.key.model_path_in_hash", "vllm.engine.inductor_threads"]
+
+[[cache]]
+id = "inductor.fxgraph"
+name = "Inductor FX graph cache"
+libraries = ["torch"]
+engines = ["sglang", "vllm"]
+vars = ["TORCHINDUCTOR_CACHE_DIR"]
+patterns = [
+  "{TORCHINDUCTOR_CACHE_DIR}/fxgraph",
+  "{TMPDIR}/torchinductor_{SANITIZED_USER}/fxgraph",
+  "{SGLANG_CACHE_DIR}/inductor/fxgraph",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/*/inductor_cache/fxgraph",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/torch_aot_compile/*/inductor_cache/fxgraph",
+]
+redirect = "inductor"
+write = "write_atomic, no lock; corrupt entries skipped"
+relocatable = "yes"
+readonly_ok = "no"
+evidence = ["fxgraph.default.subdir", "fxgraph.key.torch_key", "fxgraph.key.system_info", "fxgraph.write.atomic", "fxgraph.read.corrupt_skipped"]
+
+[[cache]]
+id = "inductor.aotautograd"
+name = "AOTAutograd cache"
+libraries = ["torch"]
+engines = ["sglang", "vllm"]
+vars = ["TORCHINDUCTOR_CACHE_DIR"]
+patterns = [
+  "{TORCHINDUCTOR_CACHE_DIR}/aotautograd",
+  "{TMPDIR}/torchinductor_{SANITIZED_USER}/aotautograd",
+  "{SGLANG_CACHE_DIR}/inductor/aotautograd",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/*/inductor_cache/aotautograd",
+  "{VLLM_CACHE_ROOT}/torch_compile_cache/torch_aot_compile/*/inductor_cache/aotautograd",
+]
+redirect = "inductor"
+write = "write_atomic; a hit also needs the FX graph entries"
+relocatable = "yes"
+readonly_ok = "no"
+evidence = ["aotautograd.default.subdir", "aotautograd.key.inherits_fx", "aotautograd.write.atomic", "aotautograd.read.depends_on_fx"]
+
+[[cache]]
+id = "inductor.pch"
+name = "Inductor C++ precompiled headers (CPU C++ backend)"
+libraries = ["torch"]
+vars = []
+patterns = ["{TMPDIR}/torchinductor_{SANITIZED_USER}/precompiled_headers", "/tmp/torchinductor_{SANITIZED_USER}/precompiled_headers"]
+persist = false
+relocatable = "no"
+notes = "Ignores TORCHINDUCTOR_CACHE_DIR on purpose (only TMPDIR moves it). Found by the local audit: a 31 MB .pch per compiler and flags. Used by the CPU C++ backend; GPU serving compiles Triton instead, so it is reported but not gated."
+evidence = ["inductor.pch.default_dir", "inductor.content.pch_ignores_env"]
+
+[[cache]]
+id = "torch_extensions"
+name = "torch.utils.cpp_extension JIT builds (ninja trees + .so)"
+libraries = ["torch"]
+vars = ["TORCH_EXTENSIONS_DIR"]
+patterns = [
+  "{TORCH_EXTENSIONS_DIR}",
+  "{XDG_CACHE_HOME}/torch_extensions",
+  "{HOME}/Library/Caches/torch_extensions",   # macOS (local tests)
+]
+redirect = "torch_extensions"
+key = ["extension name only (plus an in-memory version counter)", "python and CUDA tag in the folder name when the variable is unset"]
+write = "ninja builds in place under a FileBaton lock"
+lock = "FileBaton (O_EXCL lock file, polled with no timeout)"
+relocatable = "no"
+readonly_ok = "no"
+notes = "build.ninja holds absolute paths. A job killed while holding the baton leaves the lock file behind and every later load of that extension waits forever."
+evidence = ["cpp_extension.env.dir", "cpp_extension.default.appdirs", "cpp_extension.key.name_dir", "cpp_extension.lock.baton", "cpp_extension.lock.poll_no_timeout", "cpp_extension.reloc.abs_sources"]
+
+# ---------------------------------------------------------------------------------------
+# vLLM 0.32.0
+# ---------------------------------------------------------------------------------------
+[[cache]]
+id = "vllm.torch_compile"
+name = "vLLM torch.compile artifacts (default: AOT + mega artifact under torch_aot_compile/<sha256>)"
+libraries = ["vllm"]
+engines = ["vllm"]
+vars = ["VLLM_CACHE_ROOT"]
+patterns = ["{VLLM_CACHE_ROOT}/torch_compile_cache"]
+redirect = "vllm"
+key = ["~240 VLLM_* env vars minus an ignore list (CUDA_HOME, VLLM_DP_RANK, side-channel ports are hashed)", "VllmConfig hash incl. vLLM version and the model PATH string", "GPU name, torch CUDA, Triton key, torch hash", "forward qualname and line"]
+write = "model.<pid>.tmp + os.replace, no lock; a corrupt file recompiles"
+lock = "none"
+relocatable = "yes"
+readonly_ok = "no"
+notes = "Per checkpoint path: ModelConfig.compute_hash does not ignore `model`, so a moved or renamed checkpoint, or each new Apertus checkpoint, misses. VLLM_CACHE_ROOT itself is excluded from the hash, so relocating the root is fine. Even a hit writes <hash>/inductor_cache and creates a dummy cache dir, so it needs a writable root."
+evidence = ["vllm.layout.compile_dir", "vllm.key.compile_factors", "vllm.layout.aot_dir", "vllm.default.aot_on", "vllm.key.model_path_in_hash", "vllm.key.all_fields", "vllm.key.model_field", "vllm.key.cache_root_ignored", "vllm_aot.default.dir", "vllm_aot.key.factors", "vllm_aot_io.write.tmp_name", "vllm_aot_io.write.replace", "vllm_aot_io.read.dummy_dir", "vllm_root.key.cuda_home_hashed", "vllm_root.key.dp_rank_hashed", "vllm.write.binary_safe", "vllm.write.unpacked_unsafe"]
+
+[[cache]]
+id = "vllm.flashinfer_autotune"
+name = "vLLM FlashInfer autotune results"
+libraries = ["vllm"]
+engines = ["vllm"]
+vars = ["VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR"]
+patterns = ["{VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR}", "{VLLM_CACHE_ROOT}/flashinfer_autotune_cache"]
+redirect = "vllm/flashinfer_autotune_cache"
+kind = "autotune"
+key = ["VllmConfig hash without the vLLM version", "FlashInfer version", "arch", "DP size and rank"]
+write = "FlashInfer merge + mkstemp + os.replace, no lock"
+relocatable = "yes"
+readonly_ok = "partial"
+evidence = ["vllm.env.flashinfer_autotune", "vllm_fi_autotune.env.dir", "vllm_fi_autotune.default.root", "vllm_fi_autotune.key.config_hash", "vllm_fi_autotune.write.fi_atomic"]
+
+[[cache]]
+id = "vllm.p2p"
+name = "vLLM GPU P2P access check (runtime state, node-topology specific)"
+libraries = ["vllm"]
+engines = ["vllm"]
+vars = []
+patterns = ["{VLLM_CACHE_ROOT}/gpu_p2p_access_cache_for_*.json"]
+kind = "runtime-state"
+persist = false
+notes = "Keyed by the device id list only (no host, no GPU model), written in place without a lock: a torn read on a shared root raises at startup. Never promote it into a shared cache."
+evidence = ["vllm_p2p.default.path", "vllm_p2p.key.cvd", "vllm_p2p.write.open"]
+
+[[cache]]
+id = "vllm.root"
+name = "vLLM cache root (startup plan, modelinfos, assets)"
+libraries = ["vllm"]
+engines = ["vllm"]
+vars = ["VLLM_CACHE_ROOT"]
+patterns = ["{VLLM_CACHE_ROOT}"]
+redirect = "vllm"
+notes = "Defaults to $XDG_CACHE_HOME/vllm. VLLM_ENABLE_STARTUP_PLAN=1 stores the memory-profiling result here (tmp + os.replace; skips profiling on the next boot)."
+evidence = ["vllm.default.cache_root", "vllm.default.xdg", "vllm.env.startup_plan", "vllm_startup_plan.write.replace", "vllm_modelinfo.write.replace"]
+
+[[cache]]
+id = "deep_gemm"
+name = "DeepGEMM JIT kernels (DeepJIT disk cache)"
+libraries = ["vllm", "sgl-deep-gemm", "deep-gemm"]
+engines = ["sglang", "vllm"]
+vars = ["DG_JIT_CACHE_DIR"]
+patterns = [
+  "{DG_JIT_CACHE_DIR}",
+  "{VLLM_CACHE_ROOT}/deep_gemm",        # vLLM sets it when unset or empty
+  "{SGLANG_CACHE_DIR}/deep_gemm",       # SGLang overwrites it from SGLANG_DG_CACHE_DIR
+  "{HOME}/.dj",                         # DeepJIT fallback after DJ_JIT_CACHE_DIR
+]
+redirect = "deep_gemm"
+key = ["cutlass version, full `nvcc --version` text", "NVCC flags incl. sm_90a / 100f", "source + deep_gemm header contents", "NOT include paths, NOT implicit env"]
+write = "build in <root>/tmp/<pid-rand>, fsync, write .committed, rename the entry dir into <root>/cache/<tag>.<digest>/; no lock"
+lock = "none"
+relocatable = "yes"
+readonly_ok = "yes"
+notes = "DG_JIT_CACHE_DIR may be a ':'-separated list: one writable root then read-only lookup roots, a built-in read-only shared layer. SGLang overwrites DG_JIT_CACHE_DIR from SGLANG_DG_CACHE_DIR in every model-runner process and its lock code mishandles the ':' list, so under SGLang set SGLANG_DG_CACHE_DIR. JIT DeepGEMM is off on sglang_base (SGL_ENABLE_JIT_DEEPGEMM=0), but direct deep_gemm callers (DSA/DSv4 indexers) still compile."
+evidence = ["vllm.engine.dg_env_name", "vllm.engine.dg_default", "vllm.engine.dg_vendored", "vllm_deepgemm.engine.set_if_empty", "vllm_deepgemm.env.prefix_fallback", "vllm_deepgemm.default.home_dj", "vllm_deepgemm.read.ro_layers", "vllm_deepgemm.write.commit_marker", "sglang.engine.dg_env_set", "sglang.env.dg_cache", "sglang_deepgemm.env.override", "sglang_deepgemm.lock.dir", "sglang_deepgemm.key.deepjit_path_list", "ml.env.no_cache_vars", "deepjit.env.name_composition", "deepjit.env.dj_fallback", "deepjit.env.colon_list", "deepjit.default.home_dj", "deepjit.key.nvcc_version_text", "deepjit.key.arch_flag", "deepjit.write.tmp_dir", "deepjit.write.commit_marker", "deepjit.write.rename", "deepjit.lock.none", "deepjit.read.ro_ok", "deepgemm_sglang.engine.force_override"]
+
+# ---------------------------------------------------------------------------------------
+# SGLang 0.5.20
+# ---------------------------------------------------------------------------------------
+[[cache]]
+id = "sglang.jit"
+name = "SGLang JIT kernel builds (~119 modules incl. custom all-reduce v2 and the KV-cache store), content-addressed"
+libraries = ["sglang"]
+engines = ["sglang"]
+vars = ["SGLANG_JIT_CACHE_DIR"]
+patterns = ["{SGLANG_JIT_CACHE_DIR}", "{HOME}/.cache/sglang/jit"]
+redirect = "sglang-jit"
+key = ["module args", "sha256 of sources and all transitive headers", "anchor-normalized build.ninja (flags, sm_90a)", "nvcc and c++ --version", "tvm-ffi, flashinfer, torch, mathdx versions"]
+write = "flock on <scope>/.lock (0644) + uuid staging dir + atomic directory rename; leaves never modified"
+lock = "fcntl.flock, only to dedup builds; reads take no lock"
+relocatable = "yes"
+readonly_ok = "partial"
+notes = "Does NOT follow SGLANG_CACHE_DIR (undocumented). Hits work read-only; misses raise. Even a hit runs nvcc --version (part of the key), so the runtime image needs the same toolchain. SGLANG_CRASH_ON_JIT_COMPILE=1 makes a miss fail loudly: the check for a pre-seeded cache."
+evidence = ["sglang.env.jit_cache_dir", "sglang.default.jit_cache_dir", "sglang.key.anchor_normalize", "sglang_jit.key.env_fingerprint", "sglang_jit.key.compiler_version", "sglang_jit.write.staging", "sglang_jit.write.rename", "sglang_jit.lock.flock", "sglang_jit.read.lockless_fast_path", "sglang_jit_build.env.crash_on_compile", "sglang_jit_users.engine.allreduce_module"]
+
+[[cache]]
+id = "sglang.cute_aot"
+name = "SGLang CuTe DSL AOT objects (FA4 path, the GH200 attention backend)"
+libraries = ["sglang"]
+engines = ["sglang"]
+vars = ["SGLANG_CUTE_AOT_CACHE_DIR"]
+patterns = ["{SGLANG_CUTE_AOT_CACHE_DIR}", "{SGLANG_CACHE_DIR}/cute_aot"]
+redirect = "sglang/cute_aot"
+key = ["Python version, host", "cutlass version + CUDA_VERSION, arch", "tvm-ffi version", "source content", "pickled compile key"]
+write = "flock (polled, 15 s timeout) + tmp + os.replace"
+relocatable = "yes"
+readonly_ok = "partial"
+notes = "A hit works read-only only if the .lock files already exist. Objects are loaded into the process: the cache must be trusted."
+evidence = ["sglang.env.cute_aot", "sglang_cute_aot.key.cutlass_version", "sglang_cute_aot.key.arch", "sglang_cute_aot.lock.timeout", "sglang_cute_aot.write.replace", "sglang_cute_aot.engine.trust"]
+
+[[cache]]
+id = "sglang.flashinfer_autotune"
+name = "SGLang FlashInfer autotune results"
+libraries = ["sglang"]
+engines = ["sglang"]
+vars = ["SGLANG_CACHE_DIR"]
+patterns = ["{SGLANG_CACHE_DIR}/flashinfer/autotune"]
+redirect = "sglang"
+kind = "autotune"
+key = ["model path, dtype, quant, MoE backend, tp/pp/dp/ep", "FlashInfer version, sm"]
+write = "FlashInfer mkstemp (mode 0600) + os.replace, only when new tactics were found"
+relocatable = "no"
+notes = "Per checkpoint (model path in the key). Files are 0600, so other users of a shared cache cannot read them: a promoter must fix modes."
+evidence = ["sglang_fi_autotune.default.root", "sglang_fi_autotune.key.model_path", "sglang_fi_autotune.write.fi_mkstemp", "sglang_fi_autotune.write.fi_replace"]
+
+[[cache]]
+id = "sglang.p2p"
+name = "SGLang GPU P2P access check (runtime state, node-topology specific)"
+libraries = ["sglang"]
+engines = ["sglang"]
+vars = []
+patterns = ["{SGLANG_CACHE_DIR}/gpu_p2p_access_cache_for_*.json"]
+kind = "runtime-state"
+persist = false
+notes = "Keyed by CUDA_VISIBLE_DEVICES only, written in place without a lock. Never promote it into a shared cache."
+evidence = ["sglang_p2p.default.file", "sglang_p2p.key.cvd", "sglang_p2p.write.direct"]
+
+[[cache]]
+id = "sglang.root"
+name = "SGLang cache root (torch.compile, rust extensions, redirected third-party caches)"
+libraries = ["sglang"]
+engines = ["sglang"]
+vars = ["SGLANG_CACHE_DIR"]
+patterns = ["{SGLANG_CACHE_DIR}"]
+redirect = "sglang"
+notes = "import sglang setdefaults TRITON_CACHE_DIR, TORCHINDUCTOR_CACHE_DIR, CUDA_CACHE_PATH and FLASHINFER_WORKSPACE_BASE under it (explicit values win; no effect if FlashInfer or Inductor resolved theirs first)."
+evidence = ["sglang.default.cache_root_env", "sglang.engine.redirect_call", "sglang.engine.redirect_setdefault", "sglang.engine.legacy_dirs_log", "sglang_env.engine.spawn", "sglang_env.engine.noop_after_flashinfer_import"]
+
+# ---------------------------------------------------------------------------------------
+# Kernel libraries
+# ---------------------------------------------------------------------------------------
+[[cache]]
+id = "flashinfer"
+name = "FlashInfer JIT (generated sources, ninja build trees, .so) under <base>/.cache/flashinfer/<version>/<arch>/cached_ops"
+libraries = ["flashinfer-python"]
+engines = ["sglang", "vllm"]
+vars = ["FLASHINFER_WORKSPACE_BASE"]
+var_is_base = true
+subpath = ".cache/flashinfer"
+patterns = ["{FLASHINFER_WORKSPACE_BASE}", "{HOME}/.cache/flashinfer", "{SGLANG_CACHE_DIR}/.cache/flashinfer"]
+redirect = "flashinfer"
+key = ["FlashInfer version and sorted arch list in the path (SGLang sets FLASHINFER_CUDA_ARCH_LIST=9.0a)", "CUDA, nvcc and flags only inside build.ninja"]
+write = "per-module filelock, then ninja writes in place, then dlopen under the lock"
+lock = "py-filelock per module (cached_ops/tmp)"
+relocatable = "no"
+readonly_ok = "no"
+notes = "Absolute paths in build.ninja force a rebuild after a move. No read-only mode: the log file is opened at import and every process takes the lock and runs ninja on first load. FLASHINFER_DISABLE_JIT accepts only AOT kernels and ignores cached JIT .so files. The variable names a base; FlashInfer appends .cache/flashinfer and reads it at import."
+evidence = ["sglang.engine.redirect_flashinfer", "flashinfer.env.workspace_base", "flashinfer.default.cache_dir", "flashinfer.key.version_arch", "flashinfer.lock.filelock", "flashinfer.read.ninja_every_process", "flashinfer.write.import_logfile", "flashinfer.reloc.abs_outputs", "flashinfer.read.disable_jit_ignores_jit_cache", "sglang.engine.cuda_arch_list"]
+
+[[cache]]
+id = "flashinfer.cubins"
+name = "FlashInfer downloaded cubins (trtllm-gen etc.), content-addressed"
+libraries = ["flashinfer-python"]
+engines = ["sglang", "vllm"]
+vars = ["FLASHINFER_CUBIN_DIR"]
+patterns = ["{FLASHINFER_CUBIN_DIR}", "{FLASHINFER_WORKSPACE_BASE}/.cache/flashinfer/cubins", "{HOME}/.cache/flashinfer/cubins", "{SGLANG_CACHE_DIR}/.cache/flashinfer/cubins"]
+redirect = "flashinfer/.cache/flashinfer/cubins"
+kind = "download"
+key = ["pinned artifact commit path + sha256"]
+write = "per-file filelock, uuid temp + os.replace"
+relocatable = "yes"
+readonly_ok = "yes"
+notes = "A miss downloads from the network (FLASHINFER_NO_DOWNLOAD makes it raise). Prefer the flashinfer-cubin package in the image when compute nodes are offline."
+evidence = ["flashinfer_cubin.env.cubin_dir", "flashinfer_cubin.default.cubins", "flashinfer_cubin.read.sha256", "flashinfer_cubin.write.atomic", "flashinfer_cubin.env.no_download"]
+
+[[cache]]
+id = "tvm_ffi"
+name = "apache-tvm-ffi C++/CUDA JIT builds (and the torch DLPack add-on)"
+libraries = ["apache-tvm-ffi"]
+engines = ["sglang", "vllm"]
+vars = ["TVM_FFI_CACHE_DIR"]
+patterns = ["{TVM_FFI_CACHE_DIR}", "{HOME}/.cache/tvm-ffi"]
+redirect = "tvm-ffi"
+key = ["<name>_<sha16> of source paths or text + flags", "NOT the GPU arch, CUDA or compiler version"]
+write = "fcntl lock file per build dir; ninja writes in place; ninja runs on every load"
+lock = "fcntl, any OSError treated as busy, no timeout"
+relocatable = "no"
+readonly_ok = "no"
+notes = "Measured (0.1.11, CPU): warm run rebuilt 0 of 3 modules; a moved copy rewrote 15 files (absolute paths); a read-only copy hung retrying the lock until killed (549 attempts in 60 s, 1,107 in 120 s, 5,809 in 10 min). The key lacks the arch, so the per-GPU-arch directory level is required. SGLang 0.5.20's own kernels no longer use it (TVM_FFI_CACHE_DIR is dead for them)."
+evidence = ["tvmffi.env.cache_dir", "tvmffi.key.dir_name", "tvmffi.key.arch_outside_hash", "tvmffi.lock.oserror_is_busy", "tvmffi.lock.no_timeout", "tvmffi.read.always_ninja", "tvmffi.reloc.abs_main_cpp", "servekit.engine.tvm_ffi"]
+
+[[cache]]
+id = "tilelang"
+name = "TileLang kernel cache, autotuner and cuda-binaries"
+libraries = ["tilelang"]
+engines = ["sglang", "vllm"]
+vars = ["TILELANG_CACHE_DIR"]
+patterns = ["{TILELANG_CACHE_DIR}", "{HOME}/.tilelang/cache"]
+redirect = "tilelang"
+key = ["sha256 of the PrimFunc script", "target string with arch", "pass configs, compile flags", "TileLang version (in the path)", "NOT the nvcc/CUDA version", "T.dynamic shapes are not keyed (no per-batch-size compile)"]
+write = "staging dir + tmp files (TILELANG_TMP_DIR) + os.replace + atomic dir rename; no cross-process lock"
+lock = "thread lock only"
+relocatable = "yes"
+readonly_ok = "yes"
+notes = "Nobody sets it: neither vLLM, SGLang nor servekit, so vLLM's DeepSeek-V4 mHC kernels go to ~/.tilelang/cache and die with the job. import tilelang creates the empty tree, which explains #270's empty ~/.tilelang. TILELANG_TMP_DIR must be on the same filesystem as the cache (default <cache>/tmp). The key lacks the CUDA version, so keep it per image. Measured (0.1.12, C target, CPU): a moved copy hit with zero rewrites; a read-only copy still hit (exit 0; its 25 write attempts failed harmlessly); 8 concurrent writers x 3: no failures. Its Cython wrapper build leaves one tmp*.cpp + tmp*.so per compiled kernel in TMPDIR (leaked temporaries, never reused)."
+evidence = ["tilelang.env.cache_dir", "tilelang.env.tmp_dir", "tilelang.default.namespace", "tilelang.key.script_hash", "tilelang.key.arch_target", "tilelang.key.dynamic_not_keyed", "tilelang.write.tmp_file_replace", "tilelang.write.dir_rename", "tilelang.read.incomplete_is_miss", "vllm_tilelang.key.dynamic", "vllm.engine.tilelang_tmp"]
+
+[[cache]]
+id = "fa4.cute_dsl"
+name = "FlashAttention-4 CuTe DSL compile cache (vLLM vendored FA4; flash-attn-4)"
+libraries = ["vllm", "flash-attn-4"]
+engines = ["vllm"]
+vars = ["FLASH_ATTENTION_CUTE_DSL_CACHE_DIR"]
+patterns = ["{FLASH_ATTENTION_CUTE_DSL_CACHE_DIR}", "{TMPDIR}/{USER}/flash_attention_cute_dsl_cache", "/tmp/{USER}/flash_attention_cute_dsl_cache"]
+redirect = "fa4-cute"
+key = ["Python minor, cutlass and tvm-ffi versions, FA4 sources (fingerprint dir)", "kernel name"]
+write = "flock + direct export_to_c (no rename)"
+relocatable = "yes"
+readonly_ok = "partial"
+notes = "Off by default: FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 turns it on. Hits need the .lock files to exist."
+evidence = ["vllm_fa4.env.enabled", "vllm_fa4.env.dir", "vllm_fa4.default.dir", "vllm_fa4.lock.flock", "vllm_fa4.write.export"]
+
+[[cache]]
+id = "cute_dsl"
+name = "CUTLASS CuTe DSL file cache (compiled MLIR modules)"
+libraries = ["nvidia-cutlass-dsl", "nvidia-cutlass-dsl-libs-base"]
+engines = ["sglang", "vllm"]
+vars = ["CUTE_DSL_CACHE_DIR"]
+patterns = ["{CUTE_DSL_CACHE_DIR}", "{TMPDIR}/{USER}/cutlass_python_cache", "/tmp/{USER}/cutlass_python_cache"]
+redirect = "cute-dsl"
+key = ["MLIR bytecode", "all CUTE_DSL_* values incl. the cache-dir string and the dump dir (CWD)", "arch, compile options, absolute library paths"]
+write = "per-pid temp dir + os.replace, CRC32 check on read; no lock"
+lock = "none"
+relocatable = "partial"
+readonly_ok = "yes"
+notes = "Verified on the 4.5.0 source as a proxy (4.6.2/4.8.0 ship it compiled: UNVERIFIED). Files move fine, but the key contains the cache-dir string and the CWD, so a different path or working dir misses: keep both fixed. Write errors are only logged."
+evidence = ["cute_dsl.env.cache_dir", "cute_dsl.default.tmpdir", "cute_dsl.env.disable_file_caching", "cute_dsl.key.cwd", "cute_dsl.key.cache_dir_value", "cute_dsl.write.replace", "cute_dsl.read.write_failure_warns", "cute_dsl.engine.proxy_version"]
+
+[[cache]]
+id = "quack"
+name = "QuACK (CuTe DSL kernels) compile cache and autotune results"
+libraries = ["quack-kernels"]
+engines = ["sglang", "vllm"]
+vars = ["QUACK_CACHE_DIR"]
+patterns = ["{QUACK_CACHE_DIR}", "{TMPDIR}/{USER}/quack_cache", "/tmp/{USER}/quack_cache", "{HOME}/.quack/cache"]
+redirect = "quack"
+key = ["Python, cutlass and tvm-ffi versions + QuACK sources (fingerprint)", "sha256 of the pickled call key", "no explicit arch"]
+write = "flock (60 s) + tmp + os.replace; autotune via Triton's put"
+relocatable = "yes"
+readonly_ok = "no"
+notes = "Dormant in both engines' default paths (utility use only). QUACK_HOME moves the autotune dir."
+evidence = ["quack.env.dir", "quack.default.tmp_user", "quack.key.no_explicit_arch", "quack.lock.flock", "quack.write.replace", "quack.env.autotune_dir", "quack.engine.utility_only"]
+
+[[cache]]
+id = "humming"
+name = "humming-kernels NVRTC/NVCC cubin cache"
+libraries = ["humming-kernels"]
+engines = ["sglang", "vllm"]
+vars = ["HUMMING_CACHE_DIR"]
+patterns = ["{HUMMING_CACHE_DIR}", "{HOME}/.humming/cache"]
+redirect = "humming"
+key = ["md5 of compiler + NVRTC version, flags incl. absolute -I paths, sm, source", "header mtimes (a reinstall misses)"]
+write = "filelock in HUMMING_TMP_DIR + kernel_tmp.cubin then os.replace"
+relocatable = "yes"
+readonly_ok = "partial"
+notes = "Hits work if HUMMING_TMP_DIR is writable. Header mtimes are in the key, so a rebuilt image misses even with identical sources: another reason to key by image."
+evidence = ["humming.env.cache_dir", "humming.default.cache_home", "humming.env.tmp_dir", "humming.key.header_mtimes", "humming.key.abs_include_flags", "humming.write.replace"]
+
+[[cache]]
+id = "numba"
+name = "numba @njit(cache=True) machine code (.nbi/.nbc)"
+libraries = ["numba"]
+engines = ["sglang", "vllm"]
+vars = ["NUMBA_CACHE_DIR"]
+patterns = ["{NUMBA_CACHE_DIR}", "{XDG_CACHE_HOME}/numba"]
+redirect = "numba"
+key = ["numba version", "source file stamp (mtime + size)", "signature", "target triple, CPU name and features"]
+write = "uuid temp + os.replace; no lock"
+relocatable = "no"
+readonly_ok = "no"
+notes = "Default is __pycache__ next to the source (read-only squashfs in the image), else the user cache dir. A cached CPU-feature key makes it host-specific."
+evidence = ["numba.env.cache_dir", "numba.default.locator_order", "numba.default.user_wide", "numba.key.source_stamp", "numba.key.cpu", "numba.write.replace", "numba.reloc.subpath_sha1"]
+
+[[cache]]
+id = "cuda_compute_cache"
+name = "NVIDIA driver PTX JIT cache (ComputeCache)"
+libraries = []
+engines = ["sglang", "vllm"]
+vars = ["CUDA_CACHE_PATH"]
+patterns = ["{CUDA_CACHE_PATH}", "{HOME}/.nv/ComputeCache", "{SGLANG_CACHE_DIR}/nv"]
+redirect = "nv"
+relocatable = "yes"
+notes = "Driver-managed (closed source): CUDA_CACHE_PATH, CUDA_CACHE_MAXSIZE, CUDA_CACHE_DISABLE per the CUDA programming guide; keyed internally by driver version. Matters only when PTX (not SASS) is loaded."
+evidence = ["sglang.engine.redirect_nv"]
+
+# ---------------------------------------------------------------------------------------
+# Not compile caches (reported, never gated)
+# ---------------------------------------------------------------------------------------
+[[cache]]
+id = "hf_hub"
+name = "Hugging Face hub downloads (models, tokenizers, kernels hub)"
+libraries = ["huggingface-hub"]
+vars = ["HF_HOME"]
+patterns = ["{HF_HOME}", "{XDG_CACHE_HOME}/huggingface"]
+kind = "download"
+persist = false
+
+[[cache]]
+id = "macos.homebrew"
+name = "Homebrew cache written by Inductor's `brew --prefix libomp` probe (macOS local runs only)"
+vars = ["HOMEBREW_CACHE"]
+patterns = ["{HOME}/Library/Caches/Homebrew"]
+kind = "other"
+persist = false
+evidence = ["torch.macos.brew"]
+
+[[cache]]
+id = "python.bytecode"
+name = "Python bytecode (__pycache__)"
+vars = ["PYTHONPYCACHEPREFIX"]
+suffixes = [".pyc"]
+kind = "bytecode"
+persist = false
+notes = "Out of scope here (see the python-startup opportunity)."

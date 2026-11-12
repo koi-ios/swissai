@@ -1,0 +1,131 @@
+{
+ "spec": {
+  "model": "mock/model",
+  "tp": 1,
+  "server_args": [
+   "--mem-fraction-static",
+   "0.85"
+  ],
+  "launch_request": null,
+  "timeout_s": 120,
+  "arm": "default",
+  "repeat": 0,
+  "cuda_graph_config": null,
+  "env": {},
+  "correctness": {
+   "prompt_tokens": [
+    96,
+    300,
+    1000,
+    3000,
+    6000
+   ],
+   "prefix_tokens": 3000,
+   "suffix_tokens": 200,
+   "output_tokens": 8,
+   "wait_s": 60
+  },
+  "run_id": "dry-correctness"
+ },
+ "tag": "default-tp1-r0",
+ "time_to_ready_s": 0.7719074579654261,
+ "gpu_mem_after_replay_mib": null,
+ "correctness": {
+  "phase1": {
+   "prefix": [
+    6576,
+    17413,
+    28358,
+    9322,
+    4150,
+    6312,
+    25782,
+    20250
+   ]
+  },
+  "phase2": {
+   "prefix+suffix": [
+    22921,
+    17820,
+    10098,
+    9414,
+    5324,
+    11594,
+    13208,
+    20281
+   ],
+   "96": [
+    9714,
+    22031,
+    13930,
+    12978,
+    6933,
+    17887,
+    1599,
+    12741
+   ],
+   "300": [
+    1416,
+    5294,
+    3900,
+    17851,
+    3449,
+    8715,
+    22182,
+    8062
+   ],
+   "1000": [
+    22498,
+    1748,
+    23475,
+    20295,
+    15262,
+    8308,
+    11940,
+    20096
+   ],
+   "3000": [
+    15789,
+    13064,
+    22498,
+    5952,
+    24904,
+    7150,
+    13280,
+    21015
+   ],
+   "6000": [
+    9305,
+    20564,
+    20089,
+    18309,
+    17249,
+    11433,
+    17830,
+    19110
+   ]
+  }
+ },
+ "log": {
+  "startup_capture": {
+   "prefill": {
+    "t": 0.5057442499091849,
+    "elapsed_s": 18.07,
+    "mem_gb": 0.12
+   },
+   "decode": {
+    "t": 0.6204782499698922,
+    "elapsed_s": 4.68,
+    "mem_gb": 0.07
+   }
+  },
+  "lazy_setup": {},
+  "lazy_disabled": {},
+  "lazy_steps": [],
+  "lazy_all_captured_t": null,
+  "ready_log_t": 0.6237048750044778,
+  "errors": [],
+  "startup_capture_total_s": 22.75,
+  "lazy_capture_total_s": 0
+ }
+}

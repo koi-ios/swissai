@@ -1,0 +1,32 @@
+[SERVEKIT] checking 16 prompts from http://127.0.0.1:18105 against results/e2e_cli/gold.json
+
+[SERVEKIT] Verify of http://127.0.0.1:18105 (statistical mode)
+----------------------------------------
+prompt                n_tok   max|dlp|    max z       dnll    greedy
+capital_of_france         4  0.0009594  0.00726  -0.000241        ok
+fibonacci_code           16   0.000452  0.00342  -2.73e-05        ok
+arithmetic               26   0.005063     0.12   -6.1e-05        ok
+primes                   22    0.01967    0.149  -0.000901        ok
+thermodynamics           13   0.008393   0.0653   -0.00133        ok
+french                   21  0.0007915  0.00599  +3.49e-05        ok
+german                   22   0.003924   0.0297  +0.000164        ok
+unicode                  31   0.001241    0.115  -1.73e-05        ok
+json_schema              21    0.02725    0.399   -0.00121         -
+sql                      28   0.008183   0.0646  -0.000298         -
+repetition               12   0.007947   0.0601  -0.000654         -
+rare_tokens              28    0.09654    0.932   -0.00363         -
+dialogue                 20    0.03149    0.238   +0.00155         -
+chess                    47    0.02887    0.543  +0.000599         -
+numbers                  61   0.002187   0.0387  -3.63e-05         -
+long_prose              769    0.06249     1.03  -7.94e-05         -
+
+max_z       1.027   threshold 8.555   calibration [4.46, 6.58]
+rms_z     0.07125   threshold 0.7751   calibration [0.626, 0.716]
+shift   -0.001864   threshold 0.07877   calibration [-0.0506, 0.0337]
+top-1 flips at clear winners: 0/871; greedy divergences: 0 unexplained, 0 at near-ties
+calibration: 8 perturbed runs, scale 0.132, deterministic True, batch-invariant False
+  noise model: scale 0.132 x (1 - p), 8 perturbed calibration runs, margin_tau 1.39, alpha 0.01
+PASS
+
+result written to results/e2e_cli/5-mantflip-stat.json
+exit 0

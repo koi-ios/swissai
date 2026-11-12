@@ -1,0 +1,1640 @@
+[
+ {
+  "id": "inductor.env.cache_dir",
+  "claim": "TORCHINDUCTOR_CACHE_DIR selects the Inductor cache root; it is re-read from os.environ on every cache_dir() call",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 15,
+  "quote": "cache_dir = os.environ.get(\"TORCHINDUCTOR_CACHE_DIR\")"
+ },
+ {
+  "id": "inductor.default.gettempdir",
+  "claim": "Default root parent is tempfile.gettempdir() (honours TMPDIR) outside fbcode, /var/tmp in fbcode",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 32,
+  "quote": "tempfile.gettempdir() if not is_fbcode() else \"/var/tmp\","
+ },
+ {
+  "id": "inductor.default.tmp_user",
+  "claim": "Default root directory name is torchinductor_<sanitized user name>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 33,
+  "quote": "\"torchinductor_\" + sanitized_username,"
+ },
+ {
+  "id": "inductor.engine.env_pinned",
+  "claim": "cache_dir() assigns (not setdefault) the absolutized path back into os.environ, pinning it for the process and its children",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 19,
+  "quote": "os.environ[\"TORCHINDUCTOR_CACHE_DIR\"] = cache_dir"
+ },
+ {
+  "id": "inductor.engine.makedirs_each_call",
+  "claim": "cache_dir() calls os.makedirs(exist_ok=True) on every call",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 20,
+  "quote": "os.makedirs(cache_dir, exist_ok=True)"
+ },
+ {
+  "id": "inductor.engine.import_time_cache_dir",
+  "claim": "torch._dynamo.package calls cache_dir() at module import time (creates and pins the root on import)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_dynamo/package.py",
+  "line": 1267,
+  "quote": "DynamoCache = DiskDynamoCache(os.path.join(cache_dir(), \"dynamo\"))"
+ },
+ {
+  "id": "inductor.engine.triton_dir_only_if_unset",
+  "claim": "CachingAutotuner only overrides TRITON_CACHE_DIR when it is unset",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 492,
+  "quote": "if os.getenv(\"TRITON_CACHE_DIR\") is None:"
+ },
+ {
+  "id": "inductor.engine.triton_dir_override",
+  "claim": "CachingAutotuner.__init__ writes TRITON_CACHE_DIR=triton_cache_dir(device) into os.environ",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 493,
+  "quote": "os.environ[\"TRITON_CACHE_DIR\"] = triton_cache_dir("
+ },
+ {
+  "id": "inductor.engine.device_index",
+  "claim": "The device passed to triton_cache_dir is the CUDA device index of the kernel",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 454,
+  "quote": "\"device\": self.device_props.index,"
+ },
+ {
+  "id": "inductor.default.triton_per_device",
+  "claim": "triton_cache_dir takes a device index (path is <inductor root>/triton/<device>)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 37,
+  "quote": "def triton_cache_dir(device: int) -> str:"
+ },
+ {
+  "id": "inductor.default.triton_env_wins",
+  "claim": "An explicit TRITON_CACHE_DIR is returned unchanged by triton_cache_dir",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/cache_dir_utils.py",
+  "line": 38,
+  "quote": "if (directory := os.getenv(\"TRITON_CACHE_DIR\")) is not None:"
+ },
+ {
+  "id": "inductor.write.write_atomic_tmp",
+  "claim": "write_atomic writes to a same-directory temp file named .<pid>.<thread ident>.tmp (no host or uuid component)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 538,
+  "quote": "tmp_path = path.parent / f\".{os.getpid()}.{threading.get_ident()}.tmp\""
+ },
+ {
+  "id": "inductor.write.write_atomic_rename",
+  "claim": "write_atomic publishes with Path.rename (atomic replace on POSIX); no lock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 543,
+  "quote": "tmp_path.rename(target=path)"
+ },
+ {
+  "id": "inductor.read.exists_skip_write",
+  "claim": "Generic write() (PyCodeCache etc.) only writes when the target path does not exist",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 512,
+  "quote": "if not os.path.exists(path):"
+ },
+ {
+  "id": "inductor.key.pycode_shard",
+  "claim": "PyCodeCache/generic files live at <root>/<key[1:3]>/<key>.<ext>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 448,
+  "quote": "subdir = os.path.join(cache_dir(), basename[1:3])"
+ },
+ {
+  "id": "inductor.lock.lock_dir",
+  "claim": "Inductor lock files live in <root>/locks",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 423,
+  "quote": "lock_dir = os.path.join(cache_dir(), \"locks\")"
+ },
+ {
+  "id": "inductor.lock.timeout",
+  "claim": "Lock timeout is TORCHINDUCTOR_FILE_LOCK_TIMEOUT, default 600 s",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 1616,
+  "quote": "os.environ.get(\"TORCHINDUCTOR_FILE_LOCK_TIMEOUT\", \"600\")"
+ },
+ {
+  "id": "inductor.content.pch_ignores_env",
+  "claim": "Precompiled headers go under default_cache_dir() (TMPDIR-based), ignoring TORCHINDUCTOR_CACHE_DIR",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3542,
+  "quote": "_HEADER_DIR = os.path.join(default_cache_dir(), \"precompiled_headers\")"
+ },
+ {
+  "id": "inductor.content.pch_default_on",
+  "claim": "Header precompilation for CppCodeCache is on by default outside fbcode",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 214,
+  "quote": "\"TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS\", \"0\" if is_fbcode() else \"1\""
+ },
+ {
+  "id": "inductor.content.gemm_timings",
+  "claim": "Max-autotune choice timings are one JSON file at <root>/cache/<system hash>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 320,
+  "quote": "os.path.join(cache_dir(), \"cache\", CacheBase.get_system()[\"hash\"])"
+ },
+ {
+  "id": "inductor.write.gemm_timings_rmw",
+  "claim": "The timings file is read-modify-written (whole JSON rewritten) without a lock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 417,
+  "quote": "self.update_local_cache(local_cache)"
+ },
+ {
+  "id": "inductor.env.caching_precompile",
+  "claim": "The <root>/dynamo precompile cache is only used with TORCH_CACHING_PRECOMPILE=1",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_dynamo/config.py",
+  "line": 752,
+  "quote": "os.environ.get(\"TORCH_CACHING_PRECOMPILE\", \"0\") == \"1\""
+ },
+ {
+  "id": "inductor.reloc.pycode_path_recomputed",
+  "claim": "On an FX cache hit the wrapper .py path is recomputed from the current cache root",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/output_code.py",
+  "line": 952,
+  "quote": "artifact_path = get_path(self.cache_key, \"py\")[2]"
+ },
+ {
+  "id": "inductor.read.pycode_rematerialize",
+  "claim": "If the wrapper .py is missing on a hit it is re-written (needs a writable root)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/output_code.py",
+  "line": 956,
+  "quote": "write_atomic(artifact_path, code, make_dirs=True)"
+ },
+ {
+  "id": "inductor.env.keep_static_cubin_raw",
+  "claim": "TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW=1 keeps cubin bytes inside cached autotuners (default off)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 1421,
+  "quote": "os.environ.get(\"TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW\", \"0\") == \"1\""
+ },
+ {
+  "id": "fxgraph.env.enable",
+  "claim": "FX graph cache is a Config defaulting to True, forced by TORCHINDUCTOR_FX_GRAPH_CACHE",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 112,
+  "quote": "env_name_force=\"TORCHINDUCTOR_FX_GRAPH_CACHE\","
+ },
+ {
+  "id": "fxgraph.default.dir",
+  "claim": "FX graph cache root is <inductor root>/fxgraph",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1884,
+  "quote": "return os.path.join(cache_dir(), \"fxgraph\")"
+ },
+ {
+  "id": "fxgraph.default.subdir",
+  "claim": "Entries for one key live in fxgraph/<key[1:3]>/<key>/",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1891,
+  "quote": "return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)"
+ },
+ {
+  "id": "fxgraph.key.torch_key",
+  "claim": "Key includes torch_key() (torch source hash)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1502,
+  "quote": "self.torch_version = torch_key()"
+ },
+ {
+  "id": "fxgraph.key.torch_version",
+  "claim": "torch_key hashes torch.__version__ ...",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 952,
+  "quote": "hasher.update(torch.__version__.encode(\"utf-8\"))"
+ },
+ {
+  "id": "fxgraph.key.module_bytes",
+  "claim": "... plus module names and file bytes of every torch module (content, not install path)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 926,
+  "quote": "hasher.update(spec.name.encode(\"utf-8\"))"
+ },
+ {
+  "id": "fxgraph.key.system_info",
+  "claim": "Key includes CacheBase.get_system()",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1503,
+  "quote": "self.system_info = CacheBase.get_system()"
+ },
+ {
+  "id": "fxgraph.key.device_name",
+  "claim": "System info records the GPU name (not the compute capability)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 298,
+  "quote": "device_info[\"name\"] = device_properties.name"
+ },
+ {
+  "id": "fxgraph.key.cuda_version",
+  "claim": "System info records torch.version.cuda (build CUDA, not driver)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 299,
+  "quote": "version_info[\"cuda\"] = torch.version.cuda"
+ },
+ {
+  "id": "fxgraph.key.triton_key",
+  "claim": "System info records Triton's triton_key()",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 289,
+  "quote": "triton_version = triton_key()"
+ },
+ {
+  "id": "fxgraph.key.inductor_config",
+  "claim": "Key includes the portable Inductor config",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1504,
+  "quote": "self.inductor_config = config.save_config_portable("
+ },
+ {
+  "id": "fxgraph.key.device_index",
+  "claim": "Key pickler is created without device_id_agnostic, so tensor device indices (cuda:N) stay in the key",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1639,
+  "quote": "pickler = FxGraphCachePickler(gm, has_user_defined_triton_kernels)"
+ },
+ {
+  "id": "fxgraph.reloc.cutlass_dir_excluded",
+  "claim": "Config entries holding absolute paths (cutlass_dir) are excluded from the key",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 2848,
+  "quote": "# uses absolute path"
+ },
+ {
+  "id": "fxgraph.write.entry_name",
+  "claim": "Each entry file is named by sha256 of its pickled content",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 2119,
+  "quote": "path = os.path.join(subdir, sha256_hash(content))"
+ },
+ {
+  "id": "fxgraph.write.atomic",
+  "claim": "Entries are written with write_atomic (temp + rename), no lock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 2120,
+  "quote": "write_atomic(path, content, make_dirs=True)"
+ },
+ {
+  "id": "fxgraph.write.errors_swallowed",
+  "claim": "Write errors are logged and swallowed",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 2193,
+  "quote": "log.warning(\"fx graph unable to write to cache\", exc_info=True)"
+ },
+ {
+  "id": "fxgraph.read.skip_tmp",
+  "claim": "Lookup skips dot-files (in-flight write_atomic temps)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1710,
+  "quote": "continue  # Skip temp files from concurrent write_atomic() calls"
+ },
+ {
+  "id": "fxgraph.read.corrupt_skipped",
+  "claim": "Unloadable/corrupt entries are logged and skipped (not deleted)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1717,
+  "quote": "\"fx graph cache unable to load compiled graph\","
+ },
+ {
+  "id": "fxgraph.read.guards",
+  "claim": "Hit = first candidate whose guard expression evaluates true",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1781,
+  "quote": "hit = bool(evaluate_guards(candidate.guards_expr, hints))"
+ },
+ {
+  "id": "fxgraph.read.extern_libs",
+  "claim": "A hit is rejected if the extern libs key (libdevice) differs",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 2092,
+  "quote": "if current != graph.extern_libs_key:"
+ },
+ {
+  "id": "fxgraph.read.oserror_miss",
+  "claim": "OSError while re-materializing/loading the hit is treated as a miss",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1978,
+  "quote": "# Not expected, but in case the PyCodeCache entry is removed from"
+ },
+ {
+  "id": "fxgraph.read.bundle_emit",
+  "claim": "On a hit the bundled Triton artifacts are re-emitted to disk",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1953,
+  "quote": "triton_bundler_meta = TritonBundler.read_and_emit(bundle)"
+ },
+ {
+  "id": "fxgraph.env.bundle_triton",
+  "claim": "Triton bundling into FX entries defaults on outside fbcode (TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 48,
+  "quote": "True if not is_fbcode() else None,"
+ },
+ {
+  "id": "fxgraph.reloc.static_filename",
+  "claim": "Cached static autotuners re-check the autotune cache using their pickled compile-time filename",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 613,
+  "quote": "configs, self.filename, self.inductor_meta"
+ },
+ {
+  "id": "fxgraph.read.cubin_missing_error",
+  "claim": "A cached static kernel whose cubin is not under triton_cache_dir (and no raw bytes) raises",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 2593,
+  "quote": "\"Cubin file saved by TritonBundler not found at %s\", cubin_location"
+ },
+ {
+  "id": "aotautograd.env.enable",
+  "claim": "AOTAutograd cache defaults on; forced by TORCHINDUCTOR_AUTOGRAD_CACHE",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/config.py",
+  "line": 73,
+  "quote": "env_name_force=\"TORCHINDUCTOR_AUTOGRAD_CACHE\","
+ },
+ {
+  "id": "aotautograd.env.remote",
+  "claim": "Remote AOTAutograd cache is enabled by TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE=1",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/config.py",
+  "line": 116,
+  "quote": "if os.environ.get(\"TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE\") == \"1\":"
+ },
+ {
+  "id": "aotautograd.default.dir",
+  "claim": "AOTAutograd cache root is <inductor root>/aotautograd",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 1159,
+  "quote": "return os.path.join(cache_dir(), \"aotautograd\")"
+ },
+ {
+  "id": "aotautograd.default.subdir",
+  "claim": "Entries for one key live in aotautograd/<key>/ (no shard level)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 1166,
+  "quote": "return os.path.join(cls._get_tmp_dir(), _key)"
+ },
+ {
+  "id": "aotautograd.key.hash",
+  "claim": "Key is 'a' + hash of AOTAutogradCacheDetails",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 883,
+  "quote": "key = AOTAUTOGRAD_CACHE_PREFIX + pickler.get_hash(details)"
+ },
+ {
+  "id": "aotautograd.key.inherits_fx",
+  "claim": "AOTAutogradCacheDetails extends FxGraphHashDetails (torch_key, system info, config)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 448,
+  "quote": "class AOTAutogradCacheDetails(FxGraphHashDetails):"
+ },
+ {
+  "id": "aotautograd.key.grad_mode",
+  "claim": "Key adds grad mode (and autocast/deterministic state)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 535,
+  "quote": "self.grad_enabled = torch.is_grad_enabled()"
+ },
+ {
+  "id": "aotautograd.key.autograd_config",
+  "claim": "Key adds the functorch config",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 544,
+  "quote": "self.autograd_config = config.save_config()"
+ },
+ {
+  "id": "aotautograd.write.entry_name",
+  "claim": "Entry file named by sha256 of content",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 1283,
+  "quote": "path = os.path.join(subdir, sha256_hash(content))"
+ },
+ {
+  "id": "aotautograd.write.atomic",
+  "claim": "Entries written with write_atomic, no lock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 1285,
+  "quote": "write_atomic(path, content)"
+ },
+ {
+  "id": "aotautograd.read.guarded",
+  "claim": "Lookup uses the same guarded candidate iteration as the FX cache",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 1236,
+  "quote": ") = AOTAutogradCache.find_guarded_entry("
+ },
+ {
+  "id": "aotautograd.read.depends_on_fx",
+  "claim": "Entries reference compiled fw/bw graphs by FX graph cache key",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 971,
+  "quote": "via keys to the FXGraphCache"
+ },
+ {
+  "id": "aotautograd.read.fx_miss",
+  "claim": "An FX graph cache miss under an AOT hit is reported as a miss",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 109,
+  "quote": "# Used to signify when FXGraphCache missed when AOTAutogradCache uses it"
+ },
+ {
+  "id": "aotautograd.read.load_error_miss",
+  "claim": "Load errors are logged and treated as a miss",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 1261,
+  "quote": "log.info(\"AOTAutograd cache unable to load compiled graph: %s\", e)"
+ },
+ {
+  "id": "inductor_autotune.default.on",
+  "claim": "Local autotune result cache is on by default",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 139,
+  "quote": "autotune_local_cache: bool = True"
+ },
+ {
+  "id": "inductor_autotune.default.next_to_kernel",
+  "claim": ".best_config lives in the directory of the kernel's PyCodeCache .py file",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 132,
+  "quote": "os.path.dirname(filename), key"
+ },
+ {
+  "id": "inductor_autotune.default.path",
+  "claim": "File name is <hash>.best_config",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 166,
+  "quote": "return os.path.join(dirname, f\"{updated_cache_key}.best_config\")"
+ },
+ {
+  "id": "inductor_autotune.key.basename_tag",
+  "claim": "Key starts from the kernel file basename (source hash) plus cache_key_tag",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 151,
+  "quote": "key = f\"{os.path.basename(filename)}:{cconfig.cache_key_tag}\""
+ },
+ {
+  "id": "inductor_autotune.key.torch_key",
+  "claim": "Key is re-hashed with torch_key()",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 165,
+  "quote": "updated_cache_key = AUTOTUNE_CACHE_KEY_STRATEGY.key(cache_key, torch_key())"
+ },
+ {
+  "id": "inductor_autotune.key.configs_hash",
+  "claim": "configs_hash covers kwargs, num_warps, num_stages of all candidate configs",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 3033,
+  "quote": "{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}"
+ },
+ {
+  "id": "inductor_autotune.read.configs_hash_check",
+  "claim": "Stored result is ignored if its configs_hash differs",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 664,
+  "quote": "if best_config.pop(\"configs_hash\", None) != configs_hash:"
+ },
+ {
+  "id": "inductor_autotune.write.makedirs",
+  "claim": "Local put creates the parent directory",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 149,
+  "quote": "os.makedirs(os.path.dirname(key), exist_ok=True)"
+ },
+ {
+  "id": "inductor_autotune.write.atomic",
+  "claim": "Local put uses write_atomic (temp + rename), no lock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 152,
+  "quote": "codecache.write_atomic(key, data)"
+ },
+ {
+  "id": "inductor_autotune.read.corrupt_ignored",
+  "claim": "Corrupt JSON is logged and treated as a miss",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 370,
+  "quote": "\"Ignoring corrupt local cache entry %s: %s: %s\","
+ },
+ {
+  "id": "inductor_autotune.read.hit_readonly",
+  "claim": "A hit is a plain read of the JSON file",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 182,
+  "quote": "best_config = cache.get(key)"
+ },
+ {
+  "id": "inductor_autotune.content.fields",
+  "claim": "Stored JSON includes the Triton cache hash of the winner",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 321,
+  "quote": "\"triton_cache_hash\": triton_cache_hash,"
+ },
+ {
+  "id": "inductor_autotune.read.force_disable",
+  "claim": "force_disable_caches disables the lookup",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 294,
+  "quote": "disabled = inductor_meta.get(\"force_disable_caches\", False)"
+ },
+ {
+  "id": "inductor_cpp.key.cmdline",
+  "claim": "C++ cache key hashes source plus the full compile command line",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3764,
+  "quote": "main_code, \"main.cpp\", extra=f\"{optimized_code} {main_cmd_line}\""
+ },
+ {
+  "id": "inductor_cpp.key.hashable_cmd",
+  "claim": "The hashed command line uses dummy names but real flags/include dirs",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3757,
+  "quote": "name=\"o\", sources=\"i\", BuildOption=build_option"
+ },
+ {
+  "id": "inductor_cpp.reloc.abs_include_flags",
+  "claim": "Include dirs are emitted as -I<dir> (absolute install paths) into the command line",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/cpp_builder.py",
+  "line": 2393,
+  "quote": "self._include_dirs_args += f\"-I{shlex.quote(inc_dir)} \""
+ },
+ {
+  "id": "inductor_cpp.reloc.torch_includes",
+  "claim": "Torch include dirs come from cpp_extension.include_paths()",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/cpp_builder.py",
+  "line": 1315,
+  "quote": "include_dirs = include_paths()"
+ },
+ {
+  "id": "inductor_cpp.reloc.relative_fbcode_only",
+  "claim": "Relative paths are only used in fbcode",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3719,
+  "quote": "\"use_relative_path\": config.is_fbcode(),"
+ },
+ {
+  "id": "inductor_cpp.lock.path",
+  "claim": "Per-key lock file <root>/locks/<key>.lock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3779,
+  "quote": "lock_path = os.path.join(get_lock_dir(), key + \".lock\")"
+ },
+ {
+  "id": "inductor_cpp.lock.worker",
+  "claim": "Build (and every load) runs under torch.utils._filelock.FileLock with LOCK_TIMEOUT",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3879,
+  "quote": "with FileLock(lock_path, timeout=LOCK_TIMEOUT):"
+ },
+ {
+  "id": "inductor_cpp.read.exists",
+  "claim": "Hit check is existence of the target file",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3881,
+  "quote": "if not os.path.exists(builder.get_target_file_path()):"
+ },
+ {
+  "id": "inductor_cpp.write.target",
+  "claim": "Target .so path is <output_dir>/<name>.so",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/cpp_builder.py",
+  "line": 2323,
+  "quote": "self._target_file = os.path.join(self._output_dir, f\"{self._name}{file_ext}\")"
+ },
+ {
+  "id": "inductor_cpp.write.in_place_compile",
+  "claim": "The compiler writes the target in place (no temp+rename)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/cpp_builder.py",
+  "line": 2571,
+  "quote": "run_compile_cmd(build_cmd, cwd=_build_tmp_dir)"
+ },
+ {
+  "id": "inductor_cpp.content.build_tmp",
+  "claim": "A <name>_CxxBuild working dir is created next to the target and removed after",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/cpp_builder.py",
+  "line": 2566,
+  "quote": "self._output_dir, f\"{self._name}_{_BUILD_TEMP_DIR}\""
+ },
+ {
+  "id": "inductor_cpp.read.dlopen",
+  "claim": "Loading is a plain dlopen of the cached .so",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3658,
+  "quote": "return cdll.LoadLibrary(path)"
+ },
+ {
+  "id": "inductor_cpp.content.noexec",
+  "claim": "Cached .so files must be on an exec-mounted filesystem",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3679,
+  "quote": "\"temporary directory with TORCHINDUCTOR_CACHE_DIR environment variable.\""
+ },
+ {
+  "id": "inductor_cpp.key.pch_compiler",
+  "claim": "PCH key includes compiler version info",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3597,
+  "quote": "+ get_compiler_version_info(header_build_option.get_compiler())"
+ },
+ {
+  "id": "inductor_cpp.lock.pch_lock_dir",
+  "claim": "PCH locks live under the TMPDIR-based header dir",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 3543,
+  "quote": "_HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, \"locks\")"
+ },
+ {
+  "id": "inductor_cpp.lock.cutlass",
+  "claim": "CUTLASS/CUDA codecache compiles under a per-key FileLock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 4940,
+  "quote": "lock = FileLock(os.path.join(lock_dir, key + \".lock\"), timeout=LOCK_TIMEOUT)"
+ },
+ {
+  "id": "cpp_extension.env.dir",
+  "claim": "TORCH_EXTENSIONS_DIR overrides the extensions root",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2800,
+  "quote": "root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')"
+ },
+ {
+  "id": "cpp_extension.default.appdirs",
+  "claim": "Default root is realpath of _appdirs.user_cache_dir('torch_extensions')",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 520,
+  "quote": "torch._appdirs.user_cache_dir(appname='torch_extensions')"
+ },
+ {
+  "id": "cpp_extension.default.only_without_env",
+  "claim": "The py/cu subfolder is only added when TORCH_EXTENSIONS_DIR is unset",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2801,
+  "quote": "if root_extensions_directory is None:"
+ },
+ {
+  "id": "cpp_extension.default.py_cu_folder",
+  "claim": "Default subfolder is <python tag>_<accelerator tag>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2814,
+  "quote": "build_folder = f'{python_version}_{accelerator_str}'"
+ },
+ {
+  "id": "cpp_extension.key.cuda_tag",
+  "claim": "Accelerator tag is cu<torch.version.cuda without dots>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2810,
+  "quote": "accelerator_str = f'cu{torch.version.cuda.replace(\".\", \"\")}'"
+ },
+ {
+  "id": "cpp_extension.key.python_tag",
+  "claim": "Python tag is py<major><minor><abiflags>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2813,
+  "quote": "f'py{sys.version_info.major}{sys.version_info.minor}"
+ },
+ {
+  "id": "cpp_extension.key.name_dir",
+  "claim": "Build dir is <root>/<extension name>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2822,
+  "quote": "build_directory = os.path.join(root_extensions_directory, name)"
+ },
+ {
+  "id": "cpp_extension.key.version_bump",
+  "claim": "Name gets _v<N> only when sources/flags change within the process",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2343,
+  "quote": "name = f'{name}_v{version}'"
+ },
+ {
+  "id": "cpp_extension.key.in_memory_versioner",
+  "claim": "The versioner is a module-level in-memory object",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 468,
+  "quote": "JIT_EXTENSION_VERSIONER = ExtensionVersioner()"
+ },
+ {
+  "id": "cpp_extension.key.arch_env",
+  "claim": "CUDA arch flags come from TORCH_CUDA_ARCH_LIST ...",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2693,
+  "quote": "_arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)"
+ },
+ {
+  "id": "cpp_extension.key.arch_visible",
+  "claim": "... or, if unset, from the visible GPUs' capabilities",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2701,
+  "quote": "capability = torch.cuda.get_device_capability(i)"
+ },
+ {
+  "id": "cpp_extension.lock.baton",
+  "claim": "Builds are serialized by a FileBaton at <build_dir>/lock",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2345,
+  "quote": "baton = FileBaton(os.path.join(build_directory, 'lock'))"
+ },
+ {
+  "id": "cpp_extension.lock.o_excl",
+  "claim": "FileBaton acquires by O_CREAT|O_EXCL file creation",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/file_baton.py",
+  "line": 34,
+  "quote": "self.fd = os.open(self.lock_file_path, os.O_CREAT | os.O_EXCL)"
+ },
+ {
+  "id": "cpp_extension.lock.poll_no_timeout",
+  "claim": "Waiters poll for the lock file to disappear, with no timeout or stale-lock check",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/file_baton.py",
+  "line": 49,
+  "quote": "while os.path.exists(self.lock_file_path):"
+ },
+ {
+  "id": "cpp_extension.lock.release_remove",
+  "claim": "Release deletes the lock file",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/file_baton.py",
+  "line": 63,
+  "quote": "os.remove(self.lock_file_path)"
+ },
+ {
+  "id": "cpp_extension.read.try_acquire",
+  "claim": "Only the baton holder runs the build step; others wait then import",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2346,
+  "quote": "if baton.try_acquire():"
+ },
+ {
+  "id": "cpp_extension.write.ninja_file",
+  "claim": "A build.ninja is (re)emitted into the build dir",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2515,
+  "quote": "build_file_path = os.path.join(build_directory, 'build.ninja')"
+ },
+ {
+  "id": "cpp_extension.write.maybe_write",
+  "claim": "_maybe_write rewrites a file in place (plain open 'w') when content differs",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 505,
+  "quote": "with open(filename, 'w') as source_file:"
+ },
+ {
+  "id": "cpp_extension.read.ninja_every_load",
+  "claim": "ninja -v is run in the build dir; ninja decides up-to-date",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2860,
+  "quote": "command = ['ninja', '-v']"
+ },
+ {
+  "id": "cpp_extension.reloc.abs_sources",
+  "claim": "build.ninja uses absolute source paths",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 3177,
+  "quote": "sources = [os.path.abspath(file) for file in sources]"
+ },
+ {
+  "id": "cpp_extension.reloc.abs_includes",
+  "claim": "User include paths are absolutized into build.ninja",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2960,
+  "quote": "user_includes = [os.path.abspath(file) for file in extra_include_paths]"
+ },
+ {
+  "id": "cpp_extension.reloc.ninja_deps",
+  "claim": "Compile rule records header deps (gcc depfiles -> .ninja_deps)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 3193,
+  "quote": "compile_rule.append('  deps = gcc')"
+ },
+ {
+  "id": "cpp_extension.reloc.inline_src",
+  "claim": "load_inline writes its sources into the build dir itself",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2259,
+  "quote": "cpp_source_path = os.path.join(build_directory, 'main.cpp')"
+ },
+ {
+  "id": "cpp_extension.reloc.rpath_standalone",
+  "claim": "Standalone executables get an absolute rpath to torch/lib",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2605,
+  "quote": "extra_ldflags.append(f\"-Wl,-rpath,{TORCH_LIB_PATH}\")"
+ },
+ {
+  "id": "cpp_extension.read.import_path",
+  "claim": "The module is loaded from <build_dir>/<name><LIB_EXT>",
+  "path": "vendor/src/pytorch-v2.13.0/torch/utils/cpp_extension.py",
+  "line": 2925,
+  "quote": "filepath = os.path.join(path, f\"{module_name}{LIB_EXT}\")"
+ },
+ {
+  "id": "megacache.engine.save",
+  "claim": "save_cache_artifacts() returns CacheArtifactManager.serialize()",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/__init__.py",
+  "line": 664,
+  "quote": "return CacheArtifactManager.serialize()"
+ },
+ {
+  "id": "megacache.engine.load",
+  "claim": "load_cache_artifacts() deserializes and populates the on-disk caches",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/__init__.py",
+  "line": 683,
+  "quote": "return CacheArtifactManager.populate_caches(artifacts)"
+ },
+ {
+  "id": "megacache.content.inductor",
+  "claim": "Captured type: inductor (FX graph entries)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 339,
+  "quote": "from torch._inductor.codecache import InductorCacheArtifact  # noqa: F401"
+ },
+ {
+  "id": "megacache.content.aot",
+  "claim": "Captured type: aot_autograd entries",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 336,
+  "quote": "from torch._functorch._aot_autograd.autograd_cache import (  # noqa: F401"
+ },
+ {
+  "id": "megacache.content.autotune",
+  "claim": "Captured type: autotune (.best_config)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 340,
+  "quote": "from torch._inductor.runtime.autotune_cache import (  # noqa: F401"
+ },
+ {
+  "id": "megacache.content.pgo",
+  "claim": "Captured type: dynamo PGO profiles",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 335,
+  "quote": "from torch._dynamo.pgo import PGOCacheArtifact  # noqa: F401"
+ },
+ {
+  "id": "megacache.content.format_count",
+  "claim": "Format per type: type string, uint64 count, then artifacts",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 154,
+  "quote": "writer.write_uint64(len(cls[1]))"
+ },
+ {
+  "id": "megacache.content.format_bytes",
+  "claim": "Each artifact is serialized as key string + content bytes",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 34,
+  "quote": "writer.write_bytes(cls.content)"
+ },
+ {
+  "id": "megacache.write.fx_populate",
+  "claim": "Inductor artifacts are written with the normal FX local-cache writer",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1840,
+  "quote": "FxGraphCache._write_to_local_cache(self.key, self.content)"
+ },
+ {
+  "id": "megacache.write.triton_emit",
+  "claim": "... and their Triton bundle is emitted to the Triton cache dir",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 1841,
+  "quote": "FxGraphCache._emit_triton_bundle(self.content)"
+ },
+ {
+  "id": "megacache.write.autotune_populate",
+  "claim": "Autotune artifacts are written under the current cache root",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 97,
+  "quote": "key = os.path.join(cache_dir(), self.key)"
+ },
+ {
+  "id": "megacache.reloc.relative_keys",
+  "claim": "Autotune artifact keys are the last two path components (relative)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 170,
+  "quote": "return os.path.join(*local_cache_key.split(os.sep)[-2:])"
+ },
+ {
+  "id": "megacache.write.aot_populate",
+  "claim": "AOTAutograd artifacts use the normal AOT local-cache writer",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_functorch/_aot_autograd/autograd_cache.py",
+  "line": 940,
+  "quote": "AOTAutogradCache._write_to_local_cache(self.key, self.content)"
+ },
+ {
+  "id": "megacache.read.no_compat",
+  "claim": "No forward/backward compatibility guarantee across versions",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 204,
+  "quote": "NOTE: There's no FB/FC guarantees, results of cache artifacts will not be"
+ },
+ {
+  "id": "megacache.read.deser_fail",
+  "claim": "Deserialization failure is logged and returns None",
+  "path": "vendor/src/pytorch-v2.13.0/torch/compiler/_cache.py",
+  "line": 313,
+  "quote": "log.warning(\"Failed to un-pickle cache artifacts\", exc_info=True)"
+ },
+ {
+  "id": "torch_remote.env.fx",
+  "claim": "Remote FX graph cache env (tri-state)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 26,
+  "quote": "return get_tristate_env(\"TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE\")"
+ },
+ {
+  "id": "torch_remote.env.autotune",
+  "claim": "Remote autotune cache env (tri-state)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 38,
+  "quote": "return get_tristate_env(\"TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE\")"
+ },
+ {
+  "id": "torch_remote.env.bundled_autotune",
+  "claim": "Bundled remote autotune cache env (tri-state)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 42,
+  "quote": "return get_tristate_env(\"TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE\")"
+ },
+ {
+  "id": "torch_remote.default.oss_off",
+  "claim": "Unset means off in OSS",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/config.py",
+  "line": 121,
+  "quote": "# None: Not set -- Off for OSS, JustKnobs based for internal"
+ },
+ {
+  "id": "torch_remote.env.redis_url",
+  "claim": "OSS backend is Redis; TORCHINDUCTOR_REDIS_URL takes precedence",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 283,
+  "quote": "if \"TORCHINDUCTOR_REDIS_URL\" in os.environ:"
+ },
+ {
+  "id": "torch_remote.env.redis_host",
+  "claim": "Otherwise TORCHINDUCTOR_REDIS_HOST (default localhost)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 287,
+  "quote": "host=os.environ.get(\"TORCHINDUCTOR_REDIS_HOST\", \"localhost\"),"
+ },
+ {
+  "id": "torch_remote.env.redis_port",
+  "claim": "... and TORCHINDUCTOR_REDIS_PORT (default 6379)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 288,
+  "quote": "port=int(os.environ.get(\"TORCHINDUCTOR_REDIS_PORT\", 6379)),"
+ },
+ {
+  "id": "torch_remote.key.format",
+  "claim": "Redis key format is pt2:<cache_id>::<key>:c1",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 339,
+  "quote": "self._key_fmt = f\"pt2:{cache_id}::{{key}}:c{version}\""
+ },
+ {
+  "id": "torch_remote.content.fx_class",
+  "claim": "Remote cache classes are Redis-backed (e.g. RemoteFxGraphCache)",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 391,
+  "quote": "class RemoteFxGraphCache(RedisRemoteCache):"
+ },
+ {
+  "id": "torch_remote.read.conn_error",
+  "claim": "Redis connection errors silently disable the backend",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/remote_cache.py",
+  "line": 301,
+  "quote": "except redis.exceptions.ConnectionError:"
+ },
+ {
+  "id": "torch_remote.key.fx_id",
+  "claim": "FX remote cache id is fx-graph-v1",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 2264,
+  "quote": "cache_id = \"fx-graph-v1\""
+ },
+ {
+  "id": "torch_remote.write.base64",
+  "claim": "FX remote payload is base64 of the pickled entry inside JSON",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/codecache.py",
+  "line": 2188,
+  "quote": "\"data\": base64.b64encode(content).decode(\"ascii\"),"
+ },
+ {
+  "id": "torch_remote.key.autotune",
+  "claim": "Remote autotune key hashes torch_key, backend hash, configs hash, salt",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/autotune_cache.py",
+  "line": 250,
+  "quote": "torch_key().hex(), backend_hash, self.configs_hash, salt"
+ },
+ {
+  "id": "triton.engine.version",
+  "claim": "Vendored Triton is 3.7.1",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/__init__.py",
+  "line": 2,
+  "quote": "__version__ = '3.7.1'"
+ },
+ {
+  "id": "triton.engine.torch_pin",
+  "claim": "torch 2.13.0 pins this Triton commit",
+  "path": "vendor/src/pytorch-v2.13.0/.ci/docker/ci_commit_pins/triton.txt",
+  "line": 1,
+  "quote": "5d6048aa0a324e090ada215b609ea76620133845"
+ },
+ {
+  "id": "triton.env.cache_dir",
+  "claim": "TRITON_CACHE_DIR sets the kernel cache dir; default <TRITON_HOME>/.triton/cache",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 347,
+  "quote": "\"TRITON_CACHE_DIR\", lambda: cache.get_triton_dir(\"cache\")"
+ },
+ {
+  "id": "triton.env.home",
+  "claim": "TRITON_HOME defaults to expanduser('~/') evaluated at import",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 343,
+  "quote": "env_str(\"TRITON_HOME\", os.path.expanduser(\"~/\"))"
+ },
+ {
+  "id": "triton.default.dot_triton",
+  "claim": "Default dirs are <home>/.triton/<name>",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 353,
+  "quote": "return os.path.join(self.home_dir, \".triton\", dirname)"
+ },
+ {
+  "id": "triton.env.dump_dir",
+  "claim": "TRITON_DUMP_DIR (default ~/.triton/dump)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 345,
+  "quote": "\"TRITON_DUMP_DIR\", lambda: cache.get_triton_dir(\"dump\")"
+ },
+ {
+  "id": "triton.env.override_dir",
+  "claim": "TRITON_OVERRIDE_DIR (default ~/.triton/override)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 346,
+  "quote": "\"TRITON_OVERRIDE_DIR\", lambda: cache.get_triton_dir(\"override\")"
+ },
+ {
+  "id": "triton.env.lazy_read",
+  "claim": "Dir knobs are read from the environment at each access (no import-time freeze)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 118,
+  "quote": "env_val = getenv(self.key)"
+ },
+ {
+  "id": "triton.default.key_dir",
+  "claim": "Kernel files live in <cache dir>/<key>",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 53,
+  "quote": "self.cache_dir = os.path.join(self.cache_dir, self.key)"
+ },
+ {
+  "id": "triton.default.base32",
+  "claim": "The directory name is base32 of the sha256 key",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 256,
+  "quote": "return cls(_base32(key))"
+ },
+ {
+  "id": "triton.key.cache_key",
+  "claim": "Key = triton_key, source hash, backend hash, options hash, env vars",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 316,
+  "quote": "{triton_key()}-{src.hash()}-{backend.hash()}-{backend_options.hash()}"
+ },
+ {
+  "id": "triton.key.triton_key",
+  "claim": "triton_key = version + content hashes",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 312,
+  "quote": "return f'{__version__}' + '-'.join(contents)"
+ },
+ {
+  "id": "triton.key.libtriton",
+  "claim": "triton_key hashes the libtriton binary",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 300,
+  "quote": "with open(os.path.join(TRITON_PATH, \"_C\", f\"libtriton.{ext}\"), \"rb\") as f:"
+ },
+ {
+  "id": "triton.key.backend_sources",
+  "claim": "triton_key hashes all compiler and backend modules",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 290,
+  "quote": "(os.path.join(TRITON_PATH, \"backends\"), \"triton.backends.\"),"
+ },
+ {
+  "id": "triton.key.ptxas_arch",
+  "claim": "CUDA backend hash = ptxas version string + target arch",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/compiler.py",
+  "line": 561,
+  "quote": "return f'{version}-{self.target.arch}'"
+ },
+ {
+  "id": "triton.key.ptxas_version",
+  "claim": "ptxas version is obtained by running ptxas --version",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/compiler.py",
+  "line": 43,
+  "quote": "subprocess.check_output([get_ptxas(arch).path, \"--version\"])"
+ },
+ {
+  "id": "triton.key.extern_libs_content",
+  "claim": "Options hash includes libdevice by content hash",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/compiler.py",
+  "line": 145,
+  "quote": "tuple((k, file_hash(v)) for k, v in sorted(hash_dict[\"extern_libs\"]))"
+ },
+ {
+  "id": "triton.key.arch_option",
+  "claim": "arch option is sm<cc> or TRITON_OVERRIDE_ARCH",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/compiler.py",
+  "line": 182,
+  "quote": "args = {'arch': knobs.runtime.override_arch or f\"sm{self.target.arch}\"}"
+ },
+ {
+  "id": "triton.key.src_hash",
+  "claim": "Source hash = fn.cache_key, attrs, signature, constants",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 75,
+  "quote": "key = f\"{self.fn.cache_key}-{str(self.attrs)}-{sorted_sig}-{constants_key}\""
+ },
+ {
+  "id": "triton.key.fn_source_lineno",
+  "claim": "fn.cache_key = hash of source/deps + starting line number (+ constexpr globals)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/jit.py",
+  "line": 512,
+  "quote": "self.hash = dependencies_finder.ret + str(self.starting_line_number)"
+ },
+ {
+  "id": "triton.key.decorators_stripped",
+  "claim": "Hashed source excludes decorators",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/jit.py",
+  "line": 468,
+  "quote": "# function source code (without decorators)"
+ },
+ {
+  "id": "triton.key.env_vars",
+  "claim": "Cache-invalidating env vars (list in C++) are part of the key",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 245,
+  "quote": "env_vars = get_cache_invalidating_env_vars() if _env_vars is None else _env_vars"
+ },
+ {
+  "id": "triton_store.read.makedirs_on_lookup",
+  "claim": "Constructing the manager (done on every compile) makedirs the key dir",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 55,
+  "quote": "os.makedirs(self.cache_dir, exist_ok=True)"
+ },
+ {
+  "id": "triton_store.lock.path_unused",
+  "claim": "A lock path is computed but no lock is ever taken",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 54,
+  "quote": "self.lock_path = os.path.join(self.cache_dir, \"lock\")"
+ },
+ {
+  "id": "triton_store.write.tmp_dir",
+  "claim": "put writes into a unique temp dir tmp.pid_<pid>_<uuid4> inside the key dir",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 115,
+  "quote": "temp_dir = os.path.join(self.cache_dir, f\"tmp.pid_{pid}_{rnd_id}\")"
+ },
+ {
+  "id": "triton_store.write.os_replace",
+  "claim": "put publishes with os.replace (atomic)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 124,
+  "quote": "os.replace(temp_path, filepath)"
+ },
+ {
+  "id": "triton_store.write.tmpdir_cleanup",
+  "claim": "The temp dir is removed afterwards",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 125,
+  "quote": "os.removedirs(temp_dir)"
+ },
+ {
+  "id": "triton_store.reloc.put_returns_abs",
+  "claim": "put returns the joined (absolute) file path",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 109,
+  "quote": "filepath = self._make_path(filename)"
+ },
+ {
+  "id": "triton_store.reloc.abs_child_paths",
+  "claim": "Group index stores the child paths returned by put",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 98,
+  "quote": "grp_contents = json.dumps({\"child_paths\": group})"
+ },
+ {
+  "id": "triton_store.read.missing_children_dropped",
+  "claim": "get_group silently drops children whose path does not exist",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 90,
+  "quote": "if os.path.exists(p):"
+ },
+ {
+  "id": "triton_store.read.corrupt_group",
+  "claim": "Unreadable group JSON is treated as a miss",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 82,
+  "quote": "# exit on corrupted cache."
+ },
+ {
+  "id": "triton_store.content.group_name",
+  "claim": "Group index file is __grp__<name>.json",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 99,
+  "quote": "grp_filename = f\"__grp__{filename}\""
+ },
+ {
+  "id": "triton_store.read.group_lookup",
+  "claim": "Lookup reads the group index for <name>.json",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 265,
+  "quote": "metadata_group = fn_cache_manager.get_group(metadata_filename) or {}"
+ },
+ {
+  "id": "triton_store.read.group_hit",
+  "claim": "Hit iff the metadata JSON path is present (and TRITON_ALWAYS_COMPILE unset)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 268,
+  "quote": "if not always_compile and metadata_path is not None:"
+ },
+ {
+  "id": "triton_store.env.always_compile",
+  "claim": "TRITON_ALWAYS_COMPILE forces recompilation",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 361,
+  "quote": "always_compile: env_bool = env_bool(\"TRITON_ALWAYS_COMPILE\")"
+ },
+ {
+  "id": "triton_store.write.group_last",
+  "claim": "Group index is written last, after all files",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 356,
+  "quote": "fn_cache_manager.put_group(metadata_filename, metadata_group)"
+ },
+ {
+  "id": "triton_store.content.metadata_json",
+  "claim": "Metadata file is <name>.json",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 264,
+  "quote": "metadata_filename = f\"{file_name}.json\""
+ },
+ {
+  "id": "triton_store.content.source_file",
+  "claim": "Initial IR is stored as <name>.source",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 316,
+  "quote": "ir_filename = f\"{file_name}.source\""
+ },
+ {
+  "id": "triton_store.content.stage_files",
+  "claim": "Every IR stage output (ttir/ttgir/llir/ptx/cubin) is stored",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 339,
+  "quote": "metadata_group[ir_filename] = fn_cache_manager.put(next_module, ir_filename)"
+ },
+ {
+  "id": "triton_store.content.binary_only",
+  "claim": "TRITON_STORE_BINARY_ONLY keeps only cubin/hsaco/json",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 338,
+  "quote": "if (not store_only_binary) or (ext in (\"cubin\", \"hsaco\", \"json\")):"
+ },
+ {
+  "id": "triton_store.env.store_binary_only",
+  "claim": "TRITON_STORE_BINARY_ONLY knob",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 360,
+  "quote": "store_binary_only: env_bool = env_bool(\"TRITON_STORE_BINARY_ONLY\")"
+ },
+ {
+  "id": "triton_store.read.hit_reads_cubin",
+  "claim": "On a hit the kernel binary is read from the listed files",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/compiler/compiler.py",
+  "line": 431,
+  "quote": "self.kernel = self.asm[binary_ext]"
+ },
+ {
+  "id": "triton_store.write.ptxas_tmpfiles",
+  "claim": "ptxas runs on NamedTemporaryFiles in TMPDIR, not in the cache dir",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/compiler.py",
+  "line": 468,
+  "quote": "tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.ptx')"
+ },
+ {
+  "id": "triton_launcher.content.cuda_utils",
+  "claim": "The NVIDIA driver builds one C extension named cuda_utils",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/driver.py",
+  "line": 68,
+  "quote": "name=\"cuda_utils\","
+ },
+ {
+  "id": "triton_launcher.content.driver_c",
+  "claim": "Its source is backends/nvidia/driver.c",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/driver.py",
+  "line": 67,
+  "quote": "src=Path(os.path.join(dirname, \"driver.c\")).read_text(),"
+ },
+ {
+  "id": "triton_launcher.engine.generic_launch",
+  "claim": "Kernels launch through the generic utils.launch (no per-kernel launcher .so)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/driver.py",
+  "line": 300,
+  "quote": "launcher = triton.runtime.driver.active.utils.launch"
+ },
+ {
+  "id": "triton_launcher.key.src_platform",
+  "claim": "Key = sha256(C source + platform key)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 77,
+  "quote": "key = hashlib.sha256((src + platform_key()).encode(\"utf-8\")).hexdigest()"
+ },
+ {
+  "id": "triton_launcher.key.platform",
+  "claim": "Platform key = machine, system, architecture",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 62,
+  "quote": "return \",\".join([machine(), system(), *architecture()])"
+ },
+ {
+  "id": "triton_launcher.content.ext_suffix",
+  "claim": "File name is <name><EXT_SUFFIX> (CPython ABI tag)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 80,
+  "quote": "cache_path = cache.get_file(f\"{name}{suffix}\")"
+ },
+ {
+  "id": "triton_launcher.read.load_fail_rebuild",
+  "claim": "Import failure of a cached .so logs a warning and rebuilds",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 87,
+  "quote": "Triton cache error: compiled module {name}.so could not be loaded"
+ },
+ {
+  "id": "triton_launcher.write.tmpdir",
+  "claim": "Build happens in a TemporaryDirectory (TMPDIR)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 89,
+  "quote": "with tempfile.TemporaryDirectory() as tmpdir:"
+ },
+ {
+  "id": "triton_launcher.write.put",
+  "claim": "The .so bytes are published via the cache manager put (atomic)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 95,
+  "quote": "cache_path = cache.put(f.read(), f\"{name}{suffix}\", binary=True)"
+ },
+ {
+  "id": "triton_launcher.reloc.no_rpath",
+  "claim": "Compile command has no rpath",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 43,
+  "quote": "cc_cmd = [cc, src, \"-O3\", \"-shared\", \"-fPIC\", \"-Wno-psabi\", \"-o\", so]"
+ },
+ {
+  "id": "triton_launcher.env.cc",
+  "claim": "Compiler from CC, else gcc/clang",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/build.py",
+  "line": 26,
+  "quote": "cc = os.environ.get(\"CC\")"
+ },
+ {
+  "id": "triton_launcher.env.libcuda",
+  "claim": "TRITON_LIBCUDA_PATH overrides libcuda discovery (not part of the key)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/driver.py",
+  "line": 26,
+  "quote": "if env_libcuda_path := knobs.nvidia.libcuda_path:"
+ },
+ {
+  "id": "triton_launcher.key.libcuda_flags",
+  "claim": "Library dirs are passed as build flags, not hashed",
+  "path": "vendor/src/triton-3.7.1-5d6048a/third_party/nvidia/backend/driver.py",
+  "line": 69,
+  "quote": "library_dirs=library_dirs(),"
+ },
+ {
+  "id": "triton_autotune.env.cache",
+  "claim": "TRITON_CACHE_AUTOTUNING enables the autotuner disk cache",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 375,
+  "quote": "cache: env_bool = env_bool(\"TRITON_CACHE_AUTOTUNING\")"
+ },
+ {
+  "id": "triton_autotune.default.opt_in",
+  "claim": "Disk cache is opt-in (cache_results or the knob)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 39,
+  "quote": "(cache_results or knobs.autotuning.cache) and not knobs.runtime.interpret"
+ },
+ {
+  "id": "triton_autotune.key.backend",
+  "claim": "Key includes the backend hash (ptxas version + arch)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 185,
+  "quote": "make_backend(driver.active.get_current_target()).hash(),"
+ },
+ {
+  "id": "triton_autotune.key.env_vars",
+  "claim": "Key includes cache-invalidating env vars",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 187,
+  "quote": "str(sorted(env_vars.items())),"
+ },
+ {
+  "id": "triton_autotune.key.configs",
+  "claim": "Key includes all candidate configs",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 189,
+  "quote": "] + [str(c) for c in configs]"
+ },
+ {
+  "id": "triton_autotune.key.tuning_key",
+  "claim": "Tuning key = values of the declared key args ...",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 218,
+  "quote": "key = [_args[key] for key in self.keys if key in _args]"
+ },
+ {
+  "id": "triton_autotune.key.dtypes",
+  "claim": "... plus dtypes of all tensor args",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 221,
+  "quote": "key.append(str(arg.dtype))"
+ },
+ {
+  "id": "triton_autotune.key.cache_manager",
+  "claim": "Stored through the same Triton cache manager",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 191,
+  "quote": "cache = get_cache_manager(cache_key)"
+ },
+ {
+  "id": "triton_autotune.default.file",
+  "claim": "File name <fn>.autotune.json",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 192,
+  "quote": "file_name = f\"{fn.__name__[:150]}.autotune.json\""
+ },
+ {
+  "id": "triton_autotune.write.put",
+  "claim": "Written with the manager's put (text)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 209,
+  "quote": "}), file_name, binary=False)"
+ },
+ {
+  "id": "triton_autotune.read.no_validation",
+  "claim": "Read is a bare json.load (no error handling)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 196,
+  "quote": "timings = json.load(cached_configs)[\"configs_timings\"]"
+ },
+ {
+  "id": "triton_autotune.read.prehook_skip",
+  "claim": "Configs with pre_hooks bypass the disk cache",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/autotuner.py",
+  "line": 172,
+  "quote": "if not tuning_key or any(cfg.pre_hook for cfg in configs):"
+ },
+ {
+  "id": "triton_manager.env.class",
+  "claim": "TRITON_CACHE_MANAGER selects the cache manager class",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 349,
+  "quote": "env_class(\"TRITON_CACHE_MANAGER\", \"CacheManager\")"
+ },
+ {
+  "id": "triton_manager.engine.format",
+  "claim": "Value must be MODULE:CLASS",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 166,
+  "quote": "isn't of the form MODULE:CLASS"
+ },
+ {
+  "id": "triton_manager.engine.import",
+  "claim": "The module is imported with importlib and the class fetched by name",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 167,
+  "quote": "cls = getattr(importlib.import_module(comps[0]), comps[1])"
+ },
+ {
+  "id": "triton_manager.engine.mro_check",
+  "claim": "Class must have a base named CacheManager in its MRO",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 169,
+  "quote": "if not any((c.__name__ == self.type for c in cls.mro())):"
+ },
+ {
+  "id": "triton_manager.engine.resolved_per_access",
+  "claim": "The env var is re-read on each access of the knob",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 161,
+  "quote": "val = getenv(self.key)"
+ },
+ {
+  "id": "triton_manager.engine.factory",
+  "claim": "get_cache_manager uses the configured class or FileCacheManager",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 255,
+  "quote": "cls = knobs.cache.manager_class or FileCacheManager"
+ },
+ {
+  "id": "triton_manager.engine.override_ctor",
+  "claim": "Override manager is constructed with override=True",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 261,
+  "quote": "return cls(_base32(key), override=True)"
+ },
+ {
+  "id": "triton_manager.engine.dump_ctor",
+  "claim": "Dump manager is constructed with dump=True",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 266,
+  "quote": "return cls(_base32(key), dump=True)"
+ },
+ {
+  "id": "triton_manager.engine.ctor_sig",
+  "claim": "Constructor signature (key, override, dump)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 16,
+  "quote": "def __init__(self, key, override=False, dump=False):"
+ },
+ {
+  "id": "triton_manager.engine.api_get_file",
+  "claim": "API: get_file(filename) -> path or None",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 20,
+  "quote": "def get_file(self, filename) -> Optional[str]:"
+ },
+ {
+  "id": "triton_manager.engine.api_put",
+  "claim": "API: put(data, filename, binary) -> path",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 24,
+  "quote": "def put(self, data, filename, binary=True) -> str:"
+ },
+ {
+  "id": "triton_manager.engine.api_get_group",
+  "claim": "API: get_group(filename) -> {child: path}",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 28,
+  "quote": "def get_group(self, filename: str) -> Optional[Dict[str, str]]:"
+ },
+ {
+  "id": "triton_manager.engine.api_put_group",
+  "claim": "API: put_group(filename, group)",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 32,
+  "quote": "def put_group(self, filename: str, group: Dict[str, str]):"
+ },
+ {
+  "id": "triton_manager.env.remote_backend",
+  "claim": "TRITON_REMOTE_CACHE_BACKEND selects the backend for RemoteCacheManager",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 350,
+  "quote": "env_class(\"TRITON_REMOTE_CACHE_BACKEND\", \"RemoteCacheBackend\")"
+ },
+ {
+  "id": "triton_manager.engine.remote_materialize",
+  "claim": "RemoteCacheManager materializes data through a local FileCacheManager",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 182,
+  "quote": "self._file_cache_manager = FileCacheManager(key, override=override, dump=dump)"
+ },
+ {
+  "id": "triton_manager.engine.remote_always_get",
+  "claim": "RemoteCacheManager always queries the backend on get_file",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 196,
+  "quote": "results = self._backend.get([filename])"
+ },
+ {
+  "id": "triton_manager.engine.redis_knob_bug",
+  "claim": "Built-in Redis backend reads knobs.cache.redis, which cache_knobs does not define",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/runtime/cache.py",
+  "line": 151,
+  "quote": "self._key_fmt = knobs.cache.redis.key_format"
+ },
+ {
+  "id": "triton_manager.engine.redis_knobs_module",
+  "claim": "Redis knobs are a module-level object knobs.redis",
+  "path": "vendor/src/triton-3.7.1-5d6048a/python/triton/knobs.py",
+  "line": 554,
+  "quote": "redis = redis_knobs()"
+ },
+ {
+  "id": "triton_manager.engine.inductor_bypass",
+  "claim": "Inductor builds static-launch cubin paths under triton_cache_dir itself, bypassing the manager",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 2542,
+  "quote": "triton_cache_dir(triton_meta.get(\"device\", 0)),"
+ },
+ {
+  "id": "triton_manager.engine.static_fallback",
+  "claim": "If that cubin path is missing, static launch is bypassed",
+  "path": "vendor/src/pytorch-v2.13.0/torch/_inductor/runtime/triton_heuristics.py",
+  "line": 2549,
+  "quote": "f\"Cubin path not found: {cubin_location}\""
+ }
+]

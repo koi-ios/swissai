@@ -1,0 +1,73 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_a_later_job_finds_the_all_reduce_kernel_prepare_built __________
+
+tmp_path = PosixPath('/private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1103d1310>
+
+    def test_a_later_job_finds_the_all_reduce_kernel_prepare_built(tmp_path, monkeypatch):
+        model = tmp_path / "Apertus-8B-Instruct-2509"
+        model.mkdir()
+        (model / "config.json").write_text("{}")
+        artifact = tmp_path / "apertus8b-tp2"
+        sharder = tmp_path / "fake_sglang_0_5_20.py"
+        sharder.write_text(FAKE_SGLANG_0_5_20)
+        monkeypatch.setattr("servekit.prepare.SAVE_SCRIPT", sharder)
+        monkeypatch.delenv("SGLANG_JIT_CACHE_DIR", raising=False)
+    
+        # Job 1 prepares on node 1, with that job's own $HOME and /tmp.
+        monkeypatch.setenv("HOME", str(tmp_path / "job1-home"))
+        assert prepare(model, artifact, tp=2, cache_root=tmp_path / "node1-tmp") == 0
+    
+        # Job 2 serves on node 2: a fresh $HOME and /tmp, only the artifact carries over.
+        monkeypatch.setenv("HOME", str(tmp_path / "job2-home"))
+        seen = {}
+    
+        def fake_run_profile(command, ready_timeout=1800.0, on_ready=None, head=True, env=None):
+            seen["built"] = _built({**os.environ, **(env or {})})
+            return ProfileReport(command="", started_at=0.0, ready_at=1.0, success=True, framework="sglang")
+    
+        def fake_stage(src, dest, slices=64, file_pattern="*"):
+            return StageResult(dest=dest, wall_s=0.1, gbps=1.0, bytes=1)
+    
+        monkeypatch.setattr("servekit.launch.run_profile", fake_run_profile)
+        monkeypatch.setattr("servekit.launch.stage", fake_stage)
+        monkeypatch.setattr("servekit.launch.DEFAULT_ROOT", tmp_path / "node2-shm")
+        monkeypatch.setattr("servekit.launch.DEFAULT_CACHE_ROOT", tmp_path / "node2-tmp")
+        rc = main([
+            "launch", "--servekit-artifact-path", str(artifact), "--out", str(tmp_path / "run.json"),
+            "--", "python", "-m", "sglang.launch_server",
+            "--model-path", str(model), "--tensor-parallel-size", "2",
+        ])
+    
+        assert rc == 0
+>       assert seen["built"], "job 2 rebuilds the custom all-reduce: prepare did not keep sglang 0.5.20's load_jit cache"
+E       AssertionError: job 2 rebuilds the custom all-reduce: prepare did not keep sglang 0.5.20's load_jit cache
+E       assert False
+
+tests/test_jit_cache_regression.py:87: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[SERVEKIT] preparing /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/Apertus-8B-Instruct-2509 -> /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/apertus8b-tp2 (tp=2, pp=1)
+[SERVEKIT] kept 0 JIT cache files in /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/apertus8b-tp2/servekit-caches
+[SERVEKIT] prepared 2 ranks in /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/apertus8b-tp2; manifest written to /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/apertus8b-tp2/servekit.json
+[SERVEKIT] launch it with: servekit launch --servekit-artifact-path /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/apertus8b-tp2 -- python -m sglang.launch_server --model-path /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/Apertus-8B-Instruct-2509 --tensor-parallel-size 2 --pipeline-parallel-size 1
+[SERVEKIT] staging /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/apertus8b-tp2 -> /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/node2-shm/apertus8b-tp2
+[SERVEKIT] staged 0.0 GB in 0.10 s (1.00 GB/s)
+[SERVEKIT] staged JIT caches from /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/apertus8b-tp2/servekit-caches
+[SERVEKIT] launching: python -m sglang.launch_server --model-path /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/node2-shm/apertus8b-tp2 --tensor-parallel-size 2 --load-format sharded_state
+
+[SERVEKIT] Cold-start profile (framework=sglang)
+-------------------------
+phase  duration_s  source
+-------------------------
+stage        0.10  wall_clock
+-------------------------
+total  -1794443400.78  ready
+
+report written to /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/run.json
+----------------------------- Captured stderr call -----------------------------
+[SERVEKIT] dropping sglang_35715: exit code error: no sglang holding srt/models/deepseek_v2.py was importable; tried: /Users/koiios/Documents/Projects/swissai/opportunities/02-servekit-cache-fix/vendor/servekit-main/tests/sglang/srt/models/deepseek_v2.py /Users/koiios/Documents/Projects/swissai/opportunities/02-servekit-cache-fix/vendor/servekit-main/sglang/srt/models/deepseek_v2.py /Users/koiios/Documents/Projects/swissai/opportunities/02-servekit-cache-fix/vendor/servekit-main/src/sglang/srt/models/deepseek_v2.py /Users/koiios/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python312.zip/sglang/srt/models/deepseek_v2.py /Users/koiios/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/sglang/srt/models/deepseek_v2.py /Users/koiios/.local/share/uv/python/cpython-3.12-macos-aarch64-none/lib/python3.12/lib-dynload/sglang/srt/models/deepseek_v2.py /Users/koiios/Documents/Projects/swissai/opportunities/02-servekit-cache-fix/.venv/lib/python3.12/site-packages/sglang/srt/models/deepseek_v2.py
+[SERVEKIT] server never reported ready; /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/node2-shm/apertus8b-tp2 left in place (rm -r /private/var/folders/dr/97x1jxlj11xfd7_b5jw_gxxm0000gn/T/pytest-of-koiios/pytest-11/test_a_later_job_finds_the_all0/node2-shm/apertus8b-tp2)
+=========================== short test summary info ============================
+FAILED tests/test_jit_cache_regression.py::test_a_later_job_finds_the_all_reduce_kernel_prepare_built
+1 failed in 0.08s

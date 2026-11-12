@@ -1,0 +1,32 @@
+# Local checks, 2026-11-12T05:38Z, macOS arm64, no GPU
+
+## servekit (vendor/servekit, branch vllm-fast-loading = cd8f0b8 + patches/)
+6ce495d docs: vLLM in the README; tick the roadmap item
+6b22366 feat: vllm fast weight loading (servekit launch -- vllm serve ...)
+c8bafde test: skip the O_DIRECT stager tests where the platform has none
+cd8f0b8 feat: servekit launch applies the vendored sglang backports itself (#25)
+195 passed, 3 skipped, 8 deselected in 19.21s
+
+## prelim selftest (serve-kit-vllm-prelim/tests/selftest.sh)
+  skip  eviction (posix_fadvise needs Linux; residency and --warm still run)
+  skip  servekit launch (needs Linux and /dev/shm with > 11 GiB free; its stager keeps 10 GiB headroom)
+57 passed, 0 failed
+
+## modal_app.py --dry-run
+servekit source : /Users/koiios/Documents/Projects/swissai/opportunities/03-servekit-vllm/vendor/servekit
+harness         : /Users/koiios/Documents/Projects/swissai/serve-kit-vllm-prelim
+image           : vllm/vllm-openai:v0.33.0 + servekit (pip install, entry point checked at build) + harness
+GPU             : A10G; container 8 CPU, 48 GiB; vLLM args: --max-model-len 4096 --gpu-memory-utilization 0.90
+modal           : modal 1.6.3: the app builds locally with functions download, selftest, smoke, experiment_tp1, experiment_tp2
+arms            : default_net, default_local, lazy_net, eager_net, prefetch8_net, prefetch32_net, instanttensor_net, fastsafetensors_net, runai_net, sharded_net, runai_sharded_net, staged_shm, servekit_serial, servekit_overlap
+
+function          GPUs  est. h  est. USD  what
+download             0    0.25      0.06  weights into the hf-cache Volume
+selftest             0    0.10      0.03  mock-engine selftest on Linux
+smoke                1    0.35      0.65  TP1, 1 repeat: default_net, servekit_serial, servekit_overlap
+experiment_tp1       1    3.00      5.58  TP1, 3 cold repeats x 14 arms + staging sweep + Day-1 baseline
+experiment_tp2       2    2.50      7.40  TP2, 3 cold repeats x 14 arms
+total                              13.72  (estimate; check modal.com/pricing)
+
+split: account A runs download, selftest, smoke, experiment_tp1; account B runs download and experiment_tp2 (Volumes are per account, so each downloads once)
+dry run: OK

@@ -1,0 +1,81 @@
+From 57f90a2fafd3d1e923e5b8b10fad07fafdda9fef Mon Sep 17 00:00:00 2001
+From: cache-audit <noreply@example.invalid>
+Date: Thu, 12 Nov 2026 07:11:04 +0100
+Subject: [PATCH 4/4] launchers: a missing nvidia-smi must not abort master.sh
+ (#270)
+
+master.sh runs under set -euo pipefail, so a failing probe inside the
+cache-key command substitutions would kill the launch. Fall back to an
+'smunknown' arch directory instead, and test it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../launchers/framework.py                    |  4 ++--
+ tests/unit/test_jit_cache.py                  | 20 +++++++++++++++----
+ 2 files changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/src/swiss_ai_model_launch/launchers/framework.py b/src/swiss_ai_model_launch/launchers/framework.py
+index 837818f..ad77907 100644
+--- a/src/swiss_ai_model_launch/launchers/framework.py
++++ b/src/swiss_ai_model_launch/launchers/framework.py
+@@ -566,7 +566,7 @@ def _render_jit_cache_setup(launch_args: LaunchArgs) -> str:
+         f'SML_JIT_CACHE_LOCAL="{JIT_CACHE_LOCAL}"\n'
+         'SML_JIT_CACHE_SHARED=""\n'
+         'sml_img=$(sed -n \'s|^ *image *= *"\\([^"]*\\)".*|\\1|p\' '
+-        f'"{env}" | head -1 | sed "s|{{arch}}|${{SML_ARCH}}|g")\n'
++        f'"{env}" | head -1 | sed "s|{{arch}}|${{SML_ARCH}}|g") || sml_img=""\n'
+         'if [[ -r "${sml_img}.digest" ]]; then\n'
+         "    sml_key=$(head -1 \"${sml_img}.digest\" | tr ':' '-' | cut -c1-23)\n"
+         'elif [[ -f "$sml_img" && "$(head -c 4 "$sml_img")" == "hsqs" ]]; then\n'
+@@ -576,7 +576,7 @@ def _render_jit_cache_setup(launch_args: LaunchArgs) -> str:
+         '    sml_key="ref-$(printf \'%s\' "$sml_img" | sha256sum | cut -c1-16)"\n'
+         "fi\n"
+         "sml_cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null"
+-        " | head -1 | tr -d '.[:space:]')\n"
++        " | head -1 | tr -d '.[:space:]') || sml_cc=\"\"\n"
+         f'SML_JIT_CACHE_SHARED="{launch_args.jit_cache_root}/${{sml_key}}/sm${{sml_cc:-unknown}}"\n'
+         "# Readers without write access still seed; only promotion needs it.\n"
+         'mkdir -p "$SML_JIT_CACHE_SHARED" 2>/dev/null || true\n'
+diff --git a/tests/unit/test_jit_cache.py b/tests/unit/test_jit_cache.py
+index b9d9a07..75413bc 100644
+--- a/tests/unit/test_jit_cache.py
++++ b/tests/unit/test_jit_cache.py
+@@ -53,12 +53,15 @@ def _fake_sqsh(path: Path, salt: bytes = b"") -> Path:
+     return path
+ 
+ 
+-def _run_setup(tmp_path: Path, env_file: Path, args: LaunchArgs) -> dict[str, str]:
++def _run_setup(tmp_path: Path, env_file: Path, args: LaunchArgs, smi: bool = True) -> dict[str, str]:
+     bin_dir = tmp_path / "bin"
+     bin_dir.mkdir(exist_ok=True)
+-    smi = bin_dir / "nvidia-smi"
+-    smi.write_text("#!/bin/sh\necho 9.0\necho 9.0\n")
+-    smi.chmod(0o755)
++    fake = bin_dir / "nvidia-smi"
++    if smi:
++        fake.write_text("#!/bin/sh\necho 9.0\necho 9.0\n")
++        fake.chmod(0o755)
++    elif fake.exists():
++        fake.unlink()
+     ranks = tmp_path / "ranks"
+     ranks.mkdir(exist_ok=True)
+     script = (
+@@ -97,6 +100,15 @@ def test_bash_key_matches_helper_and_changes_on_rebuild(tmp_path: Path) -> None:
+     assert out3["SHARED"] == "/root/sha256-0123456789abcdef/sm90"
+ 
+ 
++@pytest.mark.skipif(not _HAS_SHA256SUM, reason="needs coreutils sha256sum")
++def test_missing_nvidia_smi_does_not_abort_the_job(tmp_path: Path) -> None:
++    """master.sh runs under `set -euo pipefail`: a failing probe must not kill the launch."""
++    env_file = tmp_path / "env.toml"
++    env_file.write_text('image = "docker.io/vllm/vllm-openai:v0.32.0"\n')
++    out = _run_setup(tmp_path, env_file, _args(str(env_file), jit_cache_root="/root"), smi=False)
++    assert out["SHARED"].endswith("/smunknown")
++
++
+ @pytest.mark.skipif(not _HAS_SHA256SUM, reason="needs coreutils sha256sum")
+ def test_shared_mode_points_caches_at_shared_dir(tmp_path: Path) -> None:
+     env_file = tmp_path / "env.toml"
+-- 
+2.50.1 (Apple Git-155)
+

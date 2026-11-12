@@ -1,0 +1,204 @@
+{
+ "config": {
+  "min_idle_s": 1.0,
+  "idle_cost_ratio": 0.0,
+  "horizon_s": 1800.0,
+  "session_gap_s": 900.0,
+  "max_launches": 2000
+ },
+ "models": {
+  "swissai/Apertus-70B-Instruct": {
+   "launches": 105,
+   "requests_per_launch_p50": 9.0,
+   "default": {
+    "ready_s": 43.428687999999994,
+    "startup_wait_s_mean": 163.21991087609467,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 163.21991087609467,
+    "total_extra_s_p50": 123.11075190844724
+   },
+   "fixed": {
+    "ready_s": 1.4249999999999998,
+    "startup_wait_s_mean": 2.430114294233776,
+    "eager_prefill_penalty_s_mean": 0.8972666666666714,
+    "eager_decode_penalty_s_mean": 62.92798205495099,
+    "eager_prefill_share": 0.9955258911544668,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 66.25536301585143,
+    "total_extra_s_p50": 2.8499999999999996
+   },
+   "lazy": {
+    "ready_s": 1.4249999999999998,
+    "startup_wait_s_mean": 2.430114294233776,
+    "eager_prefill_penalty_s_mean": 0.17688571428571362,
+    "eager_decode_penalty_s_mean": 3.2132602860042034,
+    "eager_prefill_share": 0.12300132022883967,
+    "interference_s_mean": 0.21858769523808272,
+    "delayed_request_share": 0.0073346046648085665,
+    "max_delay_s": 0.9276160686645554,
+    "total_extra_s_mean": 6.038847989761775,
+    "total_extra_s_p50": 2.6459999103546137,
+    "launches_fully_captured_share": 0.9809523809523809,
+    "all_captured_after_s_p50": 58.342687986648464,
+    "all_captured_after_s_p90": 113.37972324043575
+   },
+   "plan": {
+    "startup_capture_s": 1.4249999999999998,
+    "default_capture_s": 43.428687999999994,
+    "initial": {
+     "decode": [
+      1,
+      2,
+      4,
+      8,
+      40
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 31,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  },
+  "Apertus-70B-sft-mixture-8e-aligned-swissai": {
+   "launches": 38,
+   "requests_per_launch_p50": 15.0,
+   "default": {
+    "ready_s": 43.428688,
+    "startup_wait_s_mean": 174.06996839585554,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 174.06996839585554,
+    "total_extra_s_p50": 110.91625193896485
+   },
+   "fixed": {
+    "ready_s": 2.8499999999999996,
+    "startup_wait_s_mean": 4.948473684411297,
+    "eager_prefill_penalty_s_mean": 0.7618421052631613,
+    "eager_decode_penalty_s_mean": 0.15945629653177762,
+    "eager_prefill_share": 0.9923547400611621,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 5.869772086206238,
+    "total_extra_s_p50": 5.809999999999999
+   },
+   "lazy": {
+    "ready_s": 2.8499999999999996,
+    "startup_wait_s_mean": 4.948473684411297,
+    "eager_prefill_penalty_s_mean": 0.5708157894736869,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.5045871559633027,
+    "interference_s_mean": 0.5151511338019024,
+    "delayed_request_share": 0.021916411824668705,
+    "max_delay_s": 1.0764520228881835,
+    "total_extra_s_mean": 6.034440607686888,
+    "total_extra_s_p50": 5.7299999999999995,
+    "launches_fully_captured_share": 0.9736842105263158,
+    "all_captured_after_s_p50": 64.17518390653983,
+    "all_captured_after_s_p90": 176.8202879889373
+   },
+   "plan": {
+    "startup_capture_s": 2.8499999999999996,
+    "default_capture_s": 43.428688,
+    "initial": {
+     "decode": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      40,
+      48
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 26,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  },
+  "Qwen/Qwen3-Next-80B-A3B-Instruct": {
+   "launches": 28,
+   "requests_per_launch_p50": 257.5,
+   "default": {
+    "ready_s": 43.428687999999994,
+    "startup_wait_s_mean": 1733.5754538990998,
+    "eager_prefill_penalty_s_mean": 0.0,
+    "eager_decode_penalty_s_mean": 0.0,
+    "eager_prefill_share": 0.0,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 1733.5754538990998,
+    "total_extra_s_p50": 1041.6565121497267
+   },
+   "fixed": {
+    "ready_s": 0.285,
+    "startup_wait_s_mean": 2.2646428595270427,
+    "eager_prefill_penalty_s_mean": 2.861964285714279,
+    "eager_decode_penalty_s_mean": 2877.7415265732166,
+    "eager_prefill_share": 0.9999356871824555,
+    "interference_s_mean": 0.0,
+    "delayed_request_share": 0.0,
+    "max_delay_s": 0.0,
+    "total_extra_s_mean": 2882.868133718457,
+    "total_extra_s_p50": 2264.9086156953217
+   },
+   "lazy": {
+    "ready_s": 0.285,
+    "startup_wait_s_mean": 2.2646428595270427,
+    "eager_prefill_penalty_s_mean": 0.27807142857142864,
+    "eager_decode_penalty_s_mean": 354.3880653558262,
+    "eager_prefill_share": 0.0890089394816387,
+    "interference_s_mean": 0.13327755657849824,
+    "delayed_request_share": 0.0005788153579008296,
+    "max_delay_s": 0.8652200209808285,
+    "total_extra_s_mean": 357.0640572005032,
+    "total_extra_s_p50": 217.01015561836962,
+    "launches_fully_captured_share": 1.0,
+    "all_captured_after_s_p50": 74.23968807534017,
+    "all_captured_after_s_p90": 146.09608794525883
+   },
+   "plan": {
+    "startup_capture_s": 0.285,
+    "default_capture_s": 43.428687999999994,
+    "initial": {
+     "decode": [
+      64
+     ],
+     "prefill": []
+    },
+    "n_deferred": {
+     "decode": 35,
+     "prefill": 58
+    },
+    "lazy": true
+   },
+   "engine": "llama70b_tp4_gh200",
+   "penalty_source": "PREDICTED (costs.py docstring); replace with Modal data"
+  }
+ }
+}

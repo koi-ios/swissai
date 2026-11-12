@@ -1,0 +1,2 @@
+W1112 07:38:29.423000 52568 .venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+ready on http://127.0.0.1:18102
