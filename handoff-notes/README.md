@@ -14,3 +14,7 @@ Partial research notes from seven workers that the vLLM-prelim session ("Claude.
 | [python-startup/](python-startup/) | 05-python-startup | The only `SyntaxWarning` is torchao `quant_api.py:1731`. It is raised by each process that compiles the file before a `.pyc` exists. That is twice on the head node, where the wrapper and the bench race, and once on every other node (refined by the 05 session). The vLLM images install with `uv`, without `--compile-bytecode`, so they likely ship no `.pyc` files. |
 | [opentela-73/NOTES.md](opentela-73/NOTES.md) | 06-opentela-73 | Leading hypothesis: priority (Lamport height) regression. The worker's store is wiped on shutdown, so its new rows lose to its own higher-priority `LEFT` row. |
 | [servekit-correctness/NOTES.md](servekit-correctness/NOTES.md) | 08-preshard-roundtrip, 07-verify-tolerance | servekit's #19 backport no longer applies on SGLang 0.5.20 and 0.5.23. vLLM 0.33 MLA registers `W_UV`/`W_UK_T` as non-contiguous views, so its `_filter_subtensors` should raise on save (a prediction). SGLang 0.5.20 has a `PreshardedModelLoader`. |
+
+## Side-session notes
+
+[side-session/](side-session/) holds nine hand-over notes that the opportunity sessions wrote for each other on 12 Nov. They were copied here on 12 Nov from the app's folder (`~/Library/Application Support/Claude/side-session-notes/`), where the originals remain. Several STATUS files call that folder "the shared notes folder".

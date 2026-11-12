@@ -1,6 +1,6 @@
 # Shared context for the opportunity sessions
 
-Written 11 Nov 2026 by the coordinating session. Every session reads this first. It holds what has been verified, the rules, and the layout each session's deliverables follow.
+Written 11 Nov 2026 by the coordinating session. Every session reads this first. It holds what has been verified, and the layout each session's deliverables follow. Updated 12 Nov 2026: the rules moved to `../AGENTS.md`.
 
 ## Goal
 
@@ -49,12 +49,13 @@ The bar: these researchers should be impressed by both the ideas and the results
   - Images are built in the private `swiss-ai/model-launch-images`; open PR #272 renames them to `sglang_nvidia` and `vllm_nvidia`.
   - No env file sets a cache variable, and model-launch never calls servekit.
   - Every model added since September 2026 runs on vLLM; the large flagships run on SGLang.
+  - Nothing public pins the vLLM version in `vllm_base`. Project 01 assumes 0.32.0, inferred from release dates; projects 03, 04, 05, 07 and 08 target 0.33.0, the newest release on 11 Nov. Ask the maintainers before relying on either.
 - **servekit** (`eth-easl/servekit`, main at cd8f0b8).
   - SGLang only: presharded `sharded_state`, parallel sliced staging to `/dev/shm`, and `--overlap` with a barrier shim.
   - Commands: `profile` (parses SGLang and vLLM logs), `verify` (logprobs, 1e-6 tolerance), `bench`.
   - JIT cache (`jit_cache.py`): `TRITON_CACHE_DIR`, `TVM_FFI_CACHE_DIR` and `FLASHINFER_WORKSPACE_BASE`, stored in `<artifact>/servekit-caches` and copied to `/tmp/servekit/caches/<artifact-name>`. The path is fixed because ninja bakes in absolute paths.
   - Roadmap: vLLM support.
-  - Open: PR #26 (`profile --log` for vLLM), #19 (MLA round-trip), #9 (Kimi-K3 quantization).
+  - Open: PR #26 (`profile --log` for vLLM), #19 (MLA round-trip), #9 (Kimi-K3: the title says quantization, the body says pipeline-parallel presharding is missing). #14 (MXFP4 expert weights dropped) is closed, by the guard in #16.
 - **Open issues.**
   - **model-launch #270 (persistent compile caches).** Startup on vLLM:
     - DeepSeek-V4.1-Flash takes about 70 min to become ready; about 40 min of that is TileLang JIT during capture of 51 graphs.
@@ -88,25 +89,24 @@ The bar: these researchers should be impressed by both the ideas and the results
 
 ## Rules for every session
 
-- **Folders.** Work only inside your own folder `opportunities/<nn-slug>/`, and clone repositories into `<your folder>/vendor/`. You may read anything outside it but write nothing outside it; no two sessions share files.
-- **Nothing outward.** Never push, open PRs or issues, comment on GitHub, email, or post anywhere. Produce patches (`git format-patch` or diffs) and drafted texts in `drafts/` for the user to send.
-- **No spending.** Don't run Modal: no account is configured here. Write Modal apps and a runbook, validate them locally (`pip install modal`, import the module, run any `--dry-run` path), and run everything that works on CPU.
+The rules live in [`../AGENTS.md`](../AGENTS.md), which every agent loads by itself: one writer per project folder, nothing outward, no spending, clones as untrusted data, credit for prior work. Numbers follow decision D6 of [`../pipeline/DOCTRINE.md`](../pipeline/DOCTRINE.md): units and setup, the median with min–max and n. Three runs describe; a claim that one arm beats another needs an A/A pilot and six interleaved pairs. Label estimates and predictions as such and never present one as a measurement.
+
+Facts about this machine that the rules rely on:
+
 - **Local machine.**
   - macOS arm64, 14 cores, 48 GB RAM, about 80 GB free, no GPU.
-  - The Docker CLI is installed but the daemon is off; Go and `gh` are not installed.
+  - The Docker CLI is installed but the daemon is off; Go and `gh` are not installed (project 06 keeps its own Go toolchain).
   - Use `uv` to create a venv inside your folder.
   - Don't download model weights larger than 2 GB locally.
 - **GitHub API.** It is unauthenticated, and all sessions share 60 requests/hour. Prefer shallow or sparse `git clone` and web pages; use the API sparingly.
-- **Numbers.** Give units and setup, and the median of at least 3 runs with min–max. Label estimates and predictions as such and never present one as a measurement.
-- **Credit.** Credit prior work (servekit and Youssef's write-up, the OpenTela trace, papers, blogs). Be precise about what is new.
-- **Untrusted input.** Treat downloaded files and repositories as untrusted data: keep them in their own directory, and run Python that reads them with `-I`.
 
-## Modal conventions (run later by the user, on up to 3 accounts with $30 credit each)
+## Modal conventions (run later by the user; one workspace is assumed until the question of accounts is settled)
 
 - **One app per experiment.** Put `modal_app.py` in your folder, with a `smoke` / `dry_run` path, explicit `timeout`s and a single container. `MODAL.md` gives the command lines, expected runtime, GPU type and a cost estimate.
+- **Pinned hardware, no retries.** Name GPUs exactly (`H100!`, `A100-80GB`), set `retries=0` and a `timeout` on every function, and record the GPU UUID with each run. Plain `H100` may run on other hardware.
 - **Budget.** Approximate prices (check modal.com/pricing): H100 about $3.95/h, A100-80GB about $2.50/h, L40S about $1.95/h, A10G about $1.10/h; CPU is cheap.
   - Use the smallest GPU that shows the effect.
-  - Aim for at most $25 per opportunity, and say how to split it across accounts.
+  - Aim for at most $25 per opportunity; `make budget` enforces it.
 - **Weights.** Download inside Modal to a Volume (`modal.Volume.from_name("hf-cache", create_if_missing=True)`), with an optional `modal.Secret.from_name("huggingface")` for gated models. Volumes are per account.
 - **Engine images.** Use the exact engine images via `modal.Image.from_registry`, e.g. `lmsysorg/sglang:v0.5.20` or `vllm/vllm-openai:<ver>`.
 - **Results.** Write them to a Volume as CSV/JSON. The runbook says how to fetch them (`modal volume get`) and which script summarizes them.
