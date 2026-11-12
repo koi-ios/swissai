@@ -1,0 +1,300 @@
+From 0f36e781a83a4220c25e69ca09441b76d8057cec Mon Sep 17 00:00:00 2001
+From: Soorya <soorya.narayananiv@gmail.com>
+Date: Thu, 12 Nov 2026 01:37:58 +0100
+Subject: [PATCH 2/2] fix(protocol): republish our own row when it holds an
+ earlier run's record
+
+A restarted node keeps its peer ID but not its CRDT store (cleanslate
+defaults to true, and shutdown wipes the store too). The mesh still holds
+the previous run's row: its LEFT record, a head's eviction record, or the
+services it advertised before a crash. The restarted node's first writes
+lose to that row, and once the node has caught up nothing writes again
+unless a new connection, a relay change or POST /v1/dnt/_node happens to
+trigger it. Until then the head's /v1/dnt/table omits the worker while the
+worker lists itself as ready (#73). The two-minute reannounce that used to
+cover this went with the DAG-bloat fix in a8c1055.
+
+Stamp every record we publish with a per-process incarnation, in
+applyLocalRuntimeMetadata, which every self-row writer already calls.
+When the PutHook sees our own row holding a record from another
+incarnation, republish once, after a 1 s debounce. With the previous
+commit the republish outranks the record it answers, so the row converges
+within one broadcast instead of waiting for the history walk. Records
+from this run are left alone, including a head's eviction of this run,
+which copies our record and its incarnation, so the guard does not fight
+a live eviction. The guard is off after AnnounceLeave.
+
+There are no periodic writes: a restart costs one extra write.
+
+Fixes #73
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/internal/protocol/crdt.go          |   4 +-
+ src/internal/protocol/node_table.go    |   7 ++
+ src/internal/protocol/self_row.go      |  74 +++++++++++++++
+ src/internal/protocol/self_row_test.go | 122 +++++++++++++++++++++++++
+ 4 files changed, 206 insertions(+), 1 deletion(-)
+ create mode 100644 src/internal/protocol/self_row.go
+ create mode 100644 src/internal/protocol/self_row_test.go
+
+diff --git a/src/internal/protocol/crdt.go b/src/internal/protocol/crdt.go
+index c4f79d7..6f4afe7 100644
+--- a/src/internal/protocol/crdt.go
++++ b/src/internal/protocol/crdt.go
+@@ -171,9 +171,11 @@ func GetCRDTStore() (*crdt.Datastore, context.CancelFunc) {
+ 			// When a new peer is added to the table it is marked as disconnected by default.
+ 			// Doing so allows to intercept ghost peers by the verification procedure.
+ 
+-			// Do not update itself
++			// Do not update itself, but notice when our own row now holds a
++			// record from an earlier run of this peer ID.
+ 			host, _ := GetP2PNode(nil)
+ 			if strings.Trim(k.String(), "/") == host.ID().String() {
++				observeSelfRow(peer)
+ 				return
+ 			}
+ 			p, err := GetPeerFromTable(strings.Trim(k.String(), "/"))
+diff --git a/src/internal/protocol/node_table.go b/src/internal/protocol/node_table.go
+index 4211b90..c556659 100644
+--- a/src/internal/protocol/node_table.go
++++ b/src/internal/protocol/node_table.go
+@@ -221,6 +221,10 @@ type Peer struct {
+ 	// names so the control plane can fail mixed-service activation closed when a
+ 	// name is ambiguous on the worker.
+ 	ServiceNameCounts map[string]int `json:"service_name_counts,omitempty"`
++	// Incarnation identifies the run of the node that published this record.
++	// It changes on every restart while the peer ID stays the same, which lets
++	// a node recognise its own row from an earlier run (see observeSelfRow).
++	Incarnation string `json:"incarnation,omitempty"`
+ }
+ 
+ // deployKeyIdentity derives the Owner pubkey and identity attestation for a
+@@ -357,6 +361,8 @@ func AnnounceLeave() {
+ 	store, _ := GetCRDTStore()
+ 	key := ds.NewKey(host.ID().String())
+ 	common.Logger.Info("Leaving network")
++	// From here on our row is meant to say LEFT; stop defending it.
++	selfRowLeaving.Store(true)
+ 
+ 	// Update self status to LEFT
+ 	myselfMu.Lock()
+@@ -807,6 +813,7 @@ func applyLocalRuntimeMetadata(peer *Peer) {
+ 	}
+ 	peer.RuntimeCapabilities = runtimeCapabilities()
+ 	peer.ServiceNameCounts = serviceNameCounts(peer.Service)
++	peer.Incarnation = localIncarnation
+ }
+ 
+ // isKnownHeadPeer reports whether id names a peer we already know carries the
+diff --git a/src/internal/protocol/self_row.go b/src/internal/protocol/self_row.go
+new file mode 100644
+index 0000000..3fb0507
+--- /dev/null
++++ b/src/internal/protocol/self_row.go
+@@ -0,0 +1,74 @@
++package protocol
++
++import (
++	"crypto/rand"
++	"sync"
++	"sync/atomic"
++	"time"
++
++	"opentela/internal/common"
++)
++
++// localIncarnation tells this run's records of our own row apart from those of
++// earlier runs under the same peer ID. A restart keeps the peer ID but not the
++// CRDT store (cleanslate defaults to true, and shutdown wipes the store too), so
++// the mesh can still hold an earlier run's row: its LEFT record, an eviction a
++// head published while it was down, or the services it advertised before a
++// crash. applyLocalRuntimeMetadata stamps it on every record we publish.
++var localIncarnation = rand.Text()
++
++var (
++	selfRowMu      sync.Mutex
++	selfRowPending bool
++	selfRowLeaving atomic.Bool
++
++	// selfRowRepublishDelay coalesces the burst of merges a restarted node
++	// sees while it pulls history, so one republish answers all of them.
++	selfRowRepublishDelay = time.Second
++	// republishSelfRow publishes this node's current row; nil means
++	// ReannounceLocalServices. Tests swap it to observe the guard without a
++	// CRDT store. Guarded by selfRowMu, like the delay.
++	republishSelfRow func()
++)
++
++// observeSelfRow is called with the record that just became the winning value
++// of our own row in the local CRDT store. If an earlier run wrote it, every
++// peer is routing on that record rather than on ours, so we publish ours again.
++//
++// The republished row outranks the stale record because the store has merged
++// it (see go-ds-crdt addDAGNode), so the mesh converges on this run's row as
++// soon as the republish propagates. Without this, the restarted node's writes
++// lose to the stale record until it has walked the whole history and something
++// else happens to trigger a write: minutes on a long-lived mesh
++// (eth-easl/OpenTela#73).
++//
++// A record from this run is left alone, including an eviction a head published
++// about this run: the guard overrides an earlier run, not a verdict on this one.
++func observeSelfRow(winner Peer) {
++	if winner.Incarnation == localIncarnation || selfRowLeaving.Load() {
++		return
++	}
++	selfRowMu.Lock()
++	defer selfRowMu.Unlock()
++	if selfRowPending {
++		return
++	}
++	selfRowPending = true
++	common.Logger.Infof("Own row holds a record from an earlier run (status %q, incarnation %q); republishing",
++		winner.Status, winner.Incarnation)
++	time.AfterFunc(selfRowRepublishDelay, func() {
++		selfRowMu.Lock()
++		selfRowPending = false
++		publish := republishSelfRow
++		selfRowMu.Unlock()
++		// Before InitializeMyself there is no row to publish; its own write
++		// will outrank the record we saw.
++		if selfRowLeaving.Load() || GetSelf().ID == "" {
++			return
++		}
++		if publish == nil {
++			publish = ReannounceLocalServices
++		}
++		publish()
++	})
++}
+diff --git a/src/internal/protocol/self_row_test.go b/src/internal/protocol/self_row_test.go
+new file mode 100644
+index 0000000..0c60882
+--- /dev/null
++++ b/src/internal/protocol/self_row_test.go
+@@ -0,0 +1,122 @@
++package protocol
++
++import (
++	"encoding/json"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++// withSelfRowGuard points the guard at a counter instead of the CRDT store and
++// restores its state afterwards.
++func withSelfRowGuard(t *testing.T) *atomic.Int32 {
++	t.Helper()
++	var republished atomic.Int32
++	prevSelf := GetSelf()
++	selfRowMu.Lock()
++	prevPublish, prevDelay := republishSelfRow, selfRowRepublishDelay
++	republishSelfRow = func() { republished.Add(1) }
++	selfRowRepublishDelay = testRepublishDelay
++	selfRowMu.Unlock()
++	selfRowLeaving.Store(false)
++	SetMyselfForTest(Peer{ID: "self-node", Incarnation: localIncarnation})
++	t.Cleanup(func() {
++		settle() // let a pending republish fire before the hooks are swapped back
++		selfRowMu.Lock()
++		republishSelfRow, selfRowRepublishDelay = prevPublish, prevDelay
++		selfRowMu.Unlock()
++		selfRowLeaving.Store(false)
++		SetMyselfForTest(prevSelf)
++	})
++	return &republished
++}
++
++const testRepublishDelay = 20 * time.Millisecond
++
++func settle() { time.Sleep(5 * testRepublishDelay) }
++
++// A restarted node merges its earlier run's LEFT record: it must publish its
++// row again, once, however many stale records the history walk turns up.
++func TestObserveSelfRow_RepublishesOverEarlierRun(t *testing.T) {
++	republished := withSelfRowGuard(t)
++
++	observeSelfRow(Peer{ID: "self-node", Status: LEFT, Incarnation: "earlier-run"})
++	observeSelfRow(Peer{ID: "self-node", Status: READY, Incarnation: "earlier-run"})
++	observeSelfRow(Peer{ID: "self-node", Status: LEFT, EvictedBy: "head", Incarnation: "earlier-run"})
++	settle()
++
++	if got := republished.Load(); got != 1 {
++		t.Fatalf("republished %d times, want 1", got)
++	}
++
++	// A later stale record, after the first republish went out, gets its own.
++	observeSelfRow(Peer{ID: "self-node", Status: LEFT, Incarnation: "earlier-run"})
++	settle()
++	if got := republished.Load(); got != 2 {
++		t.Fatalf("republished %d times after a second stale record, want 2", got)
++	}
++}
++
++// Records written by a binary without the incarnation field count as an
++// earlier run: after an upgrade the node's own row is republished once.
++func TestObserveSelfRow_RecordWithoutIncarnation(t *testing.T) {
++	republished := withSelfRowGuard(t)
++
++	observeSelfRow(Peer{ID: "self-node", Status: READY})
++	settle()
++
++	if got := republished.Load(); got != 1 {
++		t.Fatalf("republished %d times, want 1", got)
++	}
++}
++
++// This run's own writes, and a head's eviction of this run (which copies our
++// record), must not trigger a republish.
++func TestObserveSelfRow_IgnoresThisRun(t *testing.T) {
++	republished := withSelfRowGuard(t)
++
++	observeSelfRow(Peer{ID: "self-node", Status: READY, Incarnation: localIncarnation})
++	observeSelfRow(Peer{ID: "self-node", Status: LEFT, EvictedBy: "head", Incarnation: localIncarnation})
++	settle()
++
++	if got := republished.Load(); got != 0 {
++		t.Fatalf("republished %d times, want 0", got)
++	}
++}
++
++// After AnnounceLeave the row is supposed to say LEFT.
++func TestObserveSelfRow_SilentWhileLeaving(t *testing.T) {
++	republished := withSelfRowGuard(t)
++
++	observeSelfRow(Peer{ID: "self-node", Status: READY, Incarnation: "earlier-run"})
++	selfRowLeaving.Store(true) // leave lands while the republish is pending
++	observeSelfRow(Peer{ID: "self-node", Status: READY, Incarnation: "earlier-run"})
++	settle()
++
++	if got := republished.Load(); got != 0 {
++		t.Fatalf("republished %d times while leaving, want 0", got)
++	}
++}
++
++// Every record this node publishes goes through applyLocalRuntimeMetadata, so
++// that is where the incarnation is stamped; it must survive the JSON round trip
++// to the CRDT and back.
++func TestApplyLocalRuntimeMetadata_StampsIncarnation(t *testing.T) {
++	var p Peer
++	applyLocalRuntimeMetadata(&p)
++	if p.Incarnation == "" || p.Incarnation != localIncarnation {
++		t.Fatalf("incarnation = %q, want %q", p.Incarnation, localIncarnation)
++	}
++
++	b, err := json.Marshal(p)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var back Peer
++	if err := json.Unmarshal(b, &back); err != nil {
++		t.Fatal(err)
++	}
++	if back.Incarnation != localIncarnation {
++		t.Fatalf("incarnation lost in JSON round trip: %q", back.Incarnation)
++	}
++}
+-- 
+2.50.1 (Apple Git-155)
+

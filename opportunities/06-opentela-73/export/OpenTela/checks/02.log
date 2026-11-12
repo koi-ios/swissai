@@ -1,0 +1,26 @@
+$ CGO_ENABLED=1 go test -race -count=1 -covermode=atomic -coverprofile="${TMPDIR:-/tmp}/opentela-coverage.txt" ./...   (in src)
+
+	opentela/entry		coverage: 0.0% of statements
+ok  	opentela/entry/cmd	3.118s	coverage: 46.1% of statements
+ok  	opentela/internal/account	2.399s	coverage: 81.7% of statements
+ok  	opentela/internal/analytics	1.601s	coverage: 84.3% of statements
+ok  	opentela/internal/attestation	3.244s	coverage: 91.3% of statements
+	opentela/internal/attestation/cmd/buildsign		coverage: 0.0% of statements
+ok  	opentela/internal/common	2.645s	coverage: 63.8% of statements
+ok  	opentela/internal/common/process	2.656s	coverage: 71.3% of statements
+	opentela/internal/ingest		coverage: 0.0% of statements
+ok  	opentela/internal/metrics	3.027s	coverage: 79.2% of statements
+ok  	opentela/internal/platform	1.752s	coverage: 25.4% of statements
+ok  	opentela/internal/platform/slurm	2.228s	coverage: 70.6% of statements
+ok  	opentela/internal/protocol	5.848s	coverage: 33.4% of statements
+ok  	opentela/internal/protocol/go-ds-crdt	7.498s	coverage: 47.4% of statements
+ok  	opentela/internal/protocol/nodetable	3.778s	coverage: 85.2% of statements
+ok  	opentela/internal/protocol/swim	4.637s	coverage: 74.4% of statements
+ok  	opentela/internal/server	19.539s	coverage: 51.2% of statements
+ok  	opentela/internal/solana	2.832s	coverage: 68.4% of statements
+ok  	opentela/internal/usage	2.933s	coverage: 55.9% of statements
+ok  	opentela/internal/wallet	2.529s	coverage: 81.3% of statements
+	opentela/plugins/webui		coverage: 0.0% of statements
+
+
+exit code 0

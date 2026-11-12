@@ -83,3 +83,16 @@ Asked in this session after a forked session relayed an approval (a relay is not
 - Commits in this private repository carry a neutral local identity, `swissai local <local@swissai.invalid>`, set with `git config --local`. The machine's global identity is left alone and is not used here.
 - The five commits that already existed were re-authored to that identity (author and committer; dates, messages and contents unchanged). The baseline commit is now `a0997fd`.
 - Commits exported for upstream carry the identity recorded in `pipeline/workspace.toml`, which the user gave. The export's leak check treats the machine's global git identity as a private string.
+
+## [2026-11-12] decision | The migration was applied; what differs from the plan
+
+Applied in nine commits after the user's approval. Differences from `MIGRATION.md`, all small:
+
+- `make clones-verify` proves seven series equal their clone's branch. It cannot compare 05's two clones (shallow, and nothing is fetched) or the two SGLang series that no clone holds (08's alias patch, 09's diff).
+- The canonical `sglang` and `vllm` clones are single-branch, without tags or blobs. Enough for an export; not a full mirror.
+- `pipeline/sandbox.settings.json` uses key names from the Claude Code documentation but has not been run in a live session. No second agent is installed, so `.gemini/settings.json` and the native `AGENTS.md` reading of other tools are linted, not exercised.
+- The credentials check in `make check` is a warning, not a failure, so that the user's own later login does not break the lint. `make check STRICT=1` makes it fail.
+
+## [2026-11-12] finding | The export dry run on 06
+
+`make export PROJECT=06` on a fresh worktree of OpenTela `origin/main` (4b6e90f, fetched 12 Nov): both patches apply; author and committer are the upstream identity; the `Co-Authored-By` trailer is kept, as the card's observed practice has it; `go vet`, `go test -race` with the Makefile's flags (17 packages ok) and golangci-lint v2.15 pass; the leak check passes; the PR text has the headings OpenTela's contributors use. The leak check was also run on a superseded branch with a placeholder author and failed it, as it should. Nothing was pushed: the worktree has no remote but the read-only origin, and this machine holds no credentials. One deviation, stated in the card and the rule file: OpenTela's `make test` downloads a test runner with `curl`; the same `go test` flags were run without it.

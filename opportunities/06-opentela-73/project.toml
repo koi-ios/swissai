@@ -14,7 +14,7 @@ needs_gpu = false
 [[upstream]]
 repo = "eth-easl/OpenTela"
 target = "#73"
-state = "drafted"
+state = "exported"
 series = "patches/*.patch"
 base = "4b6e90f"
 export_branch = "fix/restarted-worker-row"

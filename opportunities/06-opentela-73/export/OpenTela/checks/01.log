@@ -1,0 +1,5 @@
+$ go vet ./...   (in src)
+
+
+
+exit code 0

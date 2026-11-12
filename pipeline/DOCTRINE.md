@@ -1,6 +1,6 @@
 # Doctrine: one person, ML-systems research, agents doing most of the work
 
-Settled and audited 12 Nov 2026 ([AUDIT.md](AUDIT.md)). IDs such as E20 are rows in [RESEARCH.md](RESEARCH.md), graded A (controlled study) to E (opinion). Goals, in order: (1) rigorous, original results and patches maintainers merge; (2) output per hour of mine and per GPU dollar; (3) I can defend every line and number; (4) it survives a change of model or tool. The `make` commands are created by [MIGRATION.md](MIGRATION.md).
+Settled and audited 12 Nov 2026 ([AUDIT.md](AUDIT.md)). IDs such as E20 are rows in [RESEARCH.md](RESEARCH.md), graded A (controlled study) to E (opinion). Goals, in order: (1) rigorous, original results and patches maintainers merge; (2) output per hour of mine and per GPU dollar; (3) I can defend every line and number; (4) it survives a change of model or tool.
 
 ## D1 Lifecycle
 
