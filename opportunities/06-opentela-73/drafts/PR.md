@@ -1,6 +1,6 @@
 # fix: a restarted node's row must outrank its earlier run's (#73)
 
-Fixes #73. Two commits (patches in `patches/`), based on main 4b6e90f; they apply cleanly on top of #72.
+Refs #73. Two commits (patches in `patches/`), based on main 4b6e90f; they apply cleanly on top of #72.
 
 ## Root cause
 

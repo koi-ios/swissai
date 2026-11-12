@@ -14,7 +14,7 @@
 
 ## Yours to decide
 
-1. **Send 06?** Work through `opportunities/06-opentela-73/export/OpenTela/CHECKLIST.md`. Open choices: on top of PR #72 or not; the optional third patch; `Fixes #73` or `Refs #73`; a message to Xiaozhe first. Rewrite `PR.md` in your own words.
+1. **Send 06?** Work through `opportunities/06-opentela-73/export/OpenTela/CHECKLIST.md`. Open choices: on top of PR #72 or not; the optional third patch; a message to Xiaozhe first. Settled since: both commits and both PR drafts say `Refs #73`, so the maintainer closes the issue. Rewrite `PR.md` in your own words.
 2. **Your name on upstream commits.** It is set to a first name. vLLM's sign-off certifies a real identity; decide before any vLLM export.
 3. **AI disclosure** where a repository is silent (OpenTela, servekit, model-launch, SGLang). Default: keep the co-author trailer and one sentence in the PR, as their maintainers do.
 4. **Modal.** One workspace ($30 a month) or three accounts; ask Modal, and apply for academic credits. Set the dashboard spend limit before the first paid run. 02's $6 check is next, once its GPU name is pinned.

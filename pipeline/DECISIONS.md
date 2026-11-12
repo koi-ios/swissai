@@ -113,3 +113,5 @@ Left as they are, on purpose: the rule files are slightly looser than the cards 
 ## [2026-11-12] decision | 06 refers to issue #73 and does not close it
 
 The user chose `Refs #73` over `Fixes #73` for the second commit, to match the PR text and OpenTela's own practice (no closing keywords in its PR bodies). Changed in the stored patch `opportunities/06-opentela-73/patches/0002-...` (one word in the message; the diff is untouched) and in the exported commit (now `72d1d82`, same tree). This is the one edit to a project's patch made by the coordinating session, at the user's instruction.
+
+Follow-up, same day: the project's older draft `opportunities/06-opentela-73/drafts/PR.md` opened with `Fixes #73`. A closing keyword in a PR description closes the issue on merge just as one in a commit does, so that word is now `Refs` too (one word; nothing else in the draft changed). No text that could be sent closes the issue. This settles finding F11 in `MIGRATION-REVIEW.md` and the open item in the entry above ("The user picks"). `MIGRATION-REVIEW.md` is a reviewer's record of the state it saw and is left as written.
