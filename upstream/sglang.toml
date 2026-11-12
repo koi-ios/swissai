@@ -1,0 +1,21 @@
+# The enforceable part of upstream/sglang.md. Scripts read this file; people read the card.
+# Patterns are regular expressions. signoff: required | optional | absent. ai_trailer: keep | forbid.
+# pr_footer (the "Generated with Claude Code" line): keep | forbid | either.
+
+repo = "sgl-project/sglang"
+default_branch = "main"          # target main only; release branches get cherry-picks of merged PRs
+branch_pattern = '^[A-Za-z0-9][A-Za-z0-9._/-]*$'                        # no rule; PRs come from forks
+subject_pattern = '^\[(Feat|Fix|Refactor|Perf|Doc|Test|CI|Chore)\]( \[[^\]]+\])? [A-Za-z0-9_./ -]+: \S.*$'   # pr-title.yml
+subject_max = 120
+no_pr_suffix = true
+signoff = "optional"             # 25 of 200; not required
+ai_trailer = "keep"              # 71 of 200; no written policy
+drop_trailers = ["Claude-Session", "Entire-Checkpoint"]
+pr_sections = [["Motivation"], ["Modifications"], ["Accuracy Tests"], ["Speed Tests and Profiling"], ["Checklist"], ["Review and Merge Process"]]
+pr_footer = "either"
+max_lines_warn = 1200
+
+[[checks]]
+name = "pre-commit, all hooks (contribution_guide.mdx:27-31). Unit tests for the touched area are listed in the card"
+cwd = "."
+cmd = "pre-commit run --all-files"

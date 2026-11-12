@@ -1,0 +1,21 @@
+# The enforceable part of upstream/servekit.md. Scripts read this file; people read the card.
+# Patterns are regular expressions. signoff: required | optional | absent. ai_trailer: keep | forbid.
+# pr_footer (the "Generated with Claude Code" line): keep | forbid | either.
+
+repo = "eth-easl/servekit"
+default_branch = "main"
+branch_pattern = '^(fix/)?[a-z0-9][a-z0-9-]*$'                          # observed: kebab-case topics
+subject_pattern = '^(feat|fix|docs?|test|dev|refactor|chore)(\([a-z0-9_./-]+\))?: \S.*[^.]$'
+subject_max = 100
+no_pr_suffix = true
+signoff = "absent"               # 0 of 19 commits; no DCO
+ai_trailer = "keep"              # 7 of 19 maintainer commits; no written rule
+drop_trailers = ["Claude-Session", "Entire-Checkpoint"]
+pr_sections = [["Summary", "Problem", "Why"], ["Test plan", "Testing", "Fix", "What"]]
+pr_footer = "either"
+max_lines_warn = 1000            # median PR: 12 files, 985 lines
+
+[[checks]]
+name = "unit tests (README.md:108). The e2e suite needs a SLURM cluster; say so in the PR"
+cwd = "."
+cmd = "PYTHONPATH=src python -m pytest tests -q"
