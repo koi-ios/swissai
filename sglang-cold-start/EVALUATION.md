@@ -1,6 +1,6 @@
 # SGLang cold-start idea: evaluation
 
-11 Nov 2026. Checks [CLAUDE.md](CLAUDE.md) against the lab's code, issues, logs and production trace. Every number below comes from the lab's own runs or data and is reproducible with the scripts in [analysis/](analysis/). Single runs are marked as such.
+11 Nov 2026. Checks the original plan ([PLAN-2026-11-11.md](PLAN-2026-11-11.md), then named `CLAUDE.md`) against the lab's code, issues, logs and production trace. Every number below comes from the lab's own runs or data and is reproducible with the scripts in [analysis/](analysis/). Single runs are marked as such.
 
 ## Verdict
 
