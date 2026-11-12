@@ -1,0 +1,24 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "07"
+title = "Calibrated servekit verify for low-precision models"
+stage = "harness"
+state = "parked"
+stakeholder = "Xiaozhe Yao; Youssef Boughizane (open question in his write-up)"
+claim = "A calibrated verify catches every fault larger than serving noise at about 1% false alarms, where fixed tolerances fail"
+kill = "On real engines the false-alarm rate stays above 5% with 32 calibration runs"
+next_action = "Modal smoke on qwen3-1.7b (about $0.5), then the BF16 and FP8 studies"
+needs_gpu = true
+
+[[upstream]]
+repo = "eth-easl/servekit"
+target = "verify tolerance"
+state = "drafted"
+series = "patches/*.patch"
+base = "cd8f0b8"
+export_branch = "verify-statistical"
+legacy = "vendor/servekit@verify-statistical"
+
+[budget]
+cap_usd = 25.0

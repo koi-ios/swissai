@@ -1,0 +1,33 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "08"
+title = "Presharding that cannot silently change the model"
+stage = "harness"
+state = "parked"
+stakeholder = "Xiaozhe Yao; Youssef Boughizane (servekit #19 and #14)"
+claim = "Raw presharding round-trips MLA and MXFP4 models exactly, and servekit's MLA backport applies again on SGLang 0.5.20"
+kill = "Raw preshard output differs from the default loader on DeepSeek-V2-Lite or gpt-oss-20b"
+next_action = "After 02 is sent: servekit PR 1 (the backport fix); Modal smoke and dsv2-lite (about $8)"
+needs_gpu = true
+
+[[upstream]]
+repo = "eth-easl/servekit"
+target = "#19, #14"
+state = "drafted"
+series = "patches/servekit/*.patch"
+base = "cd8f0b8"
+export_branch = "preshard-roundtrip"
+legacy = "vendor/servekit@preshard-roundtrip"
+
+[[upstream]]
+repo = "sgl-project/sglang"
+target = "refresh of PR #35715"
+state = "drafted"
+series = "patches/sglang/0001-deepseek_v2-kv_b_proj-alias-main-95999790a4.patch"
+base = "95999790a4"
+export_branch = "fix/mla-kv-b-proj-alias"
+legacy = ""
+
+[budget]
+cap_usd = 25.0

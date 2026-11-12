@@ -1,0 +1,24 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "02"
+title = "servekit's JIT cache no longer covers SGLang 0.5.20"
+stage = "harness"
+state = "active"
+stakeholder = "Xiaozhe Yao (supervised servekit); Youssef Boughizane (maintainer)"
+claim = "On SGLang 0.5.20 a servekit launch rebuilds the custom all-reduce JIT, about 17 s at TP4; keeping SGLANG_JIT_CACHE_DIR removes it"
+kill = "On 0.5.20, dist init is the same with main's caches and with the patched caches"
+next_action = "Modal gpu_check, then the three-arm A/B (about $6); patch 0001 can go first"
+needs_gpu = true
+
+[[upstream]]
+repo = "eth-easl/servekit"
+target = "follows #18"
+state = "drafted"
+series = "patches/*.patch"
+base = "cd8f0b8"
+export_branch = "jit-cache-keyed"
+legacy = "vendor/servekit@jit-cache-keyed"
+
+[budget]
+cap_usd = 25.0

@@ -1,0 +1,24 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "09"
+title = "TP32 post-load barrier (model-launch-images #22) and VAST readiness"
+stage = "verify"
+state = "parked"
+stakeholder = "Aryan Ahadinia and Rob (images #22)"
+claim = "The failing 8-node launches die at a hard-coded 480 s barrier, and the failing configuration reads 1.3 times a node's DRAM"
+kill = "The failing logs show ranks arriving within minutes, not hours"
+next_action = "Send the drafted questions to Aryan and Rob (your call)"
+needs_gpu = false
+
+[[upstream]]
+repo = "sgl-project/sglang"
+target = "barrier timeout as a setting"
+state = "drafted"
+series = "patches/sglang-barrier-timeout-env.diff"
+base = "94602c9"
+export_branch = "feat/barrier-timeout-env"
+legacy = ""
+
+[budget]
+cap_usd = 25.0

@@ -1,0 +1,42 @@
+# Settings the control-plane scripts read. Edit by hand; `make check` validates it.
+
+[projects]
+dir = "opportunities"
+max_active = 2                 # decision D2
+
+[budget]                       # decision D10, in US dollars
+total_usd = 90.0
+month_usd = 30.0               # one workspace's free credit per month
+project_cap_usd = 25.0
+
+[identity]                     # author and committer of commits exported to upstream repositories
+name = "Soorya"
+email = "soorya.narayananiv@gmail.com"
+
+[leak]
+# Strings that must never appear in an exported commit message or in an added line.
+private_strings = [
+  "/Users/",
+  "koiios",
+  "Projects/swissai",
+  "opportunities/0",
+  "handoff-notes",
+  "SHARED_CONTEXT",
+  "side-session",
+  "snarayana",
+  "student.ethz.ch",
+  "swissai.invalid",
+  "claude.ai/code/session",
+]
+# Files of this workspace that must never be added by an exported series.
+scaffold_files = ["STATUS.md", "WRITEUP.md", "MODAL.md", "VERIFY.md", "ASSUMPTIONS.md", "project.toml", "modal_app.py", "PORTFOLIO.md", "HARNESS.sha256"]
+scaffold_dirs = [".claude/", ".agents/", ".cursor/", ".gemini/"]
+# Author or committer values that mean nobody set the identity.
+placeholder_identities = ["example.invalid", "@localhost", "@invalid", "t@t", "to be filled", "noreply@example", "prototype"]
+
+[upstream]                     # card name -> clone URL; the canonical clone is vendor/<name>
+OpenTela = "https://github.com/eth-easl/OpenTela.git"
+servekit = "https://github.com/eth-easl/servekit.git"
+model-launch = "https://github.com/swiss-ai/model-launch.git"
+sglang = "https://github.com/sgl-project/sglang.git"
+vllm = "https://github.com/vllm-project/vllm.git"

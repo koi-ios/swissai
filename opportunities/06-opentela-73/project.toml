@@ -1,0 +1,27 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "06"
+title = "OpenTela #73: a restarted worker stays unroutable for minutes"
+stage = "export"
+state = "active"
+stakeholder = "Xiaozhe Yao (opened #73)"
+claim = "A restarted worker is routable again in 15 to 20 s, where the baseline never was within 180 s, with no periodic writes"
+kill = "The regression test passes on unpatched main, or the fix needs periodic writes"
+next_action = "Read export/OpenTela/CHECKLIST.md; decide on #72 and the optional third patch; send"
+needs_gpu = false
+
+[[upstream]]
+repo = "eth-easl/OpenTela"
+target = "#73"
+state = "drafted"
+series = "patches/*.patch"
+base = "4b6e90f"
+export_branch = "fix/restarted-worker-row"
+legacy = "vendor/OpenTela@fix/73"
+
+[export]
+env_script = "env.sh"
+
+[budget]
+cap_usd = 25.0

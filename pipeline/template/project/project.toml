@@ -1,10 +1,10 @@
-# Machine-read card for one project. `make status` and `make portfolio` read it.
+# Machine-read card for one project. `make status`, `make check` and `make export` read it.
 # Keep every value short. The story belongs in STATUS.md and WRITEUP.md.
 
 id = "NN"
 title = "The problem in one line, and whose it is"
 stage = "intake"          # intake | archaeology | hypotheses | harness | sweeps | verify | export | closed
-state = "parked"          # active | parked | sent | merged | killed
+state = "parked"          # active | parked | sent | merged | killed   (at most two active: D2)
 stakeholder = "Name (role)"
 claim = "The one measurable claim this project makes"
 kill = "The result that would stop this project"
@@ -12,14 +12,20 @@ next_action = "The first thing the next session does"
 needs_gpu = true
 
 # One block per upstream repository this project sends something to.
-# `repo` must have a card at upstream/<name>.md.
+# The repository must have a card: upstream/<name>.md and upstream/<name>.toml.
 [[upstream]]
 repo = "owner/name"
 target = "issue or roadmap item, e.g. #270"
 state = "none"            # none | drafted | exported | sent | merged | rejected
-series = "patches/"       # the tracked patch series for this repository
-base = ""                 # upstream commit the series applies to
+series = "patches/*.patch"   # the tracked patch series, as a glob inside this folder
+base = ""                 # upstream commit the series was written against
+export_branch = ""        # branch name for the export; must match the card's pattern
+legacy = ""               # optional: "vendor/<clone>@<branch>" that the series was exported from,
+                          # or "vendor/<clone>@WORKTREE" for uncommitted edits; `make clones` compares them
+
+# Optional. A script that sets up the toolchain the upstream checks need.
+# [export]
+# env_script = "env.sh"
 
 [budget]
-planned_usd = 0.0         # Modal runs planned for this project
-cap_usd = 25.0            # `make budget` refuses a launch past this
+cap_usd = 25.0            # `make budget` refuses a launch past this; planned costs live in budget/plan.csv

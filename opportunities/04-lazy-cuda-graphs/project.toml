@@ -1,0 +1,24 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "04"
+title = "Traffic-aware, lazy CUDA-graph capture for SGLang"
+stage = "harness"
+state = "parked"
+stakeholder = "Xiaozhe Yao (model-launch #125: a research direction)"
+claim = "Capturing a traffic-chosen set at startup and the rest in idle time cuts a 70B TP4 cold start by about a third, with no request delayed by more than one step"
+kill = "A deferred capture delays a request by more than one step, or greedy outputs differ"
+next_action = "Modal smoke, then the three arms with 3 repeats (about $12)"
+needs_gpu = true
+
+[[upstream]]
+repo = "sgl-project/sglang"
+target = "RFC issue (drafted)"
+state = "drafted"
+series = "patches/*.patch"
+base = "94602c9"
+export_branch = "feat/lazy-cuda-graph-capture"
+legacy = "vendor/sglang-v0.5.20@WORKTREE"
+
+[budget]
+cap_usd = 25.0

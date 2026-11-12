@@ -1,0 +1,34 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "05"
+title = "Python start and TP worker spawn before distributed init"
+stage = "harness"
+state = "parked"
+stakeholder = "Rob (images and CI); Aryan Ahadinia"
+claim = "A CUDA-safe worker zygote and shipped bytecode save 9 to 13 s per SGLang launch on Alps"
+kill = "On the real image the zygote saves under 2 s, or CUDA is initialised before the fork"
+next_action = "Modal smoke and cpu_study for both engines (about $1)"
+needs_gpu = true
+
+[[upstream]]
+repo = "sgl-project/sglang"
+target = "worker zygote; bytecode in the image"
+state = "drafted"
+series = "patches/sglang-v0.5.20-*.patch"
+base = "94602c9"
+export_branch = "feat/worker-zygote"
+legacy = "vendor/sglang-v0.5.20@pystartup-worker-zygote"
+
+[[upstream]]
+repo = "swiss-ai/model-launch"
+target = "bytecode in the images"
+state = "drafted"
+series = "patches/model-launch-python-startup.patch"
+base = "02b74ce"
+export_branch = "feat/pystartup-bytecode"
+legacy = "vendor/model-launch@pystartup-bytecode"
+legacy_base = "pystartup-bytecode~1"
+
+[budget]
+cap_usd = 25.0

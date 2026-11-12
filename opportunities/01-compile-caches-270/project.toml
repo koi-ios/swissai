@@ -1,0 +1,24 @@
+# Machine-read card. `make status`, `make check` and `make export` read it. Keep values short;
+# the story is in STATUS.md and WRITEUP.md. Fields are explained in pipeline/template/project/project.toml.
+
+id = "01"
+title = "model-launch #270: compile caches that survive a job, for vLLM and SGLang"
+stage = "harness"
+state = "parked"
+stakeholder = "Aryan Ahadinia (model-launch maintainer; opened #270)"
+claim = "One compile cache per image and GPU arch, shared by all checkpoints, removes recompilation on later launches"
+kill = "A warm launch on the same image digest still rebuilds kernels after every cache variable is redirected"
+next_action = "Modal smoke, then plan A: SGLang cold against warm"
+needs_gpu = true
+
+[[upstream]]
+repo = "swiss-ai/model-launch"
+target = "#270"
+state = "drafted"
+series = "patches/*.patch"
+base = "02b74ce"
+export_branch = "feat/shared-jit-caches"
+legacy = "vendor/model-launch@feat/shared-jit-caches"
+
+[budget]
+cap_usd = 25.0
