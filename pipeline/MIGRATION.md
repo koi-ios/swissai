@@ -84,9 +84,11 @@ Patch problems, checked against the cards:
 | `AGENTS.md` | The one instruction source, about 50 lines: commands, rules, folder rules, where things are |
 | `CLAUDE.md` | `@AGENTS.md` plus three Claude-only lines |
 | `.claude/settings.json` | Excludes `vendor/` from instruction loading; denies `git push`, `gh` and `modal run` in agent sessions |
+| `pipeline/sandbox.settings.json` | A settings file for sessions that work inside clones or run upstream code: the tool's sandbox on, network limited to the model API, package indexes and github.com (D11). Used on purpose, not by default, because ordinary sessions need the web |
 | `.gemini/settings.json` | One setting so Gemini CLI reads `AGENTS.md`. Codex, Cursor, Copilot, OpenCode and Amp read it without an adapter |
 | `Makefile` | A menu; every target is one line calling `scripts/` |
-| `scripts/check.py` | `make check`: instruction-file paths and targets exist; every project has a valid `project.toml`, STATUS and WRITEUP; at most two active projects; generated files are fresh; the ledger is within its caps; no stray instruction files outside `vendor/`. Warnings for placeholder patch authors and unpinned GPU names |
+| `scripts/check.py` | `make check`: instruction-file paths and targets exist; every project has a valid `project.toml`, STATUS and WRITEUP; at most two active projects; generated files are fresh; the ledger is within its caps; no stray instruction files outside `vendor/`; no push, `gh`, Modal or Hugging Face credential is reachable. Warnings for placeholder patch authors and unpinned GPU names |
+| `scripts/backup.sh` | `make backup DEST=…`: writes a `git bundle` of this repository to a place you choose. Run by you |
 | `scripts/portfolio.py` | `make status` (terminal) and `make portfolio` (`PORTFOLIO.md`) |
 | `scripts/budget.py` | `make budget` (the gate), `make spend` (append to the ledger) |
 | `scripts/test.py`, `pipeline/tests.toml` | `make test PROJECT=NN`: reruns a project's suites and compares with the counts in `opportunities/README.md` |
@@ -158,8 +160,12 @@ None of these blocks the migration. Defaults are what the scripts will assume un
 6. **Modal:** one workspace or three accounts. The credit is monthly, the terms are silent on several accounts and bar third-party use. Asking Modal and applying for academic credits costs an email each.
 7. **`make` or `just`.** `make` is installed. Say so if you want a `justfile` as well.
 8. **A second agent.** Installing one (for example Codex CLI) would let the adapters be run, not only linted.
+9. **A backup.** This repository has no remote, so one disk holds the only copy. Default: none until you choose a place for `make backup`, or a private remote that only you push to.
+10. **A container runtime.** The doctrine allows unattended loops and unwatched auto-mode sessions only inside a container or microVM (D7, D11). Docker is installed here but its daemon is off. Until you start one, there are no such sessions.
 
 ## 8. Risks
+
+- This session itself read web pages and cloned repositories next to the private workspace, with network access and automatic permissions. Nothing outward was possible, since no credentials exist here, but under D11 future web research belongs in sessions that see public inputs only.
 
 - A script could disagree with a card. The `.toml` files are written from the cards and the leak check prints which rule fired, so a wrong rule is visible.
 - Renaming the two `CLAUDE.md` files changes what a session in those folders loads. That is the intent; the content stays one `git mv` away.

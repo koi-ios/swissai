@@ -28,8 +28,18 @@ find harness -type f ! -name '*.pyc' | LC_ALL=C sort | xargs shasum -a 256 > HAR
 ## Run order for a comparison
 
 ```bash
-python3 harness/measure.py schedule --arms base,fix --pairs 6 --seed 1    # prints the order
-# run each line as a fresh process; record it:
-python3 harness/measure.py record --out results/runs.jsonl --arm fix --pair 1 --metric total_s=...
-python3 harness/measure.py analyze results/runs.jsonl --metric total_s --base base --test fix
+# 1. The A/A pilot: baseline against itself, in its own block.
+python3 harness/measure.py schedule --arms base,base2 --pairs 6 --seed 1
+python3 harness/measure.py record --out results/runs.jsonl --block pilot --arm base --pair 1 \
+    --metric total_s=... --phase weights_s=... --cache page=cold --engine-commit ... --exit-code 0
+
+# 2. The comparison, in another block. Run each line of the schedule as a fresh process.
+python3 harness/measure.py schedule --arms base,fix --pairs 6 --seed 2
+python3 harness/measure.py record --out results/runs.jsonl --block main --arm fix --pair 1 --metric total_s=...
+
+# 3. The verdict: DESCRIPTIVE, NO-PILOT, NOT DISTINGUISHABLE or SUPPORTED.
+python3 harness/measure.py analyze results/runs.jsonl --metric total_s --block main \
+    --base base --test fix --aa-block pilot --aa base2
 ```
+
+`record` stores the digest of `HARNESS.sha256` with every run, so a number is tied to the harness that produced it. `analyze` refuses two records for the same block, arm and pair, and prints how many runs it left out and why.

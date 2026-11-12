@@ -6,9 +6,11 @@ Fill this before any harness work. A hypothesis without a kill criterion is not 
 
 Write the prediction before the run. When a result misses it, find out why before moving on.
 
-| ID | Hypothesis | Prediction (number, unit, setup) | Expected size | Kill criterion | Cheapest test and its cost | Result |
-|---|---|---|---|---|---|---|
-| H1 | | | | | | not run |
+| ID | Hypothesis | Prediction (number, unit, setup) | Expected size | Decision rule | Maximum n | Kill criterion | Cheapest test and its cost | Result |
+|---|---|---|---|---|---|---|---|---|
+| H1 | | | | claim if the ratio of medians is outside the A/A range and the sign test gives p < 0.05 | 6 pairs; 10 if the effect is within twice the A/A range | | | not run |
+
+A kill criterion names a result, not a first score: an idea that starts worse for a reason you can state is not dead yet.
 
 ## Assumptions
 

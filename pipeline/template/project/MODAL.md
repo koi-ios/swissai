@@ -18,8 +18,11 @@ Cheapest decisive step first. Stop rules are written before the run.
 | Step | Command | GPU (pinned) | Runs | Est. minutes | Est. cost | Decides | Stop rule |
 |---|---|---|---|---|---|---|---|
 | smoke | `modal run modal_app.py::smoke` | | 1 | | | the app works on the real image | fails twice: stop and fix locally |
-| A/A pilot | | | 6 pairs | | | the noise floor | CoV above 10%: find the noise source first |
-| main | | | 6 pairs | | | the claim | effect inside the A/A range: report as not distinguishable |
+| A/A pilot (`--block pilot`, arms `base,base2`) | | | 6 pairs | | | the noise floor | CoV above 10%: find the noise source first |
+| main (`--block main`, arms `base,<change>`) | | | 6 pairs | | | the claim | `analyze` says SUPPORTED or NOT DISTINGUISHABLE: stop |
+| escalation, once (`--block main10`) | | | 10 pairs | | | an effect within twice the A/A range | still not distinguishable: report that and stop |
+
+Each step records into its own block, so pair numbers never collide. A rerun gets a new block name; a failed run is recorded with its exit code, not deleted.
 
 Estimated cost per run = container seconds x (GPU rate + cores x CPU rate + GiB x memory rate). Take the rates from the provider's pricing page on the day and note the date.
 

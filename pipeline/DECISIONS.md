@@ -59,3 +59,18 @@ They are new files in a new folder, they change nothing that existed, and the mi
 - vLLM version: project 01 targets 0.32.0 because it infers that from release dates; projects 03, 04, 05, 07 and 08 target 0.33.0, the newest release on 11 Nov. Nothing public pins the version the platform's `vllm_base` image runs. It stays an open question for the maintainers.
 - The harness self-test has 57 checks, not 55 (`IDEAS.md`, and the older `serve-kit-vllm-prelim/CLAUDE.md`).
 - Four STATUS files point at a "shared notes folder". It is an app-managed folder outside the workspace holding nine hand-over notes.
+
+## [2026-11-12] finding | The independent audit, and what changed because of it
+
+A fresh Opus session audited DOCTRINE.md, RESEARCH.md and the template (`pipeline/AUDIT.md`): 2 high, 11 medium and 17 low findings. It fetched twelve primary sources and all matched their ledger rows. `pipeline/AUDIT-RESPONSE.md` lists the action taken on each finding. The two high findings:
+
+- D11 had kept only the credentials rule and dropped network and isolation controls that the security note rates high confidence. D11 and D7 now require default-deny egress for sessions that work in clones, and a container for unattended loops.
+- `measure.py` keyed records by arm and pair, so a main run overwrote the A/A pilot's baseline and the reported noise floor was wrong. Records now belong to a block, duplicates are refused, left-out runs are counted, and the verdict is computed. The self-test covers the failing case.
+
+## [2026-11-12] finding | Correction to an earlier entry
+
+The entry "The shared web-search quota ran out during research" says ten of eleven notes list searches they could not run. The count is nine; notes 06 and 08 list unreachable primary pages instead.
+
+## [2026-11-12] finding | Pre-migration test baseline
+
+Before any change to the workspace, every project's suites were rerun. All match the counts recorded in `opportunities/README.md`: 01: 53 passed, 2 skipped; 02: 187 passed with the 2 known macOS errors, plus 8; 03: 195 passed, 3 skipped; 04: 34; 05: 41; 06: `go vet` clean, 17 packages ok; 07: 183 passed, 2 known errors; 08: 176 passed, 2 known errors, plus 9; 09: 37. Two notes for the test runner: the harness self-test needs servekit importable and was not started correctly in this run, and 08's reproduction suite rewrites `results/cpu_repro.json` with a temporary path (restored from git).

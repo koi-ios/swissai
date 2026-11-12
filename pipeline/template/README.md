@@ -5,10 +5,10 @@ A skeleton for the next project, built on [../DOCTRINE.md](../DOCTRINE.md).
 ## Start a project in this workspace
 
 ```bash
-make new-project SLUG=10-short-name        # copies project/ to opportunities/10-short-name and fills the id
+cp -R pipeline/template/project opportunities/10-short-name    # then edit project.toml
 ```
 
-Without `make`: `cp -R pipeline/template/project opportunities/10-short-name`, then edit `project.toml`.
+Once the migration in [../MIGRATION.md](../MIGRATION.md) is applied, `make new-project SLUG=10-short-name` does the same and fills in the id. The other `make` targets the template names (`status`, `check`, `budget`, `spend`, `export`) are created by that migration too.
 
 A new project starts parked. Make it active only when one of the two active slots is free (D2).
 
