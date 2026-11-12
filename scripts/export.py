@@ -126,7 +126,8 @@ def main() -> int:
     work = proj["dir"] / "vendor/export" / name
     out = proj["dir"] / "export" / name
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    if work.exists() or out.exists() or git("rev-parse", "-q", "--verify", f"refs/heads/{branch}", cwd=canon, check=False):
+    ran_before = (out / "REPORT.md").exists()
+    if work.exists() or ran_before or git("rev-parse", "-q", "--verify", f"refs/heads/{branch}", cwd=canon, check=False):
         if not a.fresh:
             die(f"an earlier export exists ({work.relative_to(ROOT)} or branch {branch}). Rerun with --fresh: "
                 "the old worktree, branch and output are kept under a dated name, not deleted.")
@@ -134,7 +135,7 @@ def main() -> int:
             git("worktree", "move", str(work), f"{work}-{stamp}", cwd=canon)
         if git("rev-parse", "-q", "--verify", f"refs/heads/{branch}", cwd=canon, check=False):
             git("branch", "-m", branch, f"{branch}-old-{stamp}", cwd=canon)
-        if out.exists():
+        if ran_before:
             keep = out / "PR.md"
             pr_text = keep.read_text(encoding="utf-8") if keep.exists() else None
             out.rename(out.with_name(f"{out.name}-{stamp}"))

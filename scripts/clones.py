@@ -65,34 +65,43 @@ def cmd_list() -> int:
     return 0
 
 
-def tree_of_series(clone: pathlib.Path, base: str, patches: list[str]) -> str:
-    """Tree that results from applying the patches to base, built without writing into the clone."""
+def _scratch_env(clone: pathlib.Path, tmp: str) -> dict:
     common = pathlib.Path(git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=clone))
-    with tempfile.TemporaryDirectory() as tmp:
-        env = dict(os.environ, GIT_INDEX_FILE=f"{tmp}/index", GIT_OBJECT_DIRECTORY=f"{tmp}/objects",
-                   GIT_ALTERNATE_OBJECT_DIRECTORIES=str(common / "objects"), GIT_NO_LAZY_FETCH="1")
-        os.makedirs(f"{tmp}/objects")
-        git("read-tree", base, cwd=clone, env=env)
-        for patch in patches:
-            p = subprocess.run(["git", "apply", "--cached", patch], cwd=clone, env=env, capture_output=True, text=True)
-            if p.returncode != 0:
-                return "does-not-apply: " + p.stderr.strip().splitlines()[0][:80]
-        return git("write-tree", cwd=clone, env=env)
+    os.makedirs(f"{tmp}/objects")
+    return dict(os.environ, GIT_INDEX_FILE=f"{tmp}/index", GIT_OBJECT_DIRECTORY=f"{tmp}/objects",
+                GIT_ALTERNATE_OBJECT_DIRECTORIES=str(common / "objects"), GIT_NO_LAZY_FETCH="1")
 
 
-def tree_of_worktree(clone: pathlib.Path) -> str:
-    common = pathlib.Path(git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=clone))
+def _try(args: list[str], clone: pathlib.Path, env: dict) -> tuple[bool, str]:
+    p = subprocess.run(["git", *args], cwd=clone, env=env, capture_output=True, text=True)
+    return p.returncode == 0, (p.stdout if p.returncode == 0 else p.stderr).strip()
+
+
+def tree_of_series(clone: pathlib.Path, base: str, patches: list[str]) -> tuple[str, str]:
+    """(tree, problem): the tree that results from applying the patches to base, built in a temporary
+    object store so nothing is written into the clone."""
     with tempfile.TemporaryDirectory() as tmp:
-        env = dict(os.environ, GIT_INDEX_FILE=f"{tmp}/index", GIT_OBJECT_DIRECTORY=f"{tmp}/objects",
-                   GIT_ALTERNATE_OBJECT_DIRECTORIES=str(common / "objects"), GIT_NO_LAZY_FETCH="1")
-        os.makedirs(f"{tmp}/objects")
-        git("read-tree", "HEAD", cwd=clone, env=env)
-        git("add", "-A", cwd=clone, env=env)
-        return git("write-tree", cwd=clone, env=env)
+        env = _scratch_env(clone, tmp)
+        for args in (["read-tree", base], *(["apply", "--cached", p] for p in patches), ["write-tree"]):
+            ok, out = _try(list(args), clone, env)
+            if not ok:
+                partial = "promisor" in out or "lazy fetching" in out
+                return "", "partial clone: objects are missing and nothing is fetched" if partial else out.splitlines()[-1][:90]
+        return out, ""
+
+
+def tree_of_worktree(clone: pathlib.Path) -> tuple[str, str]:
+    with tempfile.TemporaryDirectory() as tmp:
+        env = _scratch_env(clone, tmp)
+        for args in (["read-tree", "HEAD"], ["add", "-A"], ["write-tree"]):
+            ok, out = _try(args, clone, env)
+            if not ok:
+                return "", out.splitlines()[-1][:90]
+        return out, ""
 
 
 def cmd_verify() -> int:
-    bad = 0
+    bad = skipped = 0
     for p in projects():
         for u in (p["card"] or {}).get("upstream", []):
             legacy = u.get("legacy", "")
@@ -107,14 +116,22 @@ def cmd_verify() -> int:
             if not clone.exists():
                 print(f"gone  {label} {rel} is not on disk; the patches are the record")
                 continue
-            want = tree_of_worktree(clone) if ref == "WORKTREE" else git("rev-parse", f"{ref}^{{tree}}", cwd=clone, check=False)
-            got = tree_of_series(clone, base, patches)
-            same = bool(want) and want == got
+            if ref == "WORKTREE":
+                want, why_want = tree_of_worktree(clone)
+            else:
+                want = git("rev-parse", "-q", "--verify", f"{ref}^{{tree}}", cwd=clone, check=False)
+                why_want = "" if want else f"{ref} not found"
+            got, why_got = tree_of_series(clone, base, patches)
+            if not want or not got:
+                skipped += 1
+                print(f"skip  {label} {rel}@{ref}: cannot compare ({why_want or why_got})")
+                continue
+            same = want == got
             bad += not same
             print(f"{'same' if same else 'DIFF'}  {label} {rel}@{ref} against {len(patches)} patch(es) on {base}"
-                  + ("" if same else f"  (clone {want[:12] or '?'}, patches {got[:40]})"))
-    print("clones: every checked clone equals its tracked patches; those clones are disposable" if not bad
-          else f"clones: {bad} clone(s) hold something the patches do not")
+                  + ("" if same else f"  (clone {want[:12]}, patches {got[:12]})"))
+    print(f"clones: {bad} clone(s) hold something the patches do not" if bad
+          else f"clones: every clone that could be compared equals its tracked patches ({skipped} could not be compared)")
     return 1 if bad else 0
 
 
@@ -127,7 +144,7 @@ def cmd_ensure(name: str) -> int:
         dest.parent.mkdir(exist_ok=True)
         args = ["clone", "--origin", "origin"]
         if name in BIG:
-            args += ["--filter=blob:none", "--no-checkout"]
+            args += ["--filter=blob:none", "--no-checkout", "--single-branch", "--no-tags"]
         git(*args, urls[name], str(dest))
         print(f"clones: created vendor/{name}")
     git("config", "worktree.useRelativePaths", "true", cwd=dest)

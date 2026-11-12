@@ -37,7 +37,7 @@ project = "03"
 name = "harness selftest"
 cwd = "serve-kit-vllm-prelim"
 cmd = "V=$PWD/../opportunities/03-servekit-vllm/.venv/bin; PATH=$V:$PATH PYTHON=$V/python bash tests/selftest.sh"
-expect = "57"
+expect = "57 passed, 0 failed"
 
 [[suite]]
 project = "04"

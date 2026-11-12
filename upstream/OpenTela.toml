@@ -28,7 +28,7 @@ cmd = "go vet ./..."
 [[checks]]
 name = "unit tests with the race detector (the flags of `make test`, without its download of gotestsum)"
 cwd = "src"
-cmd = "go test -race -count=1 ./..."
+cmd = 'CGO_ENABLED=1 go test -race -count=1 -covermode=atomic -coverprofile="${TMPDIR:-/tmp}/opentela-coverage.txt" ./...'
 
 [[checks]]
 name = "lint: golangci-lint v2.15, as CI runs it"

@@ -1,0 +1,12 @@
+diff --git a/src/internal/protocol/host.go b/src/internal/protocol/host.go
+index 7cf7c26..4ba785a 100644
+--- a/src/internal/protocol/host.go
++++ b/src/internal/protocol/host.go
+@@ -193,7 +193,6 @@ func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host,
+ 		// BDP ceiling so 4 MiB+ probes don't bottleneck on flow control.
+ 		libp2p.Muxer(libp2pyamux.ID, bigWindowYamuxMuxer()),
+ 		// libp2p.ConnectionManager(connmgr),
+-		libp2p.NATPortMap(),
+ 		libp2p.ListenAddrStrings(listenAddrs...),
+ 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
+ 		libp2p.Security(noise.ID, noise.New),
