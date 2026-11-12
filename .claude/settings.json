@@ -1,0 +1,19 @@
+{
+  "claudeMdExcludes": [
+    "**/vendor/**/CLAUDE.md",
+    "**/vendor/**/CLAUDE.local.md",
+    "**/vendor/**/AGENTS.md",
+    "**/vendor/**/.claude/rules/**"
+  ],
+  "permissions": {
+    "deny": [
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(gh *)",
+      "Bash(modal run *)",
+      "Bash(modal deploy *)",
+      "Bash(modal serve *)",
+      "Bash(modal app *)"
+    ]
+  }
+}

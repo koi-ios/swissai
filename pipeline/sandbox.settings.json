@@ -1,0 +1,24 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": [
+        "pypi.org",
+        "files.pythonhosted.org",
+        "github.com"
+      ]
+    },
+    "filesystem": {
+      "denyRead": [
+        "~/.ssh",
+        "~/.config/gh",
+        "~/.modal.toml",
+        "~/.netrc",
+        "~/.git-credentials",
+        "~/.cache/huggingface/token"
+      ]
+    }
+  }
+}
