@@ -109,3 +109,7 @@ A fresh session checked the result against the plan (`pipeline/MIGRATION-REVIEW.
 - Correction to the entry "The migration was applied": it said nine commits; there were eight at that point.
 
 Left as they are, on purpose: the rule files are slightly looser than the cards (servekit and model-launch subject prefixes); 06's STATUS.md still describes the state before the export, because only that project's session edits it.
+
+## [2026-11-12] decision | 06 refers to issue #73 and does not close it
+
+The user chose `Refs #73` over `Fixes #73` for the second commit, to match the PR text and OpenTela's own practice (no closing keywords in its PR bodies). Changed in the stored patch `opportunities/06-opentela-73/patches/0002-...` (one word in the message; the diff is untouched) and in the exported commit (now `72d1d82`, same tree). This is the one edit to a project's patch made by the coordinating session, at the user's instruction.

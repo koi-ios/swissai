@@ -27,3 +27,7 @@ Author and committer: Soorya <soorya.narayananiv@gmail.com>.
 ## Result
 
 Ready for the user's review.
+
+## Amended after the run (12 Nov 2026)
+
+At the user's decision the second commit's message says `Refs #73` instead of `Fixes #73`; it is now `72d1d82`. Only the message changed: the tree is identical, so the checks above still apply. The leak check was rerun and passes, and `series/` was regenerated. The stored patch `patches/0002-...` carries the same wording.

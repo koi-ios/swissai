@@ -91,4 +91,4 @@ Each run of a node picks a random tag (`localIncarnation`) and stamps it on ever
 
 ## What only you can do
 
-The checks, the leak check and the identity are done. Left for you, from `CHECKLIST.md`: read the diff, rewrite `PR.md` in your own words, and choose: `Fixes #73` or `Refs #73` (the second commit says Fixes, the PR text says Refs; OpenTela's own PRs use no closing keyword), on top of PR #72 or independent of it (it applies either way), and whether to offer the third patch now or after.
+The checks, the leak check and the identity are done. Left for you, from `CHECKLIST.md`: read the diff, rewrite `PR.md` in your own words, and choose: on top of PR #72 or independent of it (it applies either way), and whether to offer the third patch now or after. Both commits and the PR text say `Refs #73`; closing the issue is left to the maintainer.

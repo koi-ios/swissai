@@ -26,7 +26,7 @@ a live eviction. The guard is off after AnnounceLeave.
 
 There are no periodic writes: a restart costs one extra write.
 
-Fixes #73
+Refs #73
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
