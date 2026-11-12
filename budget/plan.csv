@@ -1,0 +1,9 @@
+order,project,experiment,gpu,est_usd,decides,account_in_old_plan
+1,02-servekit-cache-fix,gpu_check + experiment,2x H100,6,The 0.5.20 cache drift: seconds saved by the servekit fix,A
+2,05-python-startup,steps 1-5,CPU then 2x L40S,3.3,Zygote and bytecode savings in the real SGLang image,A
+3,04-lazy-cuda-graphs,"smoke, arms, eager, correctness",H100,12,"Lazy capture: startup, request delay, output equality",A
+4,01-compile-caches-270,"smoke, plan_a (SGLang), plan_c (audits, write safety)",H100,15,"#270 for SGLang, measured cold against warm",B
+5,08-preshard-roundtrip,smoke + dsv2-lite,2x L40S,8,MLA raw preshard on a real GPU,B
+6,07-verify-tolerance,study: smoke + Qwen3-1.7B BF16 and FP8 + gpt-oss-20b,H100,15,Calibrated verify on real engines,C
+7,08-preshard-roundtrip,gpt-oss-20b,2x H100,7,MXFP4 raw preshard,C
+8,01-compile-caches-270,plan_b (vLLM); or 03 experiment_tp1 in its place,H100,8.5,The vLLM halves; 03's decisive test is on Lustre not Modal,C if left

@@ -1,0 +1,98 @@
+# The test suites of the nine projects, with the counts recorded in opportunities/README.md
+# ("Checked independently"). `make test` runs them and fails if a count differs.
+# cwd is relative to the workspace root. The two errors in the servekit suites of 02, 07 and 08 are
+# stager tests that need Linux O_DIRECT; they error on unpatched servekit main on macOS too.
+
+[[suite]]
+project = "01"
+name = "pytest"
+cwd = "opportunities/01-compile-caches-270"
+cmd = ".venv/bin/python -m pytest -q -p no:cacheprovider"
+expect = "53 passed, 2 skipped"
+timeout = 900
+
+[[suite]]
+project = "02"
+name = "servekit"
+cwd = "opportunities/02-servekit-cache-fix"
+cmd = "PYTHONPATH=vendor/servekit/src .venv/bin/python -m pytest vendor/servekit/tests -q -p no:cacheprovider"
+expect = "187 passed.*2 errors"
+
+[[suite]]
+project = "02"
+name = "tooling"
+cwd = "opportunities/02-servekit-cache-fix"
+cmd = ".venv/bin/python -m pytest tests -q -p no:cacheprovider"
+expect = "8 passed"
+
+[[suite]]
+project = "03"
+name = "servekit"
+cwd = "opportunities/03-servekit-vllm/vendor/servekit"
+cmd = "PYTHONPATH=src ../../.venv/bin/python -m pytest tests -q -p no:cacheprovider"
+expect = "195 passed, 3 skipped"
+
+[[suite]]
+project = "03"
+name = "harness selftest"
+cwd = "serve-kit-vllm-prelim"
+cmd = "V=$PWD/../opportunities/03-servekit-vllm/.venv/bin; PATH=$V:$PATH PYTHON=$V/python bash tests/selftest.sh"
+expect = "57"
+
+[[suite]]
+project = "04"
+name = "pytest"
+cwd = "opportunities/04-lazy-cuda-graphs"
+cmd = ".venv/bin/python -m pytest tests -q -p no:cacheprovider"
+expect = "34 passed"
+
+[[suite]]
+project = "05"
+name = "pytest"
+cwd = "opportunities/05-python-startup"
+cmd = ".venv/bin/python -m pytest -q tests -p no:cacheprovider"
+expect = "41 passed"
+
+[[suite]]
+project = "06"
+name = "go vet"
+cwd = "opportunities/06-opentela-73"
+cmd = "source env.sh && cd vendor/OpenTela-final/src && GOFLAGS=-mod=mod GOPROXY=off go vet ./... && echo VET_CLEAN"
+expect = "VET_CLEAN"
+
+[[suite]]
+project = "06"
+name = "go test -race"
+cwd = "opportunities/06-opentela-73"
+cmd = "source env.sh && cd vendor/OpenTela-final/src && GOFLAGS=-mod=mod GOPROXY=off go test -race ./... 2>&1 | grep -c '^ok' | sed 's/^/PACKAGES_OK=/'"
+expect = "PACKAGES_OK=17"
+timeout = 1500
+
+[[suite]]
+project = "07"
+name = "servekit"
+cwd = "opportunities/07-verify-tolerance/vendor/servekit"
+cmd = "PYTHONPATH=src ../../.venv/bin/python -m pytest tests -q -p no:cacheprovider"
+expect = "183 passed.*2 errors"
+
+[[suite]]
+project = "08"
+name = "servekit"
+cwd = "opportunities/08-preshard-roundtrip/vendor/servekit"
+cmd = "PYTHONPATH=src ../../.venv/bin/python -m pytest tests -q -p no:cacheprovider"
+expect = "176 passed.*2 errors"
+
+[[suite]]
+project = "08"
+name = "reproductions"
+cwd = "opportunities/08-preshard-roundtrip"
+cmd = ".venv/bin/python -m pytest repro -q -p no:cacheprovider"
+expect = "9 passed"
+restore = ["opportunities/08-preshard-roundtrip/results/cpu_repro.json"]
+
+[[suite]]
+project = "09"
+name = "pytest"
+cwd = "opportunities/09-barrier-vast"
+cmd = ".venv/bin/python -m pytest tests -q -p no:cacheprovider"
+expect = "37 passed"

@@ -13,7 +13,7 @@ needs_gpu = true
 
 [[upstream]]
 repo = "sgl-project/sglang"
-target = "RFC issue (drafted)"
+target = "RFC issue first"
 state = "drafted"
 series = "patches/*.patch"
 base = "94602c9"
