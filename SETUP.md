@@ -7,7 +7,7 @@ The GitHub repository is private and only you push to it. Agents never push (`AG
 ## 1. Clone and set the local identity
 
 ```bash
-git clone <the URL of your private repository> swissai
+git clone https://github.com/koi-ios/swissai.git swissai
 cd swissai
 git config --local user.name "swissai local"
 git config --local user.email local@swissai.invalid
