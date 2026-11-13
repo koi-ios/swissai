@@ -1,5 +1,7 @@
-# swissai control plane. Local-only repository: no remote, never pushed.
-# Heavy or regenerable trees stay on disk but out of history.
+# swissai control plane. Its one remote is a private GitHub repository that only the
+# user pushes to; agents never push (pipeline/DECISIONS.md, 13 Nov 2026).
+# Heavy, regenerable or machine-local trees stay on disk but out of history.
+# SETUP.md says how to rebuild them on a new machine.
 # Nothing listed here is deleted; see opportunities/README.md "Housekeeping".
 
 # Upstream clones, worktrees and build trees (each has its own .git).
@@ -13,6 +15,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+*.egg-info/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+node_modules/
 
 # Folder-local toolchains (06: Go toolchain and module cache, about 4 GB)
 toolchain/
@@ -31,6 +38,28 @@ toolchain/
 # (see data/swissai-trace.README.md).
 /data/swissai-trace.parquet
 
+# Secrets and credentials. None are tracked (audit of 13 Nov); keep it that way.
+# serve-kit-vllm-prelim/config.env is tracked on purpose: settings only, no secrets.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.netrc
+.git-credentials
+.modal.toml
+
+# Per-machine agent settings and agent worktrees (shared settings stay tracked)
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+
 # OS and editor noise
 .DS_Store
+._*
+Thumbs.db
 *.swp
+*.swo
+*~
+.vscode/
+.idea/

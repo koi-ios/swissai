@@ -115,3 +115,19 @@ Left as they are, on purpose: the rule files are slightly looser than the cards 
 The user chose `Refs #73` over `Fixes #73` for the second commit, to match the PR text and OpenTela's own practice (no closing keywords in its PR bodies). Changed in the stored patch `opportunities/06-opentela-73/patches/0002-...` (one word in the message; the diff is untouched) and in the exported commit (now `72d1d82`, same tree). This is the one edit to a project's patch made by the coordinating session, at the user's instruction.
 
 Follow-up, same day: the project's older draft `opportunities/06-opentela-73/drafts/PR.md` opened with `Fixes #73`. A closing keyword in a PR description closes the issue on merge just as one in a commit does, so that word is now `Refs` too (one word; nothing else in the draft changed). No text that could be sent closes the issue. This settles finding F11 in `MIGRATION-REVIEW.md` and the open item in the entry above ("The user picks"). `MIGRATION-REVIEW.md` is a reviewer's record of the state it saw and is left as written.
+
+## [2026-11-13] decision | A private GitHub remote that only the user pushes to
+
+The user asked to put this repository on GitHub so it can be used on more than one machine. This replaces "local-only: no remote, never pushed" in `AGENTS.md`, `.gitignore` and the DOCTRINE row on pushing. What stays the same: agents never push and never run `gh`, because `.claude/settings.json` still denies both, and D11 holds. The push credential is the user's. `make check` warns when an agent shell can reach it, as it was built to.
+
+The repository must be private. A read-only audit of the tracked files, the two untracked `opportunities/EXPLAINED.*` files and `git log -p --all`, made before the first push, found:
+- No secrets. The patterns searched were hf_, ghp_, github_pat_, sk-, Modal ak-/as-, AKIA, private keys and xox. The only hits were placeholders and the regex list in `scripts/leakcheck.py`.
+- Private material: a copy of a third party's experiments repository with their cluster username in its paths (`data/cold-start-elimination-experiments-swissai/`), unsent drafts addressed to named people, references to a private swiss-ai repository, the owner's email addresses (in patches and `pipeline/workspace.toml`) and a machine hostname in 09's results. History holds about 4,400 lines with this machine's home path.
+
+To make other machines work:
+- `.gitignore` adds secrets (`.env*`, keys, `.netrc`, `.modal.toml`), per-machine agent files (`CLAUDE.local.md`, `.claude/settings.local.json`, `.claude/worktrees/`) and editor and packaging noise. No tracked file matches the new rules.
+- A new `SETUP.md` covers the local identity, which a clone does not bring, and how to rebuild each ignored tree.
+
+Left as found:
+- Two paths would break on another machine: `opportunities/01-compile-caches-270/tools/fetch_sources.sh:10` hard-codes a miniconda Python, and `opportunities/08-preshard-roundtrip/scratch/probe_import.py:2` hard-codes a `sys.path`. Only those projects' sessions edit them.
+- The records `MIGRATION.md`, `REPORT.md`, `AUDIT.md` and `AUDIT-RESPONSE.md` describe the state they saw, and are left as written.

@@ -161,5 +161,5 @@ Would change it: nothing in general; each scaffold is tested on its own.
 | Agents open draft PRs with `gh`; agents get their own keys with spending caps | Dropped | agents hold no outward credential (D11, X16) |
 | Golden tasks on each new model | Kept | plus the known-bad check (D14) |
 | Morning brief, weekly review, scheduled digests | Changed | one read-only upstream digest, later (D13) |
-| "If it isn't pushed, it doesn't exist" | Changed | agents never push; I keep a backup myself (MIGRATION.md) |
+| "If it isn't pushed, it doesn't exist" | Changed | agents never push; I push to a private GitHub repository and can still make a backup (DECISIONS.md, 13 Nov) |
 | Single-track vLLM plan; `swiss-ai-internship` repo; Obsidian wiki, flashcards | Dropped | stale, or outside research work |

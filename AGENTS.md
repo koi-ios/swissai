@@ -1,6 +1,6 @@
 # swissai: private control plane
 
-Research projects for the Swiss AI serving platform, one folder each under `opportunities/`. This is a local-only git repository: it has no remote and nothing here is pushed. The method is `pipeline/DOCTRINE.md`. If a rule below seems wrong for the task, say so; do not work around it.
+Research projects for the Swiss AI serving platform, one folder each under `opportunities/`. Its one remote is a private GitHub repository that only the user pushes to; agents never push. The method is `pipeline/DOCTRINE.md`. If a rule below seems wrong for the task, say so; do not work around it.
 
 ## Commands
 
@@ -9,7 +9,7 @@ Research projects for the Swiss AI serving platform, one folder each under `oppo
 - `make test PROJECT=06`: rerun a project's suites and compare with the recorded counts.
 - `make clones`: every clone and worktree, its role and state.
 - `make budget PROJECT=02 COST=6`: may this run be launched? `make spend` records one that ran.
-- `make export PROJECT=06`, `make leakcheck`, `make backup DEST=dir`: run by the user, not by agents.
+- `make export PROJECT=06`, `make leakcheck`, `make backup DEST=dir`, `git push`: run by the user, not by agents.
 - `make new-project SLUG=10-name`: a new project from `pipeline/template/project/`.
 
 ## Rules
@@ -36,6 +36,7 @@ Research projects for the Swiss AI serving platform, one folder each under `oppo
 
 ## Where things are
 
+- `SETUP.md`: a new machine. What git does not carry, and how to rebuild it.
 - `PORTFOLIO.md`: every project's status. Each project folder has `STATUS.md` (state and next actions), `project.toml` (its card) and `WRITEUP.md`.
 - `opportunities/SHARED_CONTEXT.md`: verified platform facts and Modal conventions. `opportunities/README.md`: what was built, and the independent verification.
 - `pipeline/DOCTRINE.md`: the method. `pipeline/DECISIONS.md`: why things are as they are. `pipeline/template/`: the skeleton for a new project.
