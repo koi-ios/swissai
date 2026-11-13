@@ -131,3 +131,7 @@ To make other machines work:
 Left as found:
 - Two paths would break on another machine: `opportunities/01-compile-caches-270/tools/fetch_sources.sh:10` hard-codes a miniconda Python, and `opportunities/08-preshard-roundtrip/scratch/probe_import.py:2` hard-codes a `sys.path`. Only those projects' sessions edit them.
 - The records `MIGRATION.md`, `REPORT.md`, `AUDIT.md` and `AUDIT-RESPONSE.md` describe the state they saw, and are left as written.
+
+## [2026-11-13] finding | `make check` does not see a GitHub login kept in the macOS keychain
+
+This Mac's git uses the system-level `osxkeychain` credential helper, set in the Command Line Tools gitconfig, and the login keychain holds a github.com entry. `check_credentials()` in `scripts/check.py` reads only `git config --global` and a list of files, so it reported nothing. Any session that can run git over HTTPS can use this login, and the deny of `git push` in `.claude/settings.json` is the only guard. The `gh` CLI is not installed, and there are no SSH keys. Correction to the entry above: "`make check` warns when an agent shell can reach it" is not true for this credential. `scripts/check.py` is unchanged.

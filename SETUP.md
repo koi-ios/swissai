@@ -24,7 +24,7 @@ make check
 make status
 ```
 
-`make check` warns if a push, `gh`, Modal or Hugging Face credential can be reached from the shell (D11). The warning is expected on a machine where you push; it says agent sessions there could reach the credential too. Prefer an SSH key with a passphrase that is not cached, or a fine-grained token limited to this one repository, so that an agent session cannot push silently.
+`make check` warns if it finds a push, `gh`, Modal or Hugging Face credential (D11). It does not look in the macOS keychain, where git's `osxkeychain` helper keeps an HTTPS login for github.com. On 13 Nov 2026 the first Mac had one, and the check stayed silent. Any session that can run git over HTTPS can use such a login. For pushing, prefer an SSH key with a passphrase that is not cached, or a fine-grained token limited to this one repository.
 
 ## 3. Rebuild only what a task needs
 
